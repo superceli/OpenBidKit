@@ -4,9 +4,9 @@ import { getBidAnalysisTasks } from '../../technical-plan/services/bidAnalysisWo
 
 type RunningMode = 'text' | 'json' | null;
 
-const sampleTenderContent = `# 易标测试项目招标文件
+const sampleTenderContent = `# 创合测试项目招标文件
 
-项目名称：易标测试项目。
+项目名称：创合测试项目。
 项目编号：YB-TEST-001。
 项目类型：软件服务。
 项目预算：100 万元。
@@ -18,7 +18,7 @@ const sampleTenderContent = `# 易标测试项目招标文件
 3. 运维服务能力，满分 15 分，要求说明响应时效和服务保障。`;
 
 const sampleJsonInput = {
-  project_name: '易标测试项目',
+  project_name: '创合测试项目',
   requirements: '技术方案完整性 30 分；项目实施计划 20 分；运维服务能力 15 分。',
 };
 

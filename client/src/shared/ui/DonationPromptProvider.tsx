@@ -175,7 +175,7 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
         kicker="支持开源"
         title="请作者吃顿饭吧"
         description={prompt ? (
-          <>您已累计使用易标 <strong>{formatHours(prompt.accumulatedRuntimeMs)} 小时</strong>，累计下载 <strong>{prompt.wordExportClicks} 次</strong>标书。开发不易，在线乞讨，请作者吃顿饭吧。</>
+          <>您已累计使用创合 <strong>{formatHours(prompt.accumulatedRuntimeMs)} 小时</strong>，累计下载 <strong>{prompt.wordExportClicks} 次</strong>标书。开发不易，在线乞讨，请作者吃顿饭吧。</>
         ) : undefined}
         cardClassName="donation-dialog-card"
       >

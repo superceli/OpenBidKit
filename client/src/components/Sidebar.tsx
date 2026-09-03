@@ -79,7 +79,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
           <img src={logoUrl} alt="" />
         </div>
         <div className="brand-copy">
-          <span>易标</span>
+          <span>创合</span>
           <strong>投标工具箱</strong>
         </div>
       </div>
@@ -123,7 +123,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
       <div className="sidebar-footer">
         <div className="sidebar-footer-shortcuts">
           {collapsed ? wrapTooltip('使用文档', renderUserGuideButton()) : renderUserGuideButton()}
-          {collapsed ? wrapTooltip('加群', renderGroupChatButton(() => setGroupChatOpen(true))) : renderGroupChatButton(() => setGroupChatOpen(true))}
+          {collapsed ? wrapTooltip('加好友', renderGroupChatButton(() => setGroupChatOpen(true))) : renderGroupChatButton(() => setGroupChatOpen(true))}
         </div>
         {collapsed ? wrapTooltip('设置', renderSettingsButton(activeSection, onSectionChange)) : renderSettingsButton(activeSection, onSectionChange)}
       </div>
@@ -132,12 +132,12 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
         open={groupChatOpen}
         onOpenChange={setGroupChatOpen}
         kicker="用户交流"
-        title="扫码加入交流群"
-        description="使用微信扫描下方二维码，加入易标用户交流群。"
+        title="扫码加好友交流"
+        description="使用微信扫描下方二维码。"
         cardClassName="group-chat-dialog"
         actions={<button type="button" className="secondary-action" onClick={() => setGroupChatOpen(false)}>关闭</button>}
       >
-        <img className="group-chat-qr" src={groupChatQrUrl} alt="易标用户交流群二维码" />
+        <img className="group-chat-qr" src={groupChatQrUrl} alt="创合用户交流群二维码" />
       </AppDialog>
     </aside>
   );
@@ -200,13 +200,13 @@ function renderGroupChatButton(onClick: () => void) {
       type="button"
       className="settings-trigger sidebar-footer-shortcut"
       onClick={onClick}
-      aria-label="加群"
+      aria-label="加好友"
     >
       <span className="nav-icon" aria-hidden="true">
         <GroupChatIcon />
       </span>
       <span className="settings-copy">
-        <strong>加群</strong>
+        <strong>加好友</strong>
       </span>
     </button>
   );

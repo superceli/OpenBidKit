@@ -1,8 +1,8 @@
 {
   "name": "yibiao-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "易标投标工具箱独立桌面客户端",
+  "description": "创合投标工具箱独立桌面客户端",
   "author": "mark",
   "main": "electron/main.cjs",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.yibiao.openbidkit",
-    "productName": "易标投标工具箱",
+    "productName": "创合投标工具箱",
     "copyright": "Copyright © 2026 mark",
     "asar": true,
     "directories": {
@@ -195,7 +195,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
-    "electron": "^41.10.2",
+    "electron": "^41.10.7",
     "electron-builder": "^26.8.1",
     "js-yaml": "^4.1.1",
     "typescript": "^5.9.2",

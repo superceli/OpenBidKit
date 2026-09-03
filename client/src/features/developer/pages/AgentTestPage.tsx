@@ -61,7 +61,7 @@ function formatJson(value: unknown) {
 }
 
 function getBridge() {
-  if (!window.yibiao) throw new Error('当前 preload 未暴露易标客户端 API');
+  if (!window.yibiao) throw new Error('当前 preload 未暴露创合客户端 API');
   return window.yibiao;
 }
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import AppRouter from './app/AppRouter';
 import GpuHardwareAccelerationPrompt from './app/GpuHardwareAccelerationPrompt';
-import LicenseStatusPrompt from './app/LicenseStatusPrompt';
 import RequiredOnlineServicesPrompt from './app/RequiredOnlineServicesPrompt';
 import UpdateNotifier from './app/UpdateNotifier';
 import AppShell from './components/AppShell';
@@ -59,7 +58,6 @@ function App() {
       <GpuHardwareAccelerationPrompt />
       <RequiredOnlineServicesPrompt />
       <UpdateNotifier noticeEnabled />
-      <LicenseStatusPrompt />
       <AppShell
         activeSection={activeSection}
         developerMode={developerMode}

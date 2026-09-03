@@ -1,0 +1,294 @@
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+const bridge = {
+  appName: '易标投标工具箱',
+  platform: process.platform,
+  getVersion: () => ipcRenderer.invoke('app:get-version'),
+  getGpuHardwareAccelerationStatus: () => ipcRenderer.invoke('app:get-gpu-hardware-acceleration-status'),
+  saveGpuHardwareAccelerationPreference: (enabled) => ipcRenderer.invoke('app:save-gpu-hardware-acceleration-preference', enabled),
+  startGpuHardwareAccelerationTrial: () => ipcRenderer.invoke('app:start-gpu-hardware-acceleration-trial'),
+  relaunchWithGpuHardwareAccelerationDisabled: () => ipcRenderer.invoke('app:relaunch-with-gpu-hardware-acceleration-disabled'),
+  requiredOnlineServices: {
+    getStatus: () => ipcRenderer.invoke('required-online-services:get-status'),
+  },
+  donation: {
+    getConfig: () => ipcRenderer.invoke('donation:get-config'),
+    createTip: (request) => ipcRenderer.invoke('donation:create-tip', request),
+    getOrderStatus: (merchantOrderNo) => ipcRenderer.invoke('donation:get-order-status', merchantOrderNo),
+    finalizeOrderStatus: (merchantOrderNo) => ipcRenderer.invoke('donation:finalize-order-status', merchantOrderNo),
+    onPrompt: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('donation:prompt', listener);
+      return () => ipcRenderer.removeListener('donation:prompt', listener);
+    },
+    onPaid: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on('donation:paid', listener);
+      return () => ipcRenderer.removeListener('donation:paid', listener);
+    },
+  },
+  getLatestVersion: () => ipcRenderer.invoke('app:get-latest-version'),
+  getUpdateDownloadUrl: () => ipcRenderer.invoke('app:get-update-download-url'),
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+  checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+  startUpdate: () => ipcRenderer.invoke('app:start-update'),
+  quitAndInstall: () => ipcRenderer.invoke('app:quit-and-install'),
+  onUpdateProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-progress', listener);
+    return () => ipcRenderer.removeListener('app:update-progress', listener);
+  },
+  onUpdateDownloaded: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-downloaded', listener);
+    return () => ipcRenderer.removeListener('app:update-downloaded', listener);
+  },
+  onUpdateError: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-error', listener);
+    return () => ipcRenderer.removeListener('app:update-error', listener);
+  },
+  onPluginUpdatesAvailable: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('plugins:updates-available', listener);
+    return () => ipcRenderer.removeListener('plugins:updates-available', listener);
+  },
+  database: {
+    getStatus: () => ipcRenderer.invoke('workspace-database:get-status'),
+    onStatus: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('workspace-database:status', listener);
+      return () => ipcRenderer.removeListener('workspace-database:status', listener);
+    },
+  },
+  ui: {
+    setCurrentView: (view) => ipcRenderer.invoke('ui:set-current-view', view),
+  },
+  config: {
+    load: () => ipcRenderer.invoke('config:load'),
+    save: (config) => ipcRenderer.invoke('config:save', config),
+    listModels: (config) => ipcRenderer.invoke('config:list-models', config),
+    getModelInfo: (modelName) => ipcRenderer.invoke('config:get-model-info', modelName),
+    openConfigFolder: () => ipcRenderer.invoke('config:open-config-folder'),
+  },
+  license: {
+    getStatus: () => ipcRenderer.invoke('license:get-status'),
+    refresh: () => ipcRenderer.invoke('license:refresh'),
+    importOfflineFile: () => ipcRenderer.invoke('license:import-offline-file'),
+    activateOfflineCode: (code) => ipcRenderer.invoke('license:activate-offline-code', code),
+  },
+  ai: {
+    chat: (request) => ipcRenderer.invoke('ai:chat', request),
+    requestJson: (request) => ipcRenderer.invoke('ai:request-json', request),
+    testImageModel: (config) => ipcRenderer.invoke('ai:test-image-model', config),
+    onHttpError: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('ai:http-error', listener);
+      return () => ipcRenderer.removeListener('ai:http-error', listener);
+    },
+  },
+  autoConfirmation: {
+    getState: () => ipcRenderer.invoke('auto-confirmation:get-state'),
+    setEnabled: (enabled) => ipcRenderer.invoke('auto-confirmation:set-enabled', enabled),
+    onChanged: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('auto-confirmation:state', listener);
+      ipcRenderer.send('auto-confirmation:subscribe');
+      return () => ipcRenderer.removeListener('auto-confirmation:state', listener);
+    },
+  },
+  agent: {
+    run: (payload) => ipcRenderer.invoke('agent:run', payload),
+    selfCheck: () => ipcRenderer.invoke('agent:self-check'),
+    exportSelfCheckReport: (payload) => ipcRenderer.invoke('agent:export-self-check-report', payload),
+    getStatus: () => ipcRenderer.invoke('agent:get-status'),
+    restart: (reason) => ipcRenderer.invoke('agent:restart', reason),
+    getPendingQuestion: () => ipcRenderer.invoke('agent:get-pending-question'),
+    answerQuestion: (payload) => ipcRenderer.invoke('agent:answer-question', payload),
+    suppressQuestionAutoAnswer: (payload) => ipcRenderer.invoke('agent:suppress-question-auto-answer', payload),
+    onStatus: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('agent:status', listener);
+      ipcRenderer.send('agent:subscribe');
+      return () => ipcRenderer.removeListener('agent:status', listener);
+    },
+    onQuestion: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('agent:question-state', listener);
+      ipcRenderer.send('agent:subscribe');
+      return () => ipcRenderer.removeListener('agent:question-state', listener);
+    },
+  },
+  developerTokenStats: {
+    openWindow: () => ipcRenderer.invoke('developer-token-stats:open-window'),
+    get: () => ipcRenderer.invoke('developer-token-stats:get'),
+    reset: () => ipcRenderer.invoke('developer-token-stats:reset'),
+    onChanged: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('developer-token-stats:changed', listener);
+      return () => ipcRenderer.removeListener('developer-token-stats:changed', listener);
+    },
+  },
+  developerAgentMonitor: {
+    openWindow: () => ipcRenderer.invoke('developer-agent-monitor:open-window'),
+    openWorkspace: (workspaceDir) => ipcRenderer.invoke('developer-agent-monitor:open-workspace', workspaceDir),
+    attach: () => ipcRenderer.invoke('developer-agent-monitor:attach'),
+    detach: () => ipcRenderer.invoke('developer-agent-monitor:detach'),
+    onEvent: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('developer-agent-monitor:event', listener);
+      return () => ipcRenderer.removeListener('developer-agent-monitor:event', listener);
+    },
+  },
+  developerExpansionReplaceTest: {
+    run: (payload) => ipcRenderer.invoke('developer-expansion-replace-test:run', payload),
+  },
+  file: {
+    selectDuplicateCheckFiles: (options) => ipcRenderer.invoke('file:select-duplicate-check-files', options),
+    /** 把拖拽进来的 File 对象换成本地绝对路径，供各上传区拖拽导入使用 */
+    getPathForFile: (file) => webUtils.getPathForFile(file),
+  },
+  knowledgeBase: {
+    list: () => ipcRenderer.invoke('knowledge-base:list'),
+    createFolder: (name) => ipcRenderer.invoke('knowledge-base:create-folder', name),
+    renameFolder: (folderId, name) => ipcRenderer.invoke('knowledge-base:rename-folder', folderId, name),
+    reorderFolder: (draggedFolderId, targetFolderId, position) => ipcRenderer.invoke('knowledge-base:reorder-folder', draggedFolderId, targetFolderId, position),
+    deleteFolder: (folderId) => ipcRenderer.invoke('knowledge-base:delete-folder', folderId),
+    deleteDocument: (documentId) => ipcRenderer.invoke('knowledge-base:delete-document', documentId),
+    moveDocument: (documentId, targetFolderId, targetDocumentId, position) => ipcRenderer.invoke('knowledge-base:move-document', documentId, targetFolderId, targetDocumentId, position),
+    uploadDocuments: (folderId) => ipcRenderer.invoke('knowledge-base:upload-documents', folderId),
+    retryDocument: (documentId) => ipcRenderer.invoke('knowledge-base:retry-document', documentId),
+    startMatching: (documentId, batchSize) => ipcRenderer.invoke('knowledge-base:start-matching', documentId, batchSize), // batchSize 已忽略
+    readMarkdown: (documentId) => ipcRenderer.invoke('knowledge-base:read-markdown', documentId),
+    readItems: (documentId) => ipcRenderer.invoke('knowledge-base:read-items', documentId),
+    readAnalysis: (documentId) => ipcRenderer.invoke('knowledge-base:read-analysis', documentId),
+    onEvent: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('knowledge-base:event', listener);
+      return () => ipcRenderer.removeListener('knowledge-base:event', listener);
+    },
+  },
+  technicalPlan: {
+    loadState: () => ipcRenderer.invoke('technical-plan:load-state'),
+    importTenderDocument: (filePaths) => ipcRenderer.invoke('technical-plan:import-tender-document', filePaths),
+    removeTenderDocument: (sourceId) => ipcRenderer.invoke('technical-plan:remove-tender-document', sourceId),
+    importOriginalPlanDocument: (filePaths) => ipcRenderer.invoke('technical-plan:import-original-plan-document', filePaths),
+    checkBidSections: () => ipcRenderer.invoke('technical-plan:check-bid-sections'),
+    selectBidSection: (selectedSection) => ipcRenderer.invoke('technical-plan:select-bid-section', selectedSection),
+    readTenderMarkdown: () => ipcRenderer.invoke('technical-plan:read-tender-markdown'),
+    readTenderSourceMarkdown: (sourceId) => ipcRenderer.invoke('technical-plan:read-tender-source-markdown', sourceId),
+    readOriginalPlanMarkdown: () => ipcRenderer.invoke('technical-plan:read-original-plan-markdown'),
+    updateStep: (step) => ipcRenderer.invoke('technical-plan:update-step', step),
+    setWorkflowKind: (workflowKind) => ipcRenderer.invoke('technical-plan:set-workflow-kind', workflowKind),
+    switchWorkflowKind: (workflowKind) => ipcRenderer.invoke('technical-plan:switch-workflow-kind', workflowKind),
+    saveBidAnalysisConfig: (payload) => ipcRenderer.invoke('technical-plan:save-bid-analysis-config', payload),
+    saveOutlineConfig: (payload) => ipcRenderer.invoke('technical-plan:save-outline-config', payload),
+    saveOutlineSelection: (payload) => ipcRenderer.invoke('tasks:confirm-outline-selection', payload),
+    saveOutline: (outlineData) => ipcRenderer.invoke('technical-plan:save-outline', outlineData),
+    saveGlobalFactsConfig: (payload) => ipcRenderer.invoke('technical-plan:save-global-facts-config', payload),
+    saveGlobalFacts: (globalFacts) => ipcRenderer.invoke('technical-plan:save-global-facts', globalFacts),
+    saveContentGenerationOptions: (options) => ipcRenderer.invoke('technical-plan:save-content-generation-options', options),
+    saveChapterContent: (payload) => ipcRenderer.invoke('technical-plan:save-chapter-content', payload),
+    clear: () => ipcRenderer.invoke('technical-plan:clear'),
+    openBidTemplate: () => ipcRenderer.invoke('technical-plan:open-bid-template'),
+  },
+  feasibilityReport: {
+    loadState: () => ipcRenderer.invoke('feasibility-report:load-state'),
+    importSourceDocuments: (filePaths) => ipcRenderer.invoke('feasibility-report:import-source-documents', filePaths),
+    removeSourceDocument: (sourceId) => ipcRenderer.invoke('feasibility-report:remove-source-document', sourceId),
+    readSourceMarkdown: (sourceId) => ipcRenderer.invoke('feasibility-report:read-source-markdown', sourceId),
+    readCombinedSourceMarkdown: () => ipcRenderer.invoke('feasibility-report:read-combined-source-markdown'),
+    updateStep: (step) => ipcRenderer.invoke('feasibility-report:update-step', step),
+    saveProjectInfo: (projectInfo) => ipcRenderer.invoke('feasibility-report:save-project-info', projectInfo),
+    saveAnalysis: (markdown) => ipcRenderer.invoke('feasibility-report:save-analysis', markdown),
+    saveOutlineConfig: (payload) => ipcRenderer.invoke('feasibility-report:save-outline-config', payload),
+    saveOutline: (payload) => ipcRenderer.invoke('feasibility-report:save-outline', payload),
+    saveKeyParameters: (markdown) => ipcRenderer.invoke('feasibility-report:save-key-parameters', markdown),
+    saveChapterContent: (payload) => ipcRenderer.invoke('feasibility-report:save-chapter-content', payload),
+    clear: () => ipcRenderer.invoke('feasibility-report:clear'),
+  },
+  duplicateCheck: {
+    loadState: () => ipcRenderer.invoke('duplicate-check:load-state'),
+    saveFiles: (payload) => ipcRenderer.invoke('duplicate-check:save-files', payload),
+    saveUiState: (payload) => ipcRenderer.invoke('duplicate-check:save-ui-state', payload),
+    updateState: (partial) => ipcRenderer.invoke('duplicate-check:update-state', partial),
+    exportExcel: (request) => ipcRenderer.invoke('duplicate-check:export-excel', request),
+    clear: () => ipcRenderer.invoke('duplicate-check:clear'),
+  },
+  rejectionCheck: {
+    loadState: () => ipcRenderer.invoke('rejection-check:load-state'),
+    importDocument: (role, filePaths) => ipcRenderer.invoke('rejection-check:import-document', role, filePaths),
+    importTenderFromTechnicalPlan: () => ipcRenderer.invoke('rejection-check:import-tender-from-technical-plan'),
+    removeDocument: (role, documentId) => ipcRenderer.invoke('rejection-check:remove-document', role, documentId),
+    saveUiState: (payload) => ipcRenderer.invoke('rejection-check:save-ui-state', payload),
+    updateState: (partial) => ipcRenderer.invoke('rejection-check:update-state', partial),
+    exportExcel: (request) => ipcRenderer.invoke('rejection-check:export-excel', request),
+    clear: () => ipcRenderer.invoke('rejection-check:clear'),
+  },
+  templates: {
+    list: () => ipcRenderer.invoke('templates:list'),
+    get: (templateId) => ipcRenderer.invoke('templates:get', templateId),
+    create: (config) => ipcRenderer.invoke('templates:create', config),
+    update: (templateId, config) => ipcRenderer.invoke('templates:update', templateId, config),
+    delete: (templateId) => ipcRenderer.invoke('templates:delete', templateId),
+  },
+  tasks: {
+    startBidSectionExtraction: (payload) => ipcRenderer.invoke('tasks:start-bid-section-extraction', payload),
+    startBidAnalysis: (payload) => ipcRenderer.invoke('tasks:start-bid-analysis', payload),
+    startOutlineGeneration: (payload) => ipcRenderer.invoke('tasks:start-outline-generation', payload),
+    suppressOutlineSelectionAutoConfirmation: (payload) => ipcRenderer.invoke('tasks:suppress-outline-selection-auto-confirmation', payload),
+    startGlobalFactsGeneration: (payload) => ipcRenderer.invoke('tasks:start-global-facts-generation', payload),
+    startContentGeneration: (payload) => ipcRenderer.invoke('tasks:start-content-generation', payload),
+    pauseContentGeneration: () => ipcRenderer.invoke('tasks:pause-content-generation'),
+    startRejectionItemsExtraction: (payload) => ipcRenderer.invoke('tasks:start-rejection-items-extraction', payload),
+    startRejectionCheck: (payload) => ipcRenderer.invoke('tasks:start-rejection-check', payload),
+    startDuplicateAnalysis: (payload) => ipcRenderer.invoke('tasks:start-duplicate-analysis', payload),
+    startFeasibilityAnalysis: (payload) => ipcRenderer.invoke('tasks:start-feasibility-analysis', payload),
+    startFeasibilityOutline: (payload) => ipcRenderer.invoke('tasks:start-feasibility-outline', payload),
+    startFeasibilityParameters: (payload) => ipcRenderer.invoke('tasks:start-feasibility-parameters', payload),
+    startFeasibilityContent: (payload) => ipcRenderer.invoke('tasks:start-feasibility-content', payload),
+    pauseFeasibilityContent: () => ipcRenderer.invoke('tasks:pause-feasibility-content'),
+    startFeasibilityHumanWriting: (payload) => ipcRenderer.invoke('tasks:start-feasibility-human-writing', payload),
+    getActiveTasks: () => ipcRenderer.invoke('tasks:get-active'),
+    onTaskEvent: (callback) => {
+      ipcRenderer.send('tasks:subscribe');
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('tasks:event', listener);
+      return () => ipcRenderer.removeListener('tasks:event', listener);
+    },
+  },
+  export: {
+    exportWord: (payload) => ipcRenderer.invoke('export:word', payload),
+    openFile: (filePath) => ipcRenderer.invoke('export:open-file', filePath),
+    onWordExportProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('export:word-progress', listener);
+      return () => ipcRenderer.removeListener('export:word-progress', listener);
+    },
+  },
+  systemFonts: {
+    list: () => ipcRenderer.invoke('system-fonts:list'),
+  },
+  plugins: {
+    getAvailablePlugins: () => ipcRenderer.invoke('plugins:getAvailablePlugins'),
+    install: (pluginId) => ipcRenderer.invoke('plugins:install', pluginId),
+    installOffline: () => ipcRenderer.invoke('plugins:installOffline'),
+    uninstall: (pluginId) => ipcRenderer.invoke('plugins:uninstall', pluginId),
+    enable: (pluginId) => ipcRenderer.invoke('plugins:enable', pluginId),
+    disable: (pluginId) => ipcRenderer.invoke('plugins:disable', pluginId),
+    update: (pluginId) => ipcRenderer.invoke('plugins:update', pluginId),
+    checkUpdates: () => ipcRenderer.invoke('plugins:checkUpdates'),
+    updateAll: () => ipcRenderer.invoke('plugins:updateAll'),
+    openConfig: (pluginId) => ipcRenderer.invoke('plugins:openConfig', pluginId),
+    refreshMarket: () => ipcRenderer.invoke('plugins:refreshMarket'),
+    clearUpdateFailedState: (pluginId) => ipcRenderer.invoke('plugins:clearUpdateFailedState', pluginId),
+    notifyEvent: (pluginId, event, payload) => ipcRenderer.invoke('plugins:notify-event', pluginId, event, payload),
+  },
+};
+
+contextBridge.exposeInMainWorld('yibiao', bridge);
+
+contextBridge.exposeInMainWorld('yibiaoClient', {
+  appName: bridge.appName,
+  platform: bridge.platform,
+});

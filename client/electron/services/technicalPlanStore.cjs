@@ -1,0 +1,2795 @@
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { getBidAnalysisTasks } = require('./bidAnalysisTask.cjs');
+const {
+  getTechnicalPlanBidTemplatePath,
+  getTechnicalPlanBidTemplateSourcePath,
+  getTechnicalPlanBidTemplateFieldsPath,
+  getTechnicalPlanGeneratedIllustrationsDir,
+  getTechnicalPlanIllustrationsDir,
+  getTechnicalPlanOriginalPlanMarkdownPath,
+  getTechnicalPlanTenderMarkdownPath,
+  getTechnicalPlanTenderOriginalsDir,
+  getGeneratedImagesDir,
+  getWorkspaceTrashDir,
+} = require('../utils/paths.cjs');
+const { deleteImportedImageBatches } = require('../utils/importedImages.cjs');
+const { clearMermaidCache } = require('../utils/mermaidCache.cjs');
+const { detectBidSections } = require('../utils/bidSectionDetector.cjs');
+const { compactLogError, createDeveloperLogger } = require('../utils/developerLog.cjs');
+const { forceRemoveSync, isFileLockError } = require('../utils/forceRemove.cjs');
+const {
+  OUTLINE_AGENT_TASK_KEY,
+  TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
+} = require('./outlineGenerationAgentV2Config.cjs');
+const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
+
+const tenderMarkdownRelativePath = path.join('technical-plan', 'tender.md').replace(/\\/g, '/');
+const tenderOriginalMarkdownRelativePath = path.join('technical-plan', 'tender-original.md').replace(/\\/g, '/');
+const tenderSourceFilesDirRelativePath = path.join('technical-plan', 'tender-files').replace(/\\/g, '/');
+const tenderOriginalsDirRelativePath = path.join('technical-plan', 'tender-originals').replace(/\\/g, '/');
+const bidTemplateRelativePath = path.join('technical-plan', 'bid-template.docx').replace(/\\/g, '/');
+const bidTemplateSourceRelativePath = path.join('technical-plan', 'bid-template-source.docx').replace(/\\/g, '/');
+const bidTemplateFieldsRelativePath = path.join('technical-plan', 'bid-template-fields.json').replace(/\\/g, '/');
+const originalPlanMarkdownRelativePath = path.join('technical-plan', 'original-plan.md').replace(/\\/g, '/');
+const originalOutlineRuntimeFileName = 'original-outline-runtime.json';
+const defaultOutlineWordControlOptions = Object.freeze({
+  enabled: false,
+  minimumWords: 0,
+  maximumWords: 0,
+  sectionWords: 0,
+  strictSectionWords: false,
+});
+
+const initialState = {
+  workflowKind: 'technical-plan',
+  step: 'document-analysis',
+  tenderFile: null,
+  tenderFiles: [],
+  originalPlanFile: null,
+  projectOverview: '',
+  techRequirements: '',
+  bidAnalysisMode: 'key',
+  bidAnalysisSelectedTaskIds: [],
+  bidAnalysisTasks: {},
+  bidAnalysisProgress: 0,
+  bidSectionMode: 'single',
+  bidSections: [],
+  bidSectionExtractionStatus: 'idle',
+  bidSectionExtractionError: undefined,
+  outlineMode: 'aligned',
+  outlineExpansionMode: 'ai-complement',
+  outlineWordControlOptions: { ...defaultOutlineWordControlOptions },
+  outlineWordControlSnapshot: undefined,
+  referenceKnowledgeDocumentIds: [],
+  bidSectionExtractionTask: undefined,
+  bidAnalysisTask: undefined,
+  outlineGenerationTask: undefined,
+  globalFactsMode: 'fabricate',
+  globalFactsTask: undefined,
+  globalFacts: [],
+  contentGenerationTask: undefined,
+  contentGenerationOptions: undefined,
+  contentGenerationSections: {},
+  contentGenerationPlans: {},
+  contentIllustrationPlan: undefined,
+  contentGenerationRuntime: undefined,
+  bidTemplateExists: false,
+  outlineData: null,
+};
+
+const taskFieldTypes = {
+  bidSectionExtractionTask: 'bid-section-extraction',
+  bidAnalysisTask: 'bid-analysis',
+  outlineGenerationTask: 'outline-generation',
+  outlineAdjustmentTask: 'outline-adjustment',
+  globalFactsTask: 'global-facts-generation',
+  globalFactsAdjustmentTask: 'global-facts-adjustment',
+  contentGenerationTask: 'content-generation',
+};
+
+const taskTypeFields = Object.fromEntries(Object.entries(taskFieldTypes).map(([field, type]) => [type, field]));
+const originalPlanDownstreamTaskTypes = Object.freeze([
+  'outline-generation',
+  'outline-adjustment',
+  'global-facts-generation',
+  'global-facts-adjustment',
+  'content-generation',
+]);
+
+function appendImportFailureParts(messageParts, errors) {
+  const failed = Array.isArray(errors)
+    ? errors.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (!failed.length) return;
+  messageParts.push(`失败 ${failed.length} 份`);
+  messageParts.push(failed.join('；'));
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function hasOwn(value, field) {
+  return Object.prototype.hasOwnProperty.call(value || {}, field);
+}
+
+function isEmptyObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+
+function safeJsonParse(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function jsonOrNull(value) {
+  return value === undefined || value === null ? null : JSON.stringify(value);
+}
+
+function stableHash(content) {
+  return crypto.createHash('sha256').update(String(content || ''), 'utf8').digest('hex');
+}
+
+function safeFileNamePart(value) {
+  return String(value || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'file';
+}
+
+/** 生成符合当前文件系统大小写规则的路径比较键。 */
+function filePathKey(value) {
+  const resolved = path.resolve(String(value || ''));
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function createTenderSourceId(fileName, markdown, index) {
+  const hash = stableHash(`${fileName}\n${markdown}`).slice(0, 12);
+  return `tender-${String(index + 1).padStart(2, '0')}-${hash}`;
+}
+
+function combineTenderMarkdown(markdowns) {
+  return (Array.isArray(markdowns) ? markdowns : [])
+    .map((markdown) => String(markdown || '').trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function toDbBool(value) {
+  return value ? 1 : 0;
+}
+
+function fromDbBool(value) {
+  return Number(value) === 1;
+}
+
+function normalizeStatus(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
+}
+
+function normalizeWorkflowKind(value) {
+  return value === 'existing-plan-expansion' ? 'existing-plan-expansion' : 'technical-plan';
+}
+
+function normalizeNonNegativeInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
+}
+
+// 统一 Step03 当前设置和目录快照的字段语义。
+function normalizeOutlineWordControlOptions(value) {
+  const sectionWords = normalizeNonNegativeInteger(value?.sectionWords);
+  return {
+    minimumWords: normalizeNonNegativeInteger(value?.minimumWords),
+    maximumWords: normalizeNonNegativeInteger(value?.maximumWords),
+    sectionWords,
+    strictSectionWords: sectionWords > 0 && Boolean(value?.strictSectionWords),
+  };
+}
+
+function isValidStep(value) {
+  return ['document-analysis', 'bid-analysis', 'outline-generation', 'global-facts', 'content-edit', 'expand'].includes(value);
+}
+
+function normalizeGlobalFactId(value, index) {
+  const id = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return id || `fact_${String(index + 1).padStart(3, '0')}`;
+}
+
+function isValidBidMode(value) {
+  return value === 'key' || value === 'full' || value === 'custom';
+}
+
+function normalizeBidSectionMode(value) {
+  return value === 'multiple' ? 'multiple' : 'single';
+}
+
+function normalizeBidSectionExtractionStatus(value) {
+  return normalizeStatus(value, ['idle', 'running', 'success', 'error'], 'idle');
+}
+
+function normalizeBidSectionRanges(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((range) => ({
+      startLine: Math.max(1, Math.floor(Number(range?.startLine || range?.start_line || 0))),
+      endLine: Math.max(1, Math.floor(Number(range?.endLine || range?.end_line || 0))),
+      reason: range?.reason ? String(range.reason) : undefined,
+    }))
+    .filter((range) => range.startLine > 0 && range.endLine >= range.startLine);
+}
+
+function normalizeBidSections(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((section, index) => {
+      const normalizedIndex = Number(section?.index || index + 1);
+      const title = String(section?.title || '').trim();
+      return {
+        id: String(section?.id || `section-${normalizedIndex || index + 1}`).trim(),
+        index: Number.isFinite(normalizedIndex) && normalizedIndex > 0 ? normalizedIndex : index + 1,
+        unit: String(section?.unit || '标段').trim() || '标段',
+        title,
+        headLine: String(section?.headLine || section?.head_line || ''),
+        description: String(section?.description || ''),
+        includeRanges: normalizeBidSectionRanges(section?.includeRanges || section?.include_ranges),
+        evidence: (Array.isArray(section?.evidence) ? section.evidence : [])
+          .map((item) => String(item || '').trim())
+          .filter(Boolean),
+      };
+    })
+    .filter((section) => section.id && section.title);
+}
+
+function expandLineRanges(ranges, totalLines) {
+  const lines = new Set();
+  for (const range of normalizeBidSectionRanges(ranges)) {
+    const start = Math.max(1, Math.min(totalLines, range.startLine));
+    const end = Math.max(start, Math.min(totalLines, range.endLine));
+    for (let line = start; line <= end; line += 1) {
+      lines.add(line);
+    }
+  }
+  return lines;
+}
+
+function buildSelectedSectionMarkdown(markdown, sections, selectedSectionId) {
+  const sourceLines = String(markdown || '').split(/\r?\n/);
+  const totalLines = sourceLines.length;
+  const selected = sections.find((section) => section.id === selectedSectionId);
+  if (!selected) {
+    throw new Error('未找到选择的投标范围');
+  }
+  if (!normalizeBidSectionRanges(selected.includeRanges).length) {
+    throw new Error('当前标段缺少有效范围，请重新识别');
+  }
+
+  const selectedLines = expandLineRanges(selected.includeRanges, totalLines);
+  const otherLines = new Set();
+  for (const section of sections) {
+    if (section.id === selected.id) continue;
+    for (const line of expandLineRanges(section.includeRanges, totalLines)) {
+      otherLines.add(line);
+    }
+  }
+
+  const filtered = sourceLines.filter((_, index) => {
+    const lineNumber = index + 1;
+    return !otherLines.has(lineNumber) || selectedLines.has(lineNumber);
+  }).join('\n').trim();
+
+  if (!filtered) {
+    throw new Error('生成投标范围工作副本失败，请重新提取标段');
+  }
+  return filtered;
+}
+
+function getAllBidAnalysisTasks() {
+  return getBidAnalysisTasks('full');
+}
+
+function getRequiredBidAnalysisTaskIds() {
+  return getBidAnalysisTasks('key').map((task) => task.id);
+}
+
+function normalizeBidAnalysisTaskIds(taskIds) {
+  const requestedIds = new Set((Array.isArray(taskIds) ? taskIds : [])
+    .map((taskId) => String(taskId || '').trim())
+    .filter(Boolean));
+  return getAllBidAnalysisTasks()
+    .filter((task) => requestedIds.has(task.id))
+    .map((task) => task.id);
+}
+
+function normalizeBidAnalysisConfig(mode, selectedTaskIds) {
+  const allTaskIds = getAllBidAnalysisTasks().map((task) => task.id);
+  const requiredTaskIds = getRequiredBidAnalysisTaskIds();
+  const requiredSet = new Set(requiredTaskIds);
+  const selectedSet = new Set([...requiredTaskIds, ...normalizeBidAnalysisTaskIds(selectedTaskIds)]);
+  const selectedIds = allTaskIds.filter((taskId) => selectedSet.has(taskId));
+  const hasOptional = selectedIds.some((taskId) => !requiredSet.has(taskId));
+  const hasAll = selectedIds.length === allTaskIds.length;
+
+  if (mode === 'full' || hasAll) {
+    return { mode: 'full', selectedTaskIds: allTaskIds };
+  }
+  if (mode === 'custom' || hasOptional) {
+    return { mode: 'custom', selectedTaskIds: selectedIds };
+  }
+  return { mode: 'key', selectedTaskIds: requiredTaskIds };
+}
+
+function getBidAnalysisTaskIdsForConfig(mode, selectedTaskIds) {
+  return normalizeBidAnalysisConfig(mode, selectedTaskIds).selectedTaskIds;
+}
+
+function isValidOutlineMode(value) {
+  return value === 'aligned' || value === 'response-file' || value === 'standalone-technical';
+}
+
+function isValidOutlineExpansionMode(value) {
+  return value === 'original-only' || value === 'ai-complement';
+}
+
+function isValidGlobalFactsMode(value) {
+  return value === 'fabricate' || value === 'omit' || value === 'placeholder';
+}
+
+function normalizeGlobalFactsMode(value) {
+  return isValidGlobalFactsMode(value) ? value : 'fabricate';
+}
+
+function collectLeafItems(items) {
+  return (items || []).flatMap((item) => item?.children?.length ? collectLeafItems(item.children) : [item]);
+}
+
+function flattenOutlineItems(items, parentNodeId = null, level = 1, rows = []) {
+  (items || []).forEach((item, index) => {
+    const nodeId = String(item?.id || '').trim();
+    if (!nodeId) return;
+    rows.push({
+      node_id: nodeId,
+      parent_node_id: parentNodeId,
+      sort_order: index,
+      level,
+      title: String(item?.title || '未命名章节').trim() || '未命名章节',
+      description: String(item?.description || '').trim(),
+      content_mode: item?.children?.length ? null : String(item?.content_mode || '').trim() || null,
+      content_mode_note: item?.children?.length || item?.content_mode !== 'other' ? null : String(item?.content_mode_note || '').trim() || null,
+      source_requirement_id: item?.source_requirement_id ? String(item.source_requirement_id) : null,
+      source_requirement_title: item?.source_requirement_title ? String(item.source_requirement_title) : null,
+      knowledge_item_ids_json: Array.isArray(item?.knowledge_item_ids) && item.knowledge_item_ids.length ? JSON.stringify(item.knowledge_item_ids) : null,
+      content: String(item?.content || ''),
+    });
+    if (item?.children?.length) {
+      flattenOutlineItems(item.children, nodeId, level + 1, rows);
+    }
+  });
+  return rows;
+}
+
+function clearOutlineItemContent(items) {
+  return (items || []).map((item) => ({
+    ...item,
+    content: '',
+    children: item?.children?.length ? clearOutlineItemContent(item.children) : item.children,
+  }));
+}
+
+function clearOutlineDataContent(outlineData) {
+  if (!outlineData?.outline?.length) return outlineData;
+  return { ...outlineData, outline: clearOutlineItemContent(outlineData.outline) };
+}
+
+const outlineSaveReasons = new Set(['sort', 'edit', 'delete', 'add-root', 'add-child', 'replace']);
+
+function normalizeOutlineSaveReason(value) {
+  return outlineSaveReasons.has(value) ? value : 'replace';
+}
+
+function normalizeStringMap(value) {
+  const entries = value && typeof value === 'object' ? Object.entries(value) : [];
+  const map = new Map();
+  for (const [from, to] of entries) {
+    const fromId = String(from || '').trim();
+    const toId = String(to || '').trim();
+    if (fromId && toId) map.set(fromId, toId);
+  }
+  return map;
+}
+
+function normalizeStringSet(value) {
+  return new Set((Array.isArray(value) ? value : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean));
+}
+
+function reverseIdMap(idMap) {
+  const reversed = new Map();
+  for (const [oldId, newId] of idMap.entries()) {
+    reversed.set(newId, oldId);
+  }
+  return reversed;
+}
+
+function mapOutlineItems(items, mapper) {
+  return (items || []).map((item) => {
+    const nextItem = mapper(item);
+    if (item?.children?.length) {
+      nextItem.children = mapOutlineItems(item.children, mapper);
+    }
+    return nextItem;
+  });
+}
+
+function remapStringId(value, idMap) {
+  const id = String(value || '').trim();
+  return idMap.get(id) || id;
+}
+
+function remapContentRuntimeIds(runtime, idMap) {
+  if (!runtime || typeof runtime !== 'object') return runtime;
+  const remapIds = (value) => Array.isArray(value) ? value.map((id) => remapStringId(id, idMap)) : value;
+  const itemRounds = runtime.word_adjustment_item_rounds && typeof runtime.word_adjustment_item_rounds === 'object'
+    ? Object.fromEntries(Object.entries(runtime.word_adjustment_item_rounds).map(([id, rounds]) => [remapStringId(id, idMap), rounds]))
+    : runtime.word_adjustment_item_rounds;
+  return {
+    ...runtime,
+    touched_item_ids: remapIds(runtime.touched_item_ids),
+    word_adjustment_item_id: remapStringId(runtime.word_adjustment_item_id, idMap),
+    word_adjustment_item_rounds: itemRounds,
+    word_adjustment_completed_item_ids: remapIds(runtime.word_adjustment_completed_item_ids),
+    target_item_id: remapStringId(runtime.target_item_id, idMap),
+  };
+}
+
+function remapContentTaskStats(stats, idMap) {
+  if (!stats?.content) return stats;
+  return {
+    ...stats,
+    content: {
+      ...stats.content,
+      section_adjustment_item_id: remapStringId(stats.content.section_adjustment_item_id, idMap),
+      total_adjustment_item_id: remapStringId(stats.content.total_adjustment_item_id, idMap),
+    },
+  };
+}
+
+function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogStore, configStore }) {
+  function deleteOutlineAgentTask() {
+    agentService.deletePersistentTask(OUTLINE_AGENT_TASK_KEY);
+    agentService.deletePersistentTask(TEMPLATE_EXTRACTION_AGENT_TASK_KEY);
+  }
+  function deleteGlobalFactsAgentTask() {
+    agentService.deletePersistentTask(GLOBAL_FACTS_AGENT_TASK_KEY);
+  }
+  let agentWorkspaceChangeListener = null;
+  let lastAgentWorkspaceSignal = null;
+  function setAgentWorkspaceChangeListener(listener) {
+    agentWorkspaceChangeListener = typeof listener === 'function' ? listener : null;
+  }
+  function getAgentWorkspaceSignal() {
+    const meta = ensureMetaRow();
+    const hasOutline = Boolean(db.prepare('SELECT 1 FROM technical_plan_outline_nodes LIMIT 1').get());
+    const hasFacts = Boolean(db.prepare('SELECT 1 FROM technical_plan_global_fact_groups LIMIT 1').get());
+    return `${meta.step || ''}|${hasOutline ? 1 : 0}|${hasFacts ? 1 : 0}`;
+  }
+  function notifyAgentWorkspaceChange(options = {}) {
+    const signal = getAgentWorkspaceSignal();
+    if (!options.force && signal === lastAgentWorkspaceSignal) return;
+    lastAgentWorkspaceSignal = signal;
+    if (!agentWorkspaceChangeListener) return;
+    try {
+      agentWorkspaceChangeListener();
+    } catch (error) {
+      console.error('[technical-plan] Agent 工作空间变更通知失败:', error);
+    }
+  }
+  const tenderMarkdownPath = getTechnicalPlanTenderMarkdownPath(app);
+  const tenderOriginalMarkdownPath = path.join(path.dirname(tenderMarkdownPath), 'tender-original.md');
+  const tenderSourceFilesDir = path.join(path.dirname(tenderMarkdownPath), 'tender-files');
+  const tenderOriginalsDir = getTechnicalPlanTenderOriginalsDir(app);
+  const bidTemplatePath = getTechnicalPlanBidTemplatePath(app);
+  const bidTemplateSourcePath = getTechnicalPlanBidTemplateSourcePath(app);
+  const bidTemplateFieldsPath = getTechnicalPlanBidTemplateFieldsPath(app);
+  const originalPlanMarkdownPath = getTechnicalPlanOriginalPlanMarkdownPath(app);
+  const originalOutlineRuntimePath = path.join(path.dirname(originalPlanMarkdownPath), originalOutlineRuntimeFileName);
+  const illustrationsDir = getTechnicalPlanIllustrationsDir(app);
+  const generatedIllustrationsDir = getTechnicalPlanGeneratedIllustrationsDir(app);
+  const workspaceDir = path.dirname(path.dirname(tenderMarkdownPath));
+  const tenderOriginalLogger = createDeveloperLogger({
+    app,
+    config: configStore?.load?.() || {},
+    moduleName: 'technical-plan',
+    name: 'tender-original-files',
+  });
+
+  const workspaceTrashDir = getWorkspaceTrashDir(app);
+
+  /**
+   * 工作区内的强制删除统一带回收目录兜底:强杀外部占用进程;占用者属于本应用进程(如 Agent 在
+   * Main 内的句柄)无法自杀时,登记延迟删除并放行,重启后补删,保证重置/导入不被阻断。
+   * 投标模版等以“文件存在”判定状态的路径必须传 deferOnFailure: false,残留会被误认为有效数据。
+   */
+  function removeWorkspacePathSync(targetPath, onEvent, { deferOnFailure = true } = {}) {
+    forceRemoveSync(targetPath, { trashDir: workspaceTrashDir, onEvent, deferOnFailure });
+  }
+
+  /** 已在受管原件目录中的文件直接复用，不再复制或重命名。 */
+  function getManagedTenderOriginalRelativePath(filePath) {
+    const resolvedPath = path.resolve(String(filePath || ''));
+    if (filePathKey(path.dirname(resolvedPath)) !== filePathKey(tenderOriginalsDir)) return '';
+    return path.relative(workspaceDir, resolvedPath).replace(/\\/g, '/');
+  }
+
+  function normalizeIllustrationFilePart(value) {
+    return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'illustration';
+  }
+
+  function writeIllustrationFile(filePath, content) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+    if (typeof content === 'string') {
+      fs.writeFileSync(tempPath, content, 'utf-8');
+    } else {
+      fs.writeFileSync(tempPath, content);
+    }
+    fs.renameSync(tempPath, filePath);
+  }
+
+  // 根据计划版本和图片项 ID 计算 HTML 源文件的确定性路径。
+  function getIllustrationHtmlFile({ revision, itemId }) {
+    const safeRevision = normalizeIllustrationFilePart(revision);
+    const safeItemId = normalizeIllustrationFilePart(itemId);
+    const relativePath = path.join('illustrations', safeRevision, 'html', `${safeItemId}.html`).replace(/\\/g, '/');
+    return {
+      relativePath,
+      filePath: path.join(path.dirname(originalPlanMarkdownPath), relativePath),
+    };
+  }
+
+  // 独立保存 HTML 图片源文件，供转图失败或任务恢复时复用。
+  function saveIllustrationHtml({ revision, itemId, content }) {
+    const { relativePath, filePath } = getIllustrationHtmlFile({ revision, itemId });
+    writeIllustrationFile(filePath, String(content || ''));
+    return { relativePath, filePath };
+  }
+
+  // 读取此前已生成的 HTML 图片源文件。
+  function readIllustrationHtml(relativePath) {
+    const resolvedPath = path.resolve(path.dirname(originalPlanMarkdownPath), String(relativePath || ''));
+    const root = `${path.resolve(illustrationsDir)}${path.sep}`;
+    if (!resolvedPath.startsWith(root) || !fs.existsSync(resolvedPath)) return '';
+    return fs.readFileSync(resolvedPath, 'utf-8');
+  }
+
+  // 在计划尚未记录 source_path 时按确定性路径探测已落盘的 HTML。
+  function findIllustrationHtml({ revision, itemId }) {
+    const entry = getIllustrationHtmlFile({ revision, itemId });
+    if (!fs.existsSync(entry.filePath)) return null;
+    return { ...entry, content: fs.readFileSync(entry.filePath, 'utf-8') };
+  }
+
+  // 保存 HTML 截图 PNG，并返回 Renderer/导出层均可读取的资产 URL。
+  function saveIllustrationPng({ revision, itemId, buffer }) {
+    const safeRevision = normalizeIllustrationFilePart(revision);
+    const safeItemId = normalizeIllustrationFilePart(itemId);
+    const filePath = path.join(generatedIllustrationsDir, safeRevision, `${safeItemId}.png`);
+    writeIllustrationFile(filePath, buffer);
+    return {
+      filePath,
+      assetUrl: `yibiao-asset://generated-images/technical-plan/illustrations/${encodeURIComponent(safeRevision)}/${encodeURIComponent(`${safeItemId}.png`)}`,
+    };
+  }
+
+  // 清理技术方案专属的图片源文件和生成图片。
+  function clearIllustrationFiles() {
+    removeWorkspacePathSync(illustrationsDir);
+    removeWorkspacePathSync(generatedIllustrationsDir);
+  }
+  function resolvePendingTenderMarkdownPath(filePath) {
+    return path.resolve(resolveMarkdownPath(filePath));
+  }
+
+  function clearTechnicalPlanMermaidCache() {
+    try {
+      clearMermaidCache(app);
+    } catch (error) {
+      console.warn('[technical-plan] clear mermaid cache failed', error);
+    }
+  }
+
+  function shouldClearMermaidCacheForPartial(partial) {
+    if (!partial || typeof partial !== 'object') return false;
+    if (hasOwn(partial, 'outlineData') && (!partial.outlineData || !partial.outlineData?.outline?.length)) {
+      return true;
+    }
+    return hasOwn(partial, 'contentGenerationSections')
+      && hasOwn(partial, 'contentGenerationPlans')
+      && isEmptyObject(partial.contentGenerationSections)
+      && isEmptyObject(partial.contentGenerationPlans);
+  }
+
+  function isPendingTenderMarkdownPath(filePath) {
+    const resolvedPath = resolvePendingTenderMarkdownPath(filePath);
+    const expectedDir = path.resolve(path.dirname(tenderMarkdownPath));
+    return path.dirname(resolvedPath).toLowerCase() === expectedDir.toLowerCase()
+      && /^tender-pending-\d+\.tmp\.md$/.test(path.basename(resolvedPath));
+  }
+
+  function clearPendingTenderMeta() {
+    updateMeta({
+      pending_tender_markdown_path: null,
+      pending_tender_file_name: null,
+      pending_tender_parser_label: null,
+      pending_tender_sections_json: null,
+      pending_tender_total_declared: null,
+      pending_tender_created_at: null,
+    });
+  }
+
+  function cleanupOrphanPendingTenderFiles(activeMarkdownPath = '') {
+    const targetDir = path.dirname(tenderMarkdownPath);
+    if (!fs.existsSync(targetDir)) {
+      return;
+    }
+    const activePath = activeMarkdownPath ? path.resolve(activeMarkdownPath).toLowerCase() : '';
+    for (const fileName of fs.readdirSync(targetDir)) {
+      if (!/^tender-pending-\d+\.tmp\.md$/.test(fileName)) {
+        continue;
+      }
+      const filePath = path.join(targetDir, fileName);
+      if (activePath && path.resolve(filePath).toLowerCase() === activePath) {
+        continue;
+      }
+      try {
+        const stats = fs.lstatSync(filePath);
+        if (stats.isFile()) fs.rmSync(filePath, { force: true });
+      } catch {
+        // 清理孤儿临时文件失败不影响主流程
+      }
+    }
+  }
+
+  function removePendingTenderMarkdown(markdownPath) {
+    const resolvedPath = markdownPath ? resolvePendingTenderMarkdownPath(markdownPath) : '';
+    if (!resolvedPath || !isPendingTenderMarkdownPath(resolvedPath) || !fs.existsSync(resolvedPath)) {
+      return;
+    }
+    try {
+      const stats = fs.lstatSync(resolvedPath);
+      if (stats.isFile()) fs.rmSync(resolvedPath, { force: true });
+    } catch {
+      // 清理临时文件失败不影响主流程
+    }
+  }
+
+  function cleanupPendingTenderSelection() {
+    const meta = ensureMetaRow();
+    const pendingPath = meta.pending_tender_markdown_path || '';
+    const markdownPath = pendingPath ? resolvePendingTenderMarkdownPath(pendingPath) : '';
+    clearPendingTenderMeta();
+    if (!markdownPath || !isPendingTenderMarkdownPath(markdownPath) || !fs.existsSync(markdownPath)) {
+      cleanupOrphanPendingTenderFiles();
+      return;
+    }
+    removePendingTenderMarkdown(markdownPath);
+    cleanupOrphanPendingTenderFiles();
+  }
+
+  function cleanupLegacyPendingTenderState(meta = ensureMetaRow()) {
+    const hasPendingMeta = Boolean(
+      meta.pending_tender_markdown_path
+      || meta.pending_tender_file_name
+      || meta.pending_tender_sections_json
+      || meta.pending_tender_created_at,
+    );
+    if (hasPendingMeta) {
+      cleanupPendingTenderSelection();
+      return true;
+    }
+    cleanupOrphanPendingTenderFiles();
+    return false;
+  }
+
+  function ensureMetaRow() {
+    const existing = db.prepare('SELECT * FROM technical_plan_meta WHERE id = 1').get();
+    if (existing) return existing;
+    const timestamp = now();
+    db.prepare(`
+      INSERT INTO technical_plan_meta (id, workflow_kind, step, bid_analysis_mode, outline_mode, outline_expansion_mode, created_at, updated_at)
+      VALUES (1, 'technical-plan', 'document-analysis', 'key', 'aligned', 'ai-complement', @timestamp, @timestamp)
+    `).run({ timestamp });
+    return db.prepare('SELECT * FROM technical_plan_meta WHERE id = 1').get();
+  }
+
+  function readMetaRow() {
+    const meta = db.prepare('SELECT * FROM technical_plan_meta WHERE id = 1').get();
+    if (!meta) throw new Error('技术方案数据库尚未初始化');
+    return meta;
+  }
+
+  function updateMeta(fields) {
+    ensureMetaRow();
+    const entries = Object.entries(fields || {}).filter(([, value]) => value !== undefined);
+    if (!entries.length) return;
+    const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ');
+    db.prepare(`UPDATE technical_plan_meta SET ${assignments}, updated_at = @updated_at WHERE id = 1`).run({
+      ...Object.fromEntries(entries),
+      updated_at: now(),
+    });
+  }
+
+  function resolveMarkdownPath(relativeOrAbsolutePath) {
+    const value = String(relativeOrAbsolutePath || '').trim();
+    if (!value) return tenderMarkdownPath;
+    return path.isAbsolute(value) ? value : path.join(path.dirname(path.dirname(tenderMarkdownPath)), value);
+  }
+
+  function readTenderMarkdown() {
+    const meta = readMetaRow();
+    const filePath = resolveMarkdownPath(meta.tender_markdown_path || tenderMarkdownRelativePath);
+    if (!meta.tender_markdown_path || !fs.existsSync(filePath)) {
+      return '';
+    }
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  function loadTenderSourceFiles(meta = readMetaRow()) {
+    const sourceFiles = safeJsonParse(meta.tender_files_json, []);
+    if (Array.isArray(sourceFiles) && sourceFiles.length) {
+      return sourceFiles.map((file) => ({
+        id: String(file.id || ''),
+        fileName: String(file.fileName || '招标文件'),
+        markdownPath: String(file.markdownPath || ''),
+        markdownChars: Number(file.markdownChars || 0),
+        contentHash: String(file.contentHash || ''),
+        parserLabel: file.parserLabel ? String(file.parserLabel) : undefined,
+        sourceDocxPath: file.sourceDocxPath ? String(file.sourceDocxPath) : undefined,
+        importedAt: file.importedAt ? String(file.importedAt) : undefined,
+        updatedAt: file.updatedAt ? String(file.updatedAt) : meta.updated_at,
+      })).filter((file) => file.id && file.markdownPath);
+    }
+    if (meta.tender_markdown_path) {
+      return [{
+        id: 'tender-legacy-01',
+        fileName: meta.tender_file_name || '技术方案招标文件',
+        markdownPath: meta.tender_markdown_path,
+        markdownChars: Number(meta.tender_markdown_chars || 0),
+        contentHash: meta.tender_markdown_hash || '',
+        parserLabel: meta.tender_parser_label || undefined,
+        importedAt: meta.tender_imported_at || undefined,
+        updatedAt: meta.updated_at,
+      }];
+    }
+    return [];
+  }
+
+  function readTenderSourceMarkdown(sourceId) {
+    const target = loadTenderSourceFiles().find((file) => file.id === String(sourceId || ''));
+    if (!target) return '';
+    const filePath = resolveMarkdownPath(target.markdownPath);
+    if (!fs.existsSync(filePath)) return '';
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  function readOriginalTenderMarkdown() {
+    const meta = readMetaRow();
+    if (!meta.tender_markdown_path) {
+      return '';
+    }
+    const originalPath = meta.tender_original_markdown_path
+      ? resolveMarkdownPath(meta.tender_original_markdown_path)
+      : null;
+    if (originalPath && fs.existsSync(originalPath)) {
+      return fs.readFileSync(originalPath, 'utf-8');
+    }
+    throw new Error('原始招标文件缺失，请重新上传招标文件');
+  }
+
+  function writeMarkdownFile(targetPath, markdown, prefix) {
+    const targetDir = path.dirname(targetPath);
+    const tempPath = path.join(targetDir, `${prefix}-${Date.now()}.tmp.md`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(tempPath, `${String(markdown || '').trim()}\n`, 'utf-8');
+    try {
+      fs.renameSync(tempPath, targetPath);
+    } catch (error) {
+      if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      throw error;
+    }
+  }
+
+  function checkBidSections() {
+    const markdown = readOriginalTenderMarkdown();
+    return detectBidSections(markdown);
+  }
+
+  function readOriginalPlanMarkdown() {
+    const meta = readMetaRow();
+    const filePath = resolveMarkdownPath(meta.original_plan_markdown_path || originalPlanMarkdownRelativePath);
+    if (!meta.original_plan_markdown_path || !fs.existsSync(filePath)) {
+      return '';
+    }
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  function writeTenderSourceMarkdown(source, index) {
+    const markdown = String(source?.file_content || '').trim();
+    const fileName = source?.file_name || '招标文件';
+    const id = createTenderSourceId(fileName, markdown, index);
+    const relativePath = path.join(tenderSourceFilesDirRelativePath, `${id}-${safeFileNamePart(fileName)}.md`).replace(/\\/g, '/');
+    const targetPath = resolveMarkdownPath(relativePath);
+    writeMarkdownFile(targetPath, markdown, id);
+    const sourceDocxPath = persistExistingTenderOriginal(source, id);
+    return {
+      id,
+      fileName,
+      markdownPath: relativePath,
+      markdownChars: markdown.length,
+      contentHash: stableHash(markdown),
+      parserLabel: source?.parser_label || undefined,
+      sourceDocxPath: sourceDocxPath || undefined,
+      importedAt: now(),
+      updatedAt: now(),
+    };
+  }
+
+  /** 把已有或刚落下的招标 Word 原件归到当前源文件编号下。 */
+  function persistExistingTenderOriginal(source, id) {
+    const destRelative = path.join(tenderOriginalsDirRelativePath, `${id}.docx`).replace(/\\/g, '/');
+    const destPath = resolveMarkdownPath(destRelative);
+    const incoming = String(source?.source_docx_path || source?.sourceDocxPath || '').trim();
+    if (!incoming) return '';
+    const sourcePath = path.isAbsolute(incoming) ? incoming : resolveMarkdownPath(incoming);
+    if (!fs.existsSync(sourcePath)) return '';
+    const managedRelativePath = getManagedTenderOriginalRelativePath(sourcePath);
+    if (managedRelativePath) return managedRelativePath;
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    if (filePathKey(sourcePath) !== filePathKey(destPath)) {
+      tenderOriginalLogger.write('tender-original.copy.started', { phase: 'state-rebuild', source_path: sourcePath, dest_path: destPath });
+      try {
+        fs.copyFileSync(sourcePath, destPath);
+        tenderOriginalLogger.write('tender-original.copy.completed', { phase: 'state-rebuild', source_path: sourcePath, dest_path: destPath });
+      } catch (error) {
+        tenderOriginalLogger.write('tender-original.copy.failed', {
+          phase: 'state-rebuild',
+          source_path: sourcePath,
+          dest_path: destPath,
+          code: error?.code,
+          syscall: error?.syscall,
+          error: compactLogError(error),
+        });
+        throw error;
+      }
+    }
+    return destRelative;
+  }
+
+  function pruneTenderOriginals(keptRelativePaths, phase = 'state-rebuild') {
+    const keep = new Set((Array.isArray(keptRelativePaths) ? keptRelativePaths : []).map((item) => filePathKey(resolveMarkdownPath(item))));
+    if (!fs.existsSync(tenderOriginalsDir)) return;
+    for (const name of fs.readdirSync(tenderOriginalsDir)) {
+      const filePath = path.join(tenderOriginalsDir, name);
+      if (!keep.has(filePathKey(filePath))) {
+        tenderOriginalLogger.write('tender-original.delete.started', { phase, file_path: filePath });
+        try {
+          removeWorkspacePathSync(filePath, (event, payload) => tenderOriginalLogger.write(event, { phase, ...payload }));
+          tenderOriginalLogger.write('tender-original.delete.completed', { phase, file_path: filePath });
+        } catch (error) {
+          tenderOriginalLogger.write('tender-original.delete.failed', {
+            phase,
+            file_path: filePath,
+            code: error?.code,
+            syscall: error?.syscall,
+            error: compactLogError(error),
+          });
+          const fileName = path.basename(filePath);
+          const message = isFileLockError(error)
+            ? `无法删除旧招标 Word 原件“${fileName}”，请关闭可能占用该文件的 Word/WPS，并确认文件可写后重试`
+            : `无法清理旧招标 Word 原件“${fileName}”：${error?.message || error}`;
+          const cleanupError = new Error(message);
+          cleanupError.code = 'TENDER_ORIGINAL_CLEANUP_FAILED';
+          cleanupError.cause = error;
+          throw cleanupError;
+        }
+      }
+    }
+  }
+
+  function clearBidTemplate() {
+    const templateFiles = [bidTemplatePath, bidTemplateSourcePath, bidTemplateFieldsPath];
+    const templateDir = path.dirname(bidTemplatePath);
+    if (fs.existsSync(templateDir)) {
+      const tempPrefixes = [
+        `${path.basename(bidTemplatePath)}.`,
+        `${path.basename(bidTemplateFieldsPath)}.`,
+      ];
+      for (const name of fs.readdirSync(templateDir)) {
+        if (tempPrefixes.some((prefix) => name.startsWith(prefix) && name.includes('.tmp'))) {
+          templateFiles.push(path.join(templateDir, name));
+        }
+      }
+    }
+    for (const filePath of templateFiles) {
+      if (!fs.existsSync(filePath)) continue;
+      try {
+        removeWorkspacePathSync(
+          filePath,
+          (event, payload) => tenderOriginalLogger.write(event, { phase: 'bid-template-cleanup', ...payload }),
+          { deferOnFailure: false },
+        );
+      } catch (error) {
+        if (isFileLockError(error)) {
+          const lockError = new Error('投标模版正在被 Word 使用，请关闭后重试');
+          lockError.code = 'BID_TEMPLATE_IN_USE';
+          lockError.cause = error;
+          throw lockError;
+        }
+        throw error;
+      }
+    }
+  }
+
+  function clearTenderSourceFiles(phase = 'technical-plan-reset') {
+    clearBidTemplate();
+    if (fs.existsSync(tenderOriginalsDir)) {
+      tenderOriginalLogger.write('tender-original.delete-directory.started', { phase, directory_path: tenderOriginalsDir });
+      try {
+        removeWorkspacePathSync(tenderOriginalsDir, (event, payload) => tenderOriginalLogger.write(event, { phase, ...payload }));
+        tenderOriginalLogger.write('tender-original.delete-directory.completed', { phase, directory_path: tenderOriginalsDir });
+      } catch (error) {
+        tenderOriginalLogger.write('tender-original.delete-directory.failed', {
+          phase,
+          directory_path: tenderOriginalsDir,
+          code: error?.code,
+          syscall: error?.syscall,
+          path: error?.path,
+          error: compactLogError(error),
+        });
+        const resetError = new Error('无法清理招标 Word 原件，请关闭可能占用原件的 Word/WPS，并确认文件可写后重试');
+        resetError.code = 'TENDER_ORIGINAL_CLEANUP_FAILED';
+        resetError.cause = error;
+        throw resetError;
+      }
+    }
+    if (fs.existsSync(tenderSourceFilesDir)) {
+      removeWorkspacePathSync(tenderSourceFilesDir);
+    }
+  }
+
+  function clearOriginalOutlineRuntime() {
+    if (!fs.existsSync(originalOutlineRuntimePath)) {
+      return;
+    }
+    fs.rmSync(originalOutlineRuntimePath, { force: true });
+  }
+
+  function readOriginalOutlineRuntime() {
+    if (!fs.existsSync(originalOutlineRuntimePath)) {
+      return null;
+    }
+    try {
+      const runtime = safeJsonParse(fs.readFileSync(originalOutlineRuntimePath, 'utf-8'), null);
+      if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+        clearOriginalOutlineRuntime();
+        return null;
+      }
+      return runtime;
+    } catch {
+      clearOriginalOutlineRuntime();
+      return null;
+    }
+  }
+
+  function saveOriginalOutlineRuntime(runtime) {
+    const targetDir = path.dirname(originalOutlineRuntimePath);
+    const tempPath = path.join(targetDir, `original-outline-runtime-${Date.now()}.tmp.json`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(tempPath, `${JSON.stringify(runtime || {}, null, 2)}\n`, 'utf-8');
+    try {
+      fs.renameSync(tempPath, originalOutlineRuntimePath);
+    } catch (error) {
+      if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      throw error;
+    }
+  }
+
+  function loadReferenceDocumentIds() {
+    return db.prepare('SELECT document_id FROM technical_plan_reference_docs ORDER BY sort_order ASC').all()
+      .map((row) => row.document_id);
+  }
+
+  function replaceReferenceDocumentIds(documentIds) {
+    db.prepare('DELETE FROM technical_plan_reference_docs').run();
+    const insert = db.prepare('INSERT INTO technical_plan_reference_docs (document_id, sort_order) VALUES (@document_id, @sort_order)');
+    [...new Set((Array.isArray(documentIds) ? documentIds : []).map((id) => String(id || '').trim()).filter(Boolean))]
+      .forEach((documentId, index) => insert.run({ document_id: documentId, sort_order: index }));
+  }
+
+  function taskFromRow(row) {
+    if (!row) return undefined;
+    return {
+      task_id: row.task_id,
+      type: row.type,
+      status: normalizeStatus(row.status, ['running', 'pausing', 'paused', 'success', 'error'], 'running'),
+      progress: Number(row.progress || 0),
+      logs: taskLogStore.list('technical-plan', row.type, row.task_id),
+      started_at: row.started_at,
+      updated_at: row.updated_at,
+      error: row.error || undefined,
+      stats: safeJsonParse(row.stats_json, undefined),
+      pause_requested: fromDbBool(row.pause_requested),
+    };
+  }
+
+  function saveTask(type, task) {
+    if (!task) {
+      db.prepare('DELETE FROM technical_plan_tasks WHERE type = ?').run(type);
+      if (type === 'bid-section-extraction') {
+        updateMeta({ bid_section_extraction_status: 'idle', bid_section_extraction_error: null });
+      }
+      return;
+    }
+    const timestamp = now();
+    db.prepare(`
+      INSERT INTO technical_plan_tasks (type, task_id, status, progress, stats_json, error, pause_requested, started_at, updated_at)
+      VALUES (@type, @task_id, @status, @progress, @stats_json, @error, @pause_requested, @started_at, @updated_at)
+      ON CONFLICT(type) DO UPDATE SET
+        task_id = excluded.task_id,
+        status = excluded.status,
+        progress = excluded.progress,
+        stats_json = excluded.stats_json,
+        error = excluded.error,
+        pause_requested = excluded.pause_requested,
+        started_at = excluded.started_at,
+        updated_at = excluded.updated_at
+    `).run({
+      type,
+      task_id: String(task.task_id || ''),
+      status: String(task.status || 'running'),
+      progress: Math.max(0, Math.min(100, Math.round(Number(task.progress || 0)))),
+      stats_json: jsonOrNull(task.stats),
+      error: task.error ? String(task.error) : null,
+      pause_requested: toDbBool(task.pause_requested),
+      started_at: task.started_at || timestamp,
+      updated_at: task.updated_at || timestamp,
+    });
+    taskLogStore.sync('technical-plan', type, String(task.task_id || ''), task.logs, task.updated_at || timestamp);
+    if (type === 'bid-section-extraction') {
+      updateMeta({
+        bid_section_extraction_status: normalizeBidSectionExtractionStatus(task.status),
+        bid_section_extraction_error: task.error ? String(task.error) : null,
+      });
+    }
+  }
+
+  function loadTasks() {
+    const rows = db.prepare('SELECT * FROM technical_plan_tasks').all();
+    const tasks = {};
+    for (const row of rows) {
+      const field = taskTypeFields[row.type];
+      if (field) tasks[field] = taskFromRow(row);
+    }
+    return tasks;
+  }
+
+  function loadTask(type) {
+    return taskFromRow(db.prepare('SELECT * FROM technical_plan_tasks WHERE type = ?').get(type));
+  }
+
+  function loadBidItems() {
+    const rows = db.prepare('SELECT * FROM technical_plan_bid_items ORDER BY sort_order ASC, item_id ASC').all();
+    return rows.reduce((acc, row) => {
+      acc[row.item_id] = {
+        id: row.item_id,
+        label: row.label,
+        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error'], 'idle'),
+        content: row.content || '',
+        error: row.error || undefined,
+      };
+      return acc;
+    }, {});
+  }
+
+  function getBidItemSortOrder(itemId) {
+    const fullTasks = getAllBidAnalysisTasks();
+    const index = fullTasks.findIndex((task) => task.id === itemId);
+    return index >= 0 ? index : 9999;
+  }
+
+  function getBidItemLabel(itemId, fallbackLabel) {
+    const task = getBidAnalysisTasks('full').find((item) => item.id === itemId) || getBidAnalysisTasks('key').find((item) => item.id === itemId);
+    return fallbackLabel || task?.label || itemId;
+  }
+
+  function saveBidItems(tasks, mode) {
+    const entries = Object.entries(tasks || {});
+    if (!entries.length) {
+      db.prepare('DELETE FROM technical_plan_bid_items').run();
+      return;
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO technical_plan_bid_items (item_id, label, status, content, error, sort_order, updated_at)
+      VALUES (@item_id, @label, @status, @content, @error, @sort_order, @updated_at)
+      ON CONFLICT(item_id) DO UPDATE SET
+        label = excluded.label,
+        status = excluded.status,
+        content = excluded.content,
+        error = excluded.error,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at
+    `);
+    const timestamp = now();
+    for (const [itemId, task] of entries) {
+      upsert.run({
+        item_id: itemId,
+        label: getBidItemLabel(itemId, task?.label),
+        status: normalizeStatus(task?.status, ['idle', 'running', 'success', 'error'], 'idle'),
+        content: String(task?.content || ''),
+        error: task?.error ? String(task.error) : null,
+        sort_order: getBidItemSortOrder(itemId, mode),
+        updated_at: task?.updated_at || timestamp,
+      });
+    }
+  }
+
+  function saveBidItem(item, mode) {
+    const itemId = String(item?.id || '').trim();
+    if (!itemId) return;
+    saveBidItems({ [itemId]: item }, mode);
+  }
+
+  function upsertDerivedBidItem(itemId, content, mode) {
+    const label = getBidItemLabel(itemId);
+    const value = String(content || '');
+    db.prepare(`
+      INSERT INTO technical_plan_bid_items (item_id, label, status, content, error, sort_order, updated_at)
+      VALUES (@item_id, @label, @status, @content, NULL, @sort_order, @updated_at)
+      ON CONFLICT(item_id) DO UPDATE SET
+        label = excluded.label,
+        status = excluded.status,
+        content = excluded.content,
+        error = NULL,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at
+    `).run({
+      item_id: itemId,
+      label,
+      status: value.trim() ? 'success' : 'idle',
+      content: value,
+      sort_order: getBidItemSortOrder(itemId, mode),
+      updated_at: now(),
+    });
+  }
+
+  function calculateBidProgress(mode, bidTasks, selectedTaskIds) {
+    const selectedIds = getBidAnalysisTaskIdsForConfig(mode, selectedTaskIds);
+    if (!selectedIds.length) return 0;
+    const done = selectedIds.filter((taskId) => ['success', 'error'].includes(bidTasks[taskId]?.status)).length;
+    return Math.round((done / selectedIds.length) * 100);
+  }
+
+  function loadOutlineData(meta) {
+    const rows = db.prepare('SELECT * FROM technical_plan_outline_nodes ORDER BY level ASC, parent_node_id ASC, sort_order ASC').all();
+    if (!rows.length) return null;
+
+    const map = new Map();
+    for (const row of rows) {
+      map.set(row.node_id, {
+        id: row.node_id,
+        title: row.title,
+        description: row.description || '',
+        content_mode: row.content_mode || undefined,
+        content_mode_note: row.content_mode_note || undefined,
+        source_requirement_id: row.source_requirement_id || undefined,
+        source_requirement_title: row.source_requirement_title || undefined,
+        knowledge_item_ids: safeJsonParse(row.knowledge_item_ids_json, undefined),
+        content: row.content || '',
+        children: [],
+      });
+    }
+
+    const roots = [];
+    for (const row of rows) {
+      const item = map.get(row.node_id);
+      if (!item) continue;
+      if (row.parent_node_id && map.has(row.parent_node_id)) {
+        map.get(row.parent_node_id).children.push(item);
+      } else {
+        roots.push(item);
+      }
+    }
+
+    function cleanup(item) {
+      if (!item.children.length) {
+        delete item.children;
+      } else {
+        item.children.forEach(cleanup);
+      }
+      if (!item.knowledge_item_ids?.length) delete item.knowledge_item_ids;
+      if (!item.content) delete item.content;
+      return item;
+    }
+
+    return {
+      outline: roots.map(cleanup),
+      project_name: meta.outline_project_name || undefined,
+      project_overview: meta.outline_project_overview || undefined,
+    };
+  }
+
+  function saveOutlineData(outlineData) {
+    if (!outlineData?.outline?.length) {
+      db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+      updateMeta({ outline_project_name: null, outline_project_overview: null });
+      return;
+    }
+
+    const rows = flattenOutlineItems(outlineData.outline);
+    const nextIds = new Set(rows.map((row) => row.node_id));
+    const upsert = db.prepare(`
+      INSERT INTO technical_plan_outline_nodes (
+        node_id, parent_node_id, sort_order, level, title, description, content_mode, content_mode_note, source_requirement_id,
+        source_requirement_title, knowledge_item_ids_json, content, created_at, updated_at
+      ) VALUES (
+        @node_id, @parent_node_id, @sort_order, @level, @title, @description, @content_mode, @content_mode_note, @source_requirement_id,
+        @source_requirement_title, @knowledge_item_ids_json, @content, @created_at, @updated_at
+      ) ON CONFLICT(node_id) DO UPDATE SET
+        parent_node_id = excluded.parent_node_id,
+        sort_order = excluded.sort_order,
+        level = excluded.level,
+        title = excluded.title,
+        description = excluded.description,
+        content_mode = excluded.content_mode,
+        content_mode_note = excluded.content_mode_note,
+        source_requirement_id = excluded.source_requirement_id,
+        source_requirement_title = excluded.source_requirement_title,
+        knowledge_item_ids_json = excluded.knowledge_item_ids_json,
+        content = excluded.content,
+        updated_at = excluded.updated_at
+    `);
+    const timestamp = now();
+    for (const row of rows) {
+      upsert.run({ ...row, created_at: timestamp, updated_at: timestamp });
+    }
+
+    const existingIds = db.prepare('SELECT node_id FROM technical_plan_outline_nodes').all().map((row) => row.node_id);
+    const deleteNode = db.prepare('DELETE FROM technical_plan_outline_nodes WHERE node_id = ?');
+    for (const nodeId of existingIds) {
+      if (!nextIds.has(nodeId)) deleteNode.run(nodeId);
+    }
+
+    updateMeta({
+      outline_project_name: outlineData.project_name || null,
+      outline_project_overview: outlineData.project_overview || null,
+    });
+  }
+
+  function loadContentSections(outlineData) {
+    const rows = db.prepare(`
+      SELECT s.node_id, s.status, s.error, s.updated_at, n.title, n.content
+      FROM technical_plan_content_sections s
+      JOIN technical_plan_outline_nodes n ON n.node_id = s.node_id
+    `).all();
+    const sections = rows.reduce((acc, row) => {
+      acc[row.node_id] = {
+        id: row.node_id,
+        title: row.title || '未命名章节',
+        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        content: row.content || '',
+        error: row.error || undefined,
+        updated_at: row.updated_at || undefined,
+      };
+      return acc;
+    }, {});
+
+    for (const item of collectLeafItems(outlineData?.outline || [])) {
+      if (!sections[item.id] && item.content?.trim()) {
+        sections[item.id] = {
+          id: item.id,
+          title: item.title || '未命名章节',
+          status: 'success',
+          content: item.content,
+        };
+      }
+    }
+
+    return sections;
+  }
+
+  function saveContentSections(sections) {
+    const entries = Object.entries(sections || {});
+    if (!entries.length) {
+      db.prepare('DELETE FROM technical_plan_content_sections').run();
+      return;
+    }
+
+    const nextIds = new Set(entries.map(([nodeId]) => nodeId));
+    const upsert = db.prepare(`
+      INSERT INTO technical_plan_content_sections (node_id, status, error, updated_at)
+      VALUES (@node_id, @status, @error, @updated_at)
+      ON CONFLICT(node_id) DO UPDATE SET
+        status = excluded.status,
+        error = excluded.error,
+        updated_at = excluded.updated_at
+    `);
+    const updateContent = db.prepare('UPDATE technical_plan_outline_nodes SET content = @content, updated_at = @updated_at WHERE node_id = @node_id');
+    const timestamp = now();
+    for (const [nodeId, section] of entries) {
+      upsert.run({
+        node_id: nodeId,
+        status: normalizeStatus(section?.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        error: section?.error ? String(section.error) : null,
+        updated_at: section?.updated_at || timestamp,
+      });
+      if (hasOwn(section, 'content')) {
+        updateContent.run({ node_id: nodeId, content: String(section.content || ''), updated_at: timestamp });
+      }
+    }
+
+    const deleteSection = db.prepare('DELETE FROM technical_plan_content_sections WHERE node_id = ?');
+    for (const row of db.prepare('SELECT node_id FROM technical_plan_content_sections').all()) {
+      if (!nextIds.has(row.node_id)) deleteSection.run(row.node_id);
+    }
+  }
+
+  function loadContentPlans() {
+    return db.prepare('SELECT * FROM technical_plan_content_plans').all().reduce((acc, row) => {
+      const storedPlan = safeJsonParse(row.plan_json, null);
+      if (storedPlan?.plan && Number(storedPlan.plan_version) > 0) {
+        acc[row.node_id] = {
+          plan_version: Number(storedPlan.plan_version),
+          plan: storedPlan.plan,
+          ...(storedPlan.table_requirement ? { table_requirement: storedPlan.table_requirement } : {}),
+          updated_at: row.updated_at || undefined,
+        };
+      }
+      return acc;
+    }, {});
+  }
+
+  function loadGeneratedIllustrationAssetUrls() {
+    return db.prepare(`
+      SELECT generation_asset_url
+      FROM technical_plan_illustration_items
+      WHERE generation_asset_url IS NOT NULL AND generation_asset_url <> ''
+    `).all().map((row) => row.generation_asset_url);
+  }
+
+  function deleteGeneratedIllustrationAssets(assetUrls) {
+    const generatedImagesDir = path.resolve(getGeneratedImagesDir(app));
+    const prefix = 'yibiao-asset://generated-images/';
+    for (const assetUrl of new Set(assetUrls || [])) {
+      const originalSource = String(assetUrl || '');
+      const retainedByPlan = db.prepare('SELECT 1 FROM technical_plan_illustration_items WHERE generation_asset_url = ? LIMIT 1').get(originalSource);
+      const stillReferenced = db.prepare('SELECT 1 FROM technical_plan_outline_nodes WHERE instr(content, ?) > 0 LIMIT 1').get(originalSource);
+      if (retainedByPlan || stillReferenced) continue;
+      const source = originalSource.split('?')[0];
+      if (!source.startsWith(prefix)) continue;
+      let relativePath;
+      try {
+        relativePath = decodeURIComponent(source.slice(prefix.length));
+      } catch {
+        continue;
+      }
+      const filePath = path.resolve(generatedImagesDir, relativePath);
+      if (filePath === generatedImagesDir || !filePath.startsWith(`${generatedImagesDir}${path.sep}`)) continue;
+      fs.rmSync(filePath, { force: true });
+    }
+  }
+
+  const pendingGeneratedAssetCleanup = new Set();
+  let generatedAssetCleanupScheduled = false;
+  function scheduleGeneratedAssetCleanup(assetUrls) {
+    (assetUrls || []).filter(Boolean).forEach((assetUrl) => pendingGeneratedAssetCleanup.add(assetUrl));
+    if (!pendingGeneratedAssetCleanup.size || generatedAssetCleanupScheduled) return;
+    generatedAssetCleanupScheduled = true;
+    setImmediate(() => {
+      generatedAssetCleanupScheduled = false;
+      const queuedAssetUrls = [...pendingGeneratedAssetCleanup];
+      pendingGeneratedAssetCleanup.clear();
+      try {
+        deleteGeneratedIllustrationAssets(queuedAssetUrls);
+      } catch (error) {
+        console.warn('[technical-plan] 清理旧生图失败', error?.message || String(error));
+      }
+    });
+  }
+
+  function clearUnreferencedRootGeneratedImages() {
+    const generatedImagesDir = getGeneratedImagesDir(app);
+    if (!fs.existsSync(generatedImagesDir)) return;
+    const assetUrls = fs.readdirSync(generatedImagesDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => `yibiao-asset://generated-images/${encodeURIComponent(entry.name)}`);
+    scheduleGeneratedAssetCleanup(assetUrls);
+  }
+
+  function deleteContentIllustrationPlanRows() {
+    db.prepare('DELETE FROM technical_plan_illustration_items').run();
+    db.prepare('DELETE FROM technical_plan_illustration_plans').run();
+  }
+
+  function clearContentIllustrationPlan() {
+    const assetUrls = loadGeneratedIllustrationAssetUrls();
+    deleteContentIllustrationPlanRows();
+    scheduleGeneratedAssetCleanup(assetUrls);
+  }
+
+  function illustrationItemValues(item, sortOrder, timestamp) {
+    const generation = item?.generation;
+    return {
+      item_id: String(item.item_id),
+      kind: String(item.kind || ''),
+      image_type: String(item.image_type || ''),
+      title: String(item.title || ''),
+      section_ids_json: JSON.stringify(Array.isArray(item.section_ids) ? item.section_ids : []),
+      placement: String(item.placement || 'after'),
+      priority: Number(item.priority || 0),
+      generation_status: generation?.status ? String(generation.status) : null,
+      generation_mode: generation?.mode ? String(generation.mode) : null,
+      generation_code: generation?.code ? String(generation.code) : null,
+      generation_source_path: generation?.source_path ? String(generation.source_path) : null,
+      generation_asset_url: generation?.asset_url ? String(generation.asset_url) : null,
+      generation_attempts: generation?.attempts === undefined ? null : Number(generation.attempts || 0),
+      generation_error: generation?.error ? String(generation.error) : null,
+      generation_updated_at: generation?.updated_at || null,
+      sort_order: Number(sortOrder || 0),
+      updated_at: item.updated_at || timestamp,
+    };
+  }
+
+  const upsertIllustrationItem = db.prepare(`
+    INSERT INTO technical_plan_illustration_items (
+      item_id, kind, image_type, title, section_ids_json, placement, priority,
+      generation_status, generation_mode, generation_code, generation_source_path,
+      generation_asset_url, generation_attempts, generation_error, generation_updated_at,
+      sort_order, updated_at
+    ) VALUES (
+      @item_id, @kind, @image_type, @title, @section_ids_json, @placement, @priority,
+      @generation_status, @generation_mode, @generation_code, @generation_source_path,
+      @generation_asset_url, @generation_attempts, @generation_error, @generation_updated_at,
+      @sort_order, @updated_at
+    ) ON CONFLICT(item_id) DO UPDATE SET
+      kind = excluded.kind,
+      image_type = excluded.image_type,
+      title = excluded.title,
+      section_ids_json = excluded.section_ids_json,
+      placement = excluded.placement,
+      priority = excluded.priority,
+      generation_status = excluded.generation_status,
+      generation_mode = excluded.generation_mode,
+      generation_code = excluded.generation_code,
+      generation_source_path = excluded.generation_source_path,
+      generation_asset_url = excluded.generation_asset_url,
+      generation_attempts = excluded.generation_attempts,
+      generation_error = excluded.generation_error,
+      generation_updated_at = excluded.generation_updated_at,
+      sort_order = excluded.sort_order,
+      updated_at = excluded.updated_at
+  `);
+
+  function replaceContentIllustrationPlan(plan) {
+    const previousAssetUrls = loadGeneratedIllustrationAssetUrls();
+    deleteContentIllustrationPlanRows();
+    if (!plan || !Array.isArray(plan.items)) {
+      scheduleGeneratedAssetCleanup(previousAssetUrls);
+      return;
+    }
+    const timestamp = plan.updated_at || now();
+    db.prepare(`
+      INSERT INTO technical_plan_illustration_plans (id, plan_version, revision, updated_at)
+      VALUES (1, ?, ?, ?)
+    `).run(Number(plan.plan_version || 0), String(plan.revision || ''), timestamp);
+    plan.items.forEach((item, index) => {
+      if (item?.item_id) upsertIllustrationItem.run(illustrationItemValues(item, index, timestamp));
+    });
+    const retainedAssetUrls = new Set(loadGeneratedIllustrationAssetUrls());
+    scheduleGeneratedAssetCleanup(previousAssetUrls.filter((assetUrl) => !retainedAssetUrls.has(assetUrl)));
+  }
+
+  function saveContentIllustrationItem(item) {
+    if (!item?.item_id) return;
+    const existing = db.prepare('SELECT sort_order, generation_asset_url FROM technical_plan_illustration_items WHERE item_id = ?').get(item.item_id);
+    upsertIllustrationItem.run(illustrationItemValues(item, existing?.sort_order || 0, now()));
+    const nextAssetUrl = item?.generation?.asset_url ? String(item.generation.asset_url) : '';
+    if (existing?.generation_asset_url && existing.generation_asset_url !== nextAssetUrl) {
+      scheduleGeneratedAssetCleanup([existing.generation_asset_url]);
+    }
+  }
+
+  function loadContentIllustrationPlan() {
+    const plan = db.prepare('SELECT * FROM technical_plan_illustration_plans WHERE id = 1').get();
+    if (!plan) return undefined;
+    const items = db.prepare('SELECT * FROM technical_plan_illustration_items ORDER BY sort_order ASC, item_id ASC').all().map((row) => {
+      const generation = row.generation_status ? {
+        status: row.generation_status,
+        ...(row.generation_mode ? { mode: row.generation_mode } : {}),
+        ...(row.generation_code ? { code: row.generation_code } : {}),
+        ...(row.generation_source_path ? { source_path: row.generation_source_path } : {}),
+        ...(row.generation_asset_url ? { asset_url: row.generation_asset_url } : {}),
+        ...(row.generation_attempts === null ? {} : { attempts: Number(row.generation_attempts || 0) }),
+        ...(row.generation_error ? { error: row.generation_error } : {}),
+        ...(row.generation_updated_at ? { updated_at: row.generation_updated_at } : {}),
+      } : undefined;
+      return {
+        item_id: row.item_id,
+        kind: row.kind,
+        image_type: row.image_type,
+        title: row.title,
+        section_ids: safeJsonParse(row.section_ids_json, []),
+        placement: row.placement,
+        priority: Number(row.priority || 0),
+        ...(generation ? { generation } : {}),
+      };
+    });
+    return {
+      plan_version: Number(plan.plan_version || 0),
+      revision: plan.revision,
+      items,
+      updated_at: plan.updated_at || undefined,
+    };
+  }
+
+  function normalizeGlobalFactGroups(groups) {
+    const seen = new Set();
+    return (Array.isArray(groups) ? groups : []).map((group, index) => {
+      const title = String(group?.title || '').trim();
+      const content = String(group?.content || '').trim();
+      if (!title || !content) return null;
+      let id = normalizeGlobalFactId(group?.id || group?.group_id || title, index);
+      let suffix = 2;
+      while (seen.has(id)) {
+        id = `${id}_${suffix}`;
+        suffix += 1;
+      }
+      seen.add(id);
+      return {
+        id,
+        title,
+        content,
+        updated_at: group?.updated_at || group?.updatedAt || now(),
+      };
+    }).filter(Boolean);
+  }
+
+  function loadGlobalFacts() {
+    return db.prepare('SELECT * FROM technical_plan_global_fact_groups ORDER BY sort_order ASC, group_id ASC').all().map((row) => ({
+      id: row.group_id,
+      title: row.title,
+      content: row.content || '',
+      updated_at: row.updated_at || undefined,
+    }));
+  }
+
+  function replaceGlobalFacts(groups) {
+    const normalized = normalizeGlobalFactGroups(groups);
+    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+    if (!normalized.length) return;
+
+    const insert = db.prepare(`
+      INSERT INTO technical_plan_global_fact_groups (group_id, title, content, sort_order, created_at, updated_at)
+      VALUES (@group_id, @title, @content, @sort_order, @created_at, @updated_at)
+    `);
+    const timestamp = now();
+    normalized.forEach((group, index) => insert.run({
+      group_id: group.id,
+      title: group.title,
+      content: group.content,
+      sort_order: index,
+      created_at: timestamp,
+      updated_at: group.updated_at || timestamp,
+    }));
+  }
+
+  function saveContentPlans(plans) {
+    const entries = Object.entries(plans || {}).filter(([, value]) => value?.plan && Number(value.plan_version) > 0);
+    if (!entries.length) {
+      db.prepare('DELETE FROM technical_plan_content_plans').run();
+      return;
+    }
+
+    const nextIds = new Set(entries.map(([nodeId]) => nodeId));
+    const upsert = db.prepare(`
+      INSERT INTO technical_plan_content_plans (node_id, plan_json, updated_at)
+      VALUES (@node_id, @plan_json, @updated_at)
+      ON CONFLICT(node_id) DO UPDATE SET
+        plan_json = excluded.plan_json,
+        updated_at = excluded.updated_at
+    `);
+    const timestamp = now();
+    for (const [nodeId, value] of entries) {
+      if (!value?.plan) continue;
+      upsert.run({
+        node_id: nodeId,
+        plan_json: JSON.stringify({
+          plan_version: Number(value.plan_version),
+          plan: value.plan,
+          ...(value.table_requirement ? { table_requirement: value.table_requirement } : {}),
+        }),
+        updated_at: value.updated_at || timestamp,
+      });
+    }
+
+    const deletePlan = db.prepare('DELETE FROM technical_plan_content_plans WHERE node_id = ?');
+    for (const row of db.prepare('SELECT node_id FROM technical_plan_content_plans').all()) {
+      if (!nextIds.has(row.node_id)) deletePlan.run(row.node_id);
+    }
+  }
+
+  const updateGeneratedContent = db.prepare('UPDATE technical_plan_outline_nodes SET content = ?, updated_at = ? WHERE node_id = ?');
+  const upsertGeneratedSection = db.prepare(`
+    INSERT INTO technical_plan_content_sections (node_id, status, error, updated_at)
+    VALUES (@node_id, @status, @error, @updated_at)
+    ON CONFLICT(node_id) DO UPDATE SET
+      status = excluded.status,
+      error = excluded.error,
+      updated_at = excluded.updated_at
+  `);
+  const upsertGeneratedPlan = db.prepare(`
+    INSERT INTO technical_plan_content_plans (node_id, plan_json, updated_at)
+    VALUES (@node_id, @plan_json, @updated_at)
+    ON CONFLICT(node_id) DO UPDATE SET
+      plan_json = excluded.plan_json,
+      updated_at = excluded.updated_at
+  `);
+  function saveContentGenerationItemFields({ nodeId, section, storedPlan, runtime }) {
+    const timestamp = now();
+    if (section) {
+      updateGeneratedContent.run(String(section.content || ''), timestamp, nodeId);
+      upsertGeneratedSection.run({
+        node_id: nodeId,
+        status: normalizeStatus(section.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        error: section.error ? String(section.error) : null,
+        updated_at: section.updated_at || timestamp,
+      });
+    }
+    if (storedPlan) {
+      upsertGeneratedPlan.run({
+        node_id: nodeId,
+        plan_json: JSON.stringify({
+          plan_version: Number(storedPlan.plan_version),
+          plan: storedPlan.plan,
+          ...(storedPlan.table_requirement ? { table_requirement: storedPlan.table_requirement } : {}),
+        }),
+        updated_at: storedPlan.updated_at || timestamp,
+      });
+    }
+    if (runtime !== undefined) {
+      updateMeta({ content_generation_runtime_json: jsonOrNull(runtime) });
+    }
+  }
+
+  function clearDownstreamFromTender() {
+    deleteOutlineAgentTask();
+    deleteGlobalFactsAgentTask();
+    db.prepare('DELETE FROM technical_plan_tasks').run();
+    db.prepare('DELETE FROM technical_plan_bid_items').run();
+    db.prepare('DELETE FROM technical_plan_reference_docs').run();
+    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+    clearContentIllustrationPlan();
+    clearOriginalOutlineRuntime();
+    clearTechnicalPlanMermaidCache();
+    updateMeta({
+      step: 'document-analysis',
+      bid_analysis_mode: 'key',
+      bid_analysis_selected_task_ids_json: null,
+      outline_mode: 'aligned',
+      outline_expansion_mode: 'ai-complement',
+      outline_word_control_snapshot_json: null,
+      outline_project_name: null,
+      outline_project_overview: null,
+      global_facts_mode: 'fabricate',
+      content_generation_options_json: null,
+      content_generation_runtime_json: null,
+      pending_tender_markdown_path: null,
+      pending_tender_file_name: null,
+      pending_tender_parser_label: null,
+      pending_tender_sections_json: null,
+      pending_tender_total_declared: null,
+      pending_tender_created_at: null,
+      bid_section_mode: 'single',
+      bid_sections_json: null,
+      bid_section_extraction_status: 'idle',
+      bid_section_extraction_error: null,
+      selected_section_id: null,
+      selected_section_title: null,
+    });
+    notifyAgentWorkspaceChange({ force: true });
+  }
+
+  function clearDownstreamFromBidSectionChange() {
+    clearBidTemplate();
+    deleteOutlineAgentTask();
+    deleteGlobalFactsAgentTask();
+    db.prepare('DELETE FROM technical_plan_tasks').run();
+    db.prepare('DELETE FROM technical_plan_bid_items').run();
+    db.prepare('DELETE FROM technical_plan_reference_docs').run();
+    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+    clearContentIllustrationPlan();
+    clearOriginalOutlineRuntime();
+    clearTechnicalPlanMermaidCache();
+    updateMeta({
+      step: 'bid-analysis',
+      content_generation_options_json: null,
+      content_generation_runtime_json: null,
+      outline_word_control_snapshot_json: null,
+      outline_project_name: null,
+      outline_project_overview: null,
+    });
+    notifyAgentWorkspaceChange({ force: true });
+  }
+
+  function clearContentGenerationState() {
+    db.prepare("UPDATE technical_plan_outline_nodes SET content = '', updated_at = ?").run(now());
+    db.prepare('DELETE FROM technical_plan_content_sections').run();
+    db.prepare('DELETE FROM technical_plan_content_plans').run();
+    db.prepare("DELETE FROM technical_plan_tasks WHERE type = 'content-generation'").run();
+    clearContentIllustrationPlan();
+    clearTechnicalPlanMermaidCache();
+    updateMeta({ content_generation_runtime_json: null });
+  }
+
+  function clearDownstreamFromOriginalPlan() {
+    deleteOutlineAgentTask();
+    deleteGlobalFactsAgentTask();
+    db.prepare(`DELETE FROM technical_plan_tasks WHERE type IN (${originalPlanDownstreamTaskTypes.map(() => '?').join(', ')})`).run(...originalPlanDownstreamTaskTypes);
+    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+    db.prepare('DELETE FROM technical_plan_content_sections').run();
+    db.prepare('DELETE FROM technical_plan_content_plans').run();
+    clearContentIllustrationPlan();
+    clearOriginalOutlineRuntime();
+    clearTechnicalPlanMermaidCache();
+    updateMeta({
+      step: 'document-analysis',
+      outline_project_name: null,
+      outline_project_overview: null,
+      content_generation_runtime_json: null,
+      outline_word_control_snapshot_json: null,
+    });
+    notifyAgentWorkspaceChange({ force: true });
+  }
+
+  function assertNoTechnicalPlanTaskRunning() {
+    const row = db.prepare("SELECT type FROM technical_plan_tasks WHERE status IN ('running', 'pausing') LIMIT 1").get();
+    if (row) {
+      throw new Error('当前有技术方案任务正在运行，请等待任务结束后再切换模式');
+    }
+  }
+
+  // 正文任务活动或暂停期间禁止手工保存，避免清空待恢复的图片计划。
+  function assertContentEditingAllowed() {
+    const row = db.prepare("SELECT status FROM technical_plan_tasks WHERE type = 'content-generation' AND status IN ('running', 'pausing', 'paused') LIMIT 1").get();
+    if (row) {
+      throw new Error('当前正文生成任务正在运行或已暂停，请先完成任务再编辑正文');
+    }
+  }
+
+  function clearWorkflowSpecificState(workflowKind) {
+    deleteOutlineAgentTask();
+    deleteGlobalFactsAgentTask();
+    db.prepare(`DELETE FROM technical_plan_tasks WHERE type IN (${originalPlanDownstreamTaskTypes.map(() => '?').join(', ')})`).run(...originalPlanDownstreamTaskTypes);
+    db.prepare('DELETE FROM technical_plan_content_sections').run();
+    db.prepare('DELETE FROM technical_plan_content_plans').run();
+    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+    clearContentIllustrationPlan();
+    clearOriginalOutlineRuntime();
+    clearTechnicalPlanMermaidCache();
+    updateMeta({
+      workflow_kind: normalizeWorkflowKind(workflowKind),
+      step: 'document-analysis',
+      outline_expansion_mode: 'ai-complement',
+      global_facts_mode: 'fabricate',
+      original_plan_file_name: null,
+      original_plan_markdown_path: null,
+      original_plan_markdown_hash: null,
+      original_plan_markdown_chars: 0,
+      original_plan_parser_label: null,
+      original_plan_imported_at: null,
+      outline_project_name: null,
+      outline_project_overview: null,
+      outline_word_control_options_json: null,
+      outline_word_control_snapshot_json: null,
+      content_generation_options_json: null,
+      content_generation_runtime_json: null,
+    });
+    notifyAgentWorkspaceChange({ force: true });
+  }
+
+  function loadOutlinePersistenceSnapshot() {
+    return {
+      nodes: db.prepare('SELECT node_id, content FROM technical_plan_outline_nodes').all().reduce((acc, row) => {
+        acc[row.node_id] = { content: row.content || '' };
+        return acc;
+      }, {}),
+      sections: db.prepare('SELECT node_id, status, error, updated_at FROM technical_plan_content_sections').all(),
+      plans: db.prepare('SELECT node_id, plan_json, updated_at FROM technical_plan_content_plans').all(),
+    };
+  }
+
+  function assertOutlineMutationAllowed() {
+    const task = db.prepare("SELECT status FROM technical_plan_tasks WHERE type = 'content-generation'").get();
+    if (['running', 'pausing', 'paused'].includes(task?.status)) {
+      throw new Error('正文生成任务正在运行或暂停中，请结束后再调整目录');
+    }
+  }
+
+  function shouldClearSavedNode({ clearAll, oldId, newId, affectedIds }) {
+    return clearAll || affectedIds.has(oldId) || (!oldId && affectedIds.has(newId));
+  }
+
+  function buildOutlineWithPersistedContent(outlineData, { snapshot, reverseMap, affectedIds, clearAll }) {
+    if (!outlineData?.outline?.length) return outlineData;
+    return {
+      ...outlineData,
+      outline: mapOutlineItems(outlineData.outline, (item) => {
+        const newId = String(item?.id || '').trim();
+        const oldId = reverseMap.get(newId) || newId;
+        const clearContent = shouldClearSavedNode({ clearAll, oldId, newId, affectedIds });
+        const oldContent = snapshot.nodes[oldId]?.content;
+        return {
+          ...item,
+          content: clearContent ? '' : String(oldContent ?? item?.content ?? ''),
+        };
+      }),
+    };
+  }
+
+  function restoreMappedContentRows({ snapshot, idMap, affectedIds, nextIds, clearAll }) {
+    db.prepare('DELETE FROM technical_plan_content_sections').run();
+    db.prepare('DELETE FROM technical_plan_content_plans').run();
+
+    if (clearAll || !nextIds.size) return;
+
+    const insertSection = db.prepare(`
+      INSERT INTO technical_plan_content_sections (node_id, status, error, updated_at)
+      VALUES (@node_id, @status, @error, @updated_at)
+    `);
+    const seenSections = new Set();
+    for (const row of snapshot.sections) {
+      const oldId = String(row.node_id || '').trim();
+      const newId = idMap.get(oldId) || oldId;
+      if (!newId || !nextIds.has(newId) || seenSections.has(newId)) continue;
+      if (shouldClearSavedNode({ clearAll, oldId, newId, affectedIds })) continue;
+      seenSections.add(newId);
+      insertSection.run({
+        node_id: newId,
+        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        error: row.error || null,
+        updated_at: row.updated_at || now(),
+      });
+    }
+
+    const insertPlan = db.prepare(`
+      INSERT INTO technical_plan_content_plans (node_id, plan_json, updated_at)
+      VALUES (@node_id, @plan_json, @updated_at)
+    `);
+    const seenPlans = new Set();
+    for (const row of snapshot.plans) {
+      const oldId = String(row.node_id || '').trim();
+      const newId = idMap.get(oldId) || oldId;
+      if (!newId || !nextIds.has(newId) || seenPlans.has(newId)) continue;
+      if (shouldClearSavedNode({ clearAll, oldId, newId, affectedIds })) continue;
+      if (!row.plan_json) continue;
+      seenPlans.add(newId);
+      insertPlan.run({
+        node_id: newId,
+        plan_json: row.plan_json,
+        updated_at: row.updated_at || now(),
+      });
+    }
+  }
+
+  // 目录排序时使用临时编号同步主键和外键，避免删除重建正文状态与计划。
+  function saveSortedOutline(outlineData, idMap) {
+    const rows = flattenOutlineItems(outlineData?.outline || []);
+    const rowOrder = new Map(rows.map((row, index) => [row.node_id, index]));
+    const changedIds = [...idMap.entries()].filter(([oldId, newId]) => oldId !== newId);
+    const temporaryIds = new Map(changedIds.map(([oldId], index) => [oldId, `__outline_sort_${crypto.randomUUID()}_${index}`]));
+    db.pragma('defer_foreign_keys = ON');
+
+    for (const [oldId] of changedIds) {
+      const temporaryId = temporaryIds.get(oldId);
+      db.prepare('UPDATE technical_plan_outline_nodes SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
+      db.prepare('UPDATE technical_plan_content_sections SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
+      db.prepare('UPDATE technical_plan_content_plans SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
+    }
+    for (const [oldId] of changedIds) {
+      db.prepare('UPDATE technical_plan_outline_nodes SET parent_node_id = ? WHERE parent_node_id = ?').run(temporaryIds.get(oldId), oldId);
+    }
+    for (const [oldId, newId] of changedIds) {
+      const temporaryId = temporaryIds.get(oldId);
+      db.prepare('UPDATE technical_plan_outline_nodes SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
+      db.prepare('UPDATE technical_plan_content_sections SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
+      db.prepare('UPDATE technical_plan_content_plans SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
+      db.prepare('UPDATE technical_plan_outline_nodes SET parent_node_id = ? WHERE parent_node_id = ?').run(newId, temporaryId);
+    }
+
+    const updateNode = db.prepare(`
+      UPDATE technical_plan_outline_nodes
+      SET parent_node_id = @parent_node_id,
+        sort_order = @sort_order,
+        level = @level,
+        updated_at = @updated_at
+      WHERE node_id = @node_id
+    `);
+    const timestamp = now();
+    rows.forEach((row) => updateNode.run({ ...row, updated_at: timestamp }));
+    updateMeta({
+      outline_project_name: outlineData?.project_name || null,
+      outline_project_overview: outlineData?.project_overview || null,
+    });
+
+    const updateIllustration = db.prepare('UPDATE technical_plan_illustration_items SET section_ids_json = ?, updated_at = ? WHERE item_id = ?');
+    for (const item of db.prepare('SELECT item_id, section_ids_json FROM technical_plan_illustration_items').all()) {
+      const sectionIds = safeJsonParse(item.section_ids_json, [])
+        .map((sectionId) => idMap.get(String(sectionId)) || String(sectionId))
+        .sort((left, right) => (rowOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
+      updateIllustration.run(JSON.stringify(sectionIds), timestamp, item.item_id);
+    }
+
+    const meta = readMetaRow();
+    if (meta.content_generation_runtime_json) {
+      const runtime = remapContentRuntimeIds(safeJsonParse(meta.content_generation_runtime_json, {}), idMap);
+      db.prepare('UPDATE technical_plan_meta SET content_generation_runtime_json = ?, updated_at = ? WHERE id = 1')
+        .run(JSON.stringify(runtime), timestamp);
+    }
+    const contentTask = db.prepare("SELECT stats_json FROM technical_plan_tasks WHERE type = 'content-generation'").get();
+    if (contentTask?.stats_json) {
+      const stats = remapContentTaskStats(safeJsonParse(contentTask.stats_json, {}), idMap);
+      db.prepare("UPDATE technical_plan_tasks SET stats_json = ? WHERE type = 'content-generation'").run(JSON.stringify(stats));
+    }
+  }
+
+  function applyPartial(partial) {
+    const meta = ensureMetaRow();
+    const metaUpdates = {};
+    const invalidatesContentGeneration = partial.invalidateContentGeneration === true;
+
+    if (hasOwn(partial, 'workflowKind')) metaUpdates.workflow_kind = normalizeWorkflowKind(partial.workflowKind);
+    if (hasOwn(partial, 'step') && isValidStep(partial.step)) metaUpdates.step = partial.step;
+    if (hasOwn(partial, 'bidAnalysisMode') && isValidBidMode(partial.bidAnalysisMode)) metaUpdates.bid_analysis_mode = partial.bidAnalysisMode;
+    if (hasOwn(partial, 'bidAnalysisSelectedTaskIds')) metaUpdates.bid_analysis_selected_task_ids_json = jsonOrNull(normalizeBidAnalysisTaskIds(partial.bidAnalysisSelectedTaskIds));
+    if (hasOwn(partial, 'bidSectionMode')) metaUpdates.bid_section_mode = normalizeBidSectionMode(partial.bidSectionMode);
+    if (hasOwn(partial, 'bidSections')) metaUpdates.bid_sections_json = jsonOrNull(normalizeBidSections(partial.bidSections));
+    if (hasOwn(partial, 'bidSectionExtractionStatus')) metaUpdates.bid_section_extraction_status = normalizeBidSectionExtractionStatus(partial.bidSectionExtractionStatus);
+    if (hasOwn(partial, 'bidSectionExtractionError')) metaUpdates.bid_section_extraction_error = partial.bidSectionExtractionError ? String(partial.bidSectionExtractionError) : null;
+    if (hasOwn(partial, 'outlineMode') && isValidOutlineMode(partial.outlineMode)) metaUpdates.outline_mode = partial.outlineMode;
+    if (hasOwn(partial, 'outlineExpansionMode') && isValidOutlineExpansionMode(partial.outlineExpansionMode)) metaUpdates.outline_expansion_mode = partial.outlineExpansionMode;
+    if (hasOwn(partial, 'globalFactsMode')) metaUpdates.global_facts_mode = normalizeGlobalFactsMode(partial.globalFactsMode);
+    if (hasOwn(partial, 'outlineWordControlOptions')) metaUpdates.outline_word_control_options_json = jsonOrNull(normalizeOutlineWordControlOptions(partial.outlineWordControlOptions));
+    if (hasOwn(partial, 'outlineWordControlSnapshot')) {
+      metaUpdates.outline_word_control_snapshot_json = partial.outlineWordControlSnapshot === undefined || partial.outlineWordControlSnapshot === null
+        ? null
+        : JSON.stringify(normalizeOutlineWordControlOptions(partial.outlineWordControlSnapshot));
+    }
+    if (hasOwn(partial, 'contentGenerationOptions')) metaUpdates.content_generation_options_json = jsonOrNull(partial.contentGenerationOptions);
+    if (!invalidatesContentGeneration && hasOwn(partial, 'contentGenerationRuntime')) metaUpdates.content_generation_runtime_json = jsonOrNull(partial.contentGenerationRuntime);
+
+    if (Object.keys(metaUpdates).length) updateMeta(metaUpdates);
+
+    const nextBidMode = isValidBidMode(partial.bidAnalysisMode) ? partial.bidAnalysisMode : meta.bid_analysis_mode;
+    if (hasOwn(partial, 'referenceKnowledgeDocumentIds')) replaceReferenceDocumentIds(partial.referenceKnowledgeDocumentIds);
+    if (!invalidatesContentGeneration && hasOwn(partial, 'contentIllustrationPlan')) replaceContentIllustrationPlan(partial.contentIllustrationPlan);
+    if (hasOwn(partial, 'contentIllustrationItem')) saveContentIllustrationItem(partial.contentIllustrationItem);
+    if (hasOwn(partial, 'bidAnalysisTasks')) saveBidItems(partial.bidAnalysisTasks, nextBidMode);
+    if (hasOwn(partial, 'bidAnalysisItem')) saveBidItem(partial.bidAnalysisItem, nextBidMode);
+    if (hasOwn(partial, 'projectOverview')) upsertDerivedBidItem('projectOverview', partial.projectOverview, nextBidMode);
+    if (hasOwn(partial, 'techRequirements')) upsertDerivedBidItem('techRequirements', partial.techRequirements, nextBidMode);
+    if (hasOwn(partial, 'globalFacts')) {
+      replaceGlobalFacts(partial.globalFacts);
+    }
+
+    if (invalidatesContentGeneration) clearContentGenerationState();
+
+    for (const [field, type] of Object.entries(taskFieldTypes)) {
+      if (invalidatesContentGeneration && field === 'contentGenerationTask') continue;
+      if (hasOwn(partial, field)) saveTask(type, partial[field]);
+    }
+
+    if (hasOwn(partial, 'outlineData')) {
+      if (partial.outlineData === null) {
+        db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+        updateMeta({
+          outline_project_name: null,
+          outline_project_overview: null,
+          outline_word_control_snapshot_json: null,
+        });
+      } else {
+        saveOutlineData(partial.outlineData);
+        if (!partial.outlineData?.outline?.length) {
+          updateMeta({ outline_word_control_snapshot_json: null });
+        }
+      }
+    }
+
+    if (!invalidatesContentGeneration && hasOwn(partial, 'contentGenerationSections')) saveContentSections(partial.contentGenerationSections);
+    if (!invalidatesContentGeneration && hasOwn(partial, 'contentGenerationPlans')) saveContentPlans(partial.contentGenerationPlans);
+    if (hasOwn(partial, 'contentGenerationItem')) saveContentGenerationItemFields(partial.contentGenerationItem);
+  }
+
+  function loadTechnicalPlan() {
+    const meta = readMetaRow();
+    const bidAnalysisMode = isValidBidMode(meta.bid_analysis_mode) ? meta.bid_analysis_mode : 'key';
+    const bidAnalysisSelectedTaskIds = getBidAnalysisTaskIdsForConfig(
+      bidAnalysisMode,
+      safeJsonParse(meta.bid_analysis_selected_task_ids_json, []),
+    );
+    const bidAnalysisTasks = loadBidItems();
+    const outlineData = loadOutlineData(meta);
+    const tasks = loadTasks();
+    const bidSections = normalizeBidSections(safeJsonParse(meta.bid_sections_json, []));
+    const bidSectionExtractionTask = tasks.bidSectionExtractionTask;
+    const tenderFiles = loadTenderSourceFiles(meta);
+    const tenderFile = meta.tender_markdown_path ? {
+      fileName: meta.tender_file_name || '技术方案招标文件',
+      markdownPath: meta.tender_markdown_path,
+      markdownChars: Number(meta.tender_markdown_chars || 0),
+      contentHash: meta.tender_markdown_hash || '',
+      originalMarkdownPath: meta.tender_original_markdown_path || meta.tender_markdown_path,
+      originalMarkdownChars: Number(meta.tender_original_markdown_chars || meta.tender_markdown_chars || 0),
+      originalContentHash: meta.tender_original_markdown_hash || meta.tender_markdown_hash || '',
+      parserLabel: meta.tender_parser_label || undefined,
+      importedAt: meta.tender_imported_at || undefined,
+      selectedSectionId: meta.selected_section_id || undefined,
+      selectedSectionTitle: meta.selected_section_title || undefined,
+      updatedAt: meta.updated_at,
+    } : null;
+    const originalPlanFile = meta.original_plan_markdown_path ? {
+      fileName: meta.original_plan_file_name || '原方案',
+      markdownPath: meta.original_plan_markdown_path,
+      markdownChars: Number(meta.original_plan_markdown_chars || 0),
+      contentHash: meta.original_plan_markdown_hash || '',
+      parserLabel: meta.original_plan_parser_label || undefined,
+      importedAt: meta.original_plan_imported_at || undefined,
+      updatedAt: meta.updated_at,
+    } : null;
+
+    return {
+      ...initialState,
+      workflowKind: normalizeWorkflowKind(meta.workflow_kind),
+      step: isValidStep(meta.step) ? meta.step : 'document-analysis',
+      tenderFile,
+      tenderFiles,
+      originalPlanFile,
+      projectOverview: bidAnalysisTasks.projectOverview?.status === 'success' ? bidAnalysisTasks.projectOverview.content : '',
+      techRequirements: bidAnalysisTasks.techRequirements?.status === 'success' ? bidAnalysisTasks.techRequirements.content : '',
+      bidAnalysisMode,
+      bidAnalysisSelectedTaskIds,
+      bidAnalysisTasks,
+      bidAnalysisProgress: calculateBidProgress(bidAnalysisMode, bidAnalysisTasks, bidAnalysisSelectedTaskIds),
+      bidSectionMode: normalizeBidSectionMode(meta.bid_section_mode),
+      bidSections,
+      bidSectionExtractionStatus: bidSectionExtractionTask?.status
+        ? normalizeBidSectionExtractionStatus(bidSectionExtractionTask.status)
+        : normalizeBidSectionExtractionStatus(meta.bid_section_extraction_status),
+      bidSectionExtractionError: bidSectionExtractionTask?.error || meta.bid_section_extraction_error || undefined,
+      outlineMode: isValidOutlineMode(meta.outline_mode) ? meta.outline_mode : 'aligned',
+      outlineExpansionMode: isValidOutlineExpansionMode(meta.outline_expansion_mode) ? meta.outline_expansion_mode : 'ai-complement',
+      globalFactsMode: normalizeGlobalFactsMode(meta.global_facts_mode),
+      outlineWordControlOptions: normalizeOutlineWordControlOptions(safeJsonParse(meta.outline_word_control_options_json, defaultOutlineWordControlOptions)),
+      outlineWordControlSnapshot: meta.outline_word_control_snapshot_json
+        ? normalizeOutlineWordControlOptions(safeJsonParse(meta.outline_word_control_snapshot_json, defaultOutlineWordControlOptions))
+        : undefined,
+      referenceKnowledgeDocumentIds: loadReferenceDocumentIds(),
+      ...tasks,
+      globalFacts: loadGlobalFacts(),
+      contentGenerationOptions: safeJsonParse(meta.content_generation_options_json, undefined),
+      contentGenerationRuntime: safeJsonParse(meta.content_generation_runtime_json, undefined),
+      contentIllustrationPlan: loadContentIllustrationPlan(),
+      bidTemplateExists: fs.existsSync(bidTemplatePath) && fs.existsSync(bidTemplateFieldsPath),
+      contentGenerationSections: loadContentSections(outlineData),
+      contentGenerationPlans: loadContentPlans(),
+      outlineData,
+    };
+  }
+
+  const updateTechnicalPlanTransaction = db.transaction((partial) => {
+    applyPartial(partial || {});
+  });
+
+  // 应用技术方案局部更新，但不重新加载完整工作区状态。
+  function updateTechnicalPlanWithoutReload(partial) {
+    const shouldClearMermaidCache = shouldClearMermaidCacheForPartial(partial);
+    updateTechnicalPlanTransaction(partial || {});
+    const deletedAgentSessions = hasOwn(partial, 'outlineData') && partial.outlineData === null;
+    if (deletedAgentSessions) {
+      deleteOutlineAgentTask();
+      deleteGlobalFactsAgentTask();
+    }
+    if (shouldClearMermaidCache) {
+      clearTechnicalPlanMermaidCache();
+    }
+    if (deletedAgentSessions || hasOwn(partial, 'step') || hasOwn(partial, 'outlineData') || hasOwn(partial, 'globalFacts')) {
+      notifyAgentWorkspaceChange({ force: deletedAgentSessions });
+    }
+  }
+
+  function updateTechnicalPlan(partial) {
+    updateTechnicalPlanWithoutReload(partial);
+  }
+
+  function updateStep(step) {
+    return updateTechnicalPlan({ step });
+  }
+
+  function setWorkflowKind(workflowKind) {
+    return updateTechnicalPlan({ workflowKind: normalizeWorkflowKind(workflowKind) });
+  }
+
+  function switchWorkflowKind(workflowKind) {
+    const nextWorkflowKind = normalizeWorkflowKind(workflowKind);
+    const meta = ensureMetaRow();
+    if (normalizeWorkflowKind(meta.workflow_kind) === nextWorkflowKind) {
+      return;
+    }
+
+    const originalPlanFilePath = meta.original_plan_markdown_path
+      ? resolveMarkdownPath(meta.original_plan_markdown_path)
+      : originalPlanMarkdownPath;
+    const transaction = db.transaction(() => {
+      assertNoTechnicalPlanTaskRunning();
+      clearWorkflowSpecificState(nextWorkflowKind);
+    });
+    transaction();
+    if (fs.existsSync(originalPlanFilePath)) {
+      fs.rmSync(originalPlanFilePath, { force: true });
+    }
+  }
+
+  function saveOutlineConfig({ referenceKnowledgeDocumentIds, outlineMode, outlineExpansionMode, wordControlOptions } = {}) {
+    updateTechnicalPlan({
+      outlineMode: isValidOutlineMode(outlineMode) ? outlineMode : 'aligned',
+      outlineExpansionMode: isValidOutlineExpansionMode(outlineExpansionMode) ? outlineExpansionMode : 'ai-complement',
+      outlineWordControlOptions: normalizeOutlineWordControlOptions(wordControlOptions),
+      referenceKnowledgeDocumentIds,
+    });
+  }
+
+  // 保存用户确认后的一级目录待扩展选择，不写入正式目录树。
+  function saveOutlineSelection({ taskId, items, selectedIds } = {}) {
+    const task = loadTask('outline-generation');
+    if (!task || task.task_id !== taskId || task.status !== 'success') {
+      throw new Error('一级目录生成结果已变化，请重新打开后再选择');
+    }
+
+    updateTechnicalPlan({
+      outlineGenerationTask: {
+        ...task,
+        updated_at: now(),
+        stats: {
+          ...(task.stats || {}),
+          outline_selection: {
+            items,
+            selected_ids: selectedIds,
+            confirmed: true,
+          },
+        },
+      },
+    });
+  }
+
+  function resetTenderWorkingCopyToOriginal() {
+    const originalMarkdown = readOriginalTenderMarkdown().trim();
+    if (!originalMarkdown) {
+      return;
+    }
+    writeMarkdownFile(tenderMarkdownPath, originalMarkdown, 'tender');
+    updateMeta({
+      tender_markdown_path: tenderMarkdownRelativePath,
+      tender_markdown_hash: stableHash(originalMarkdown),
+      tender_markdown_chars: originalMarkdown.length,
+    });
+  }
+
+  function saveBidAnalysisConfig({ mode, selectedTaskIds, bidSectionMode } = {}) {
+    const config = normalizeBidAnalysisConfig(mode, selectedTaskIds);
+    const nextSectionMode = bidSectionMode === undefined ? null : normalizeBidSectionMode(bidSectionMode);
+    const meta = ensureMetaRow();
+    const shouldChangeSectionMode = nextSectionMode && nextSectionMode !== normalizeBidSectionMode(meta.bid_section_mode);
+    if (!shouldChangeSectionMode) {
+      updateTechnicalPlan({
+        bidAnalysisMode: config.mode,
+        bidAnalysisSelectedTaskIds: config.selectedTaskIds,
+      });
+      return;
+    }
+
+    const transaction = db.transaction(() => {
+      clearDownstreamFromBidSectionChange();
+      if (nextSectionMode === 'single' || nextSectionMode === 'multiple') {
+        resetTenderWorkingCopyToOriginal();
+      }
+      updateMeta({
+        bid_analysis_mode: config.mode,
+        bid_analysis_selected_task_ids_json: jsonOrNull(config.selectedTaskIds),
+        bid_section_mode: nextSectionMode,
+        bid_sections_json: null,
+        bid_section_extraction_status: 'idle',
+        bid_section_extraction_error: null,
+        selected_section_id: null,
+        selected_section_title: null,
+      });
+    });
+    transaction();
+  }
+
+  function prepareBidSectionExtraction() {
+    const transaction = db.transaction(() => {
+      clearDownstreamFromBidSectionChange();
+      resetTenderWorkingCopyToOriginal();
+      updateMeta({
+        bid_section_mode: 'multiple',
+        bid_sections_json: null,
+        bid_section_extraction_status: 'running',
+        bid_section_extraction_error: null,
+        selected_section_id: null,
+        selected_section_title: null,
+      });
+    });
+    transaction();
+  }
+
+  function saveOutline(payload) {
+    const request = payload?.outlineData ? payload : { outlineData: payload, reason: 'replace' };
+    const outlineData = request?.outlineData;
+    const reason = normalizeOutlineSaveReason(request?.reason);
+    const idMap = normalizeStringMap(request?.idMap);
+    const reverseMap = reverseIdMap(idMap);
+    const affectedIds = normalizeStringSet(request?.affectedNodeIds);
+    const clearAll = reason === 'replace';
+    const invalidatesContentTask = reason !== 'sort';
+
+    let savedOutlineData = outlineData;
+    let savedIllustrationPlan;
+    const transaction = db.transaction(() => {
+      assertOutlineMutationAllowed();
+      if (reason === 'sort') {
+        saveSortedOutline(outlineData, idMap);
+        savedIllustrationPlan = loadContentIllustrationPlan();
+        return;
+      }
+      const snapshot = loadOutlinePersistenceSnapshot();
+      const outlineToSave = buildOutlineWithPersistedContent(outlineData, { snapshot, reverseMap, affectedIds, clearAll });
+      savedOutlineData = outlineToSave;
+      saveOutlineData(outlineToSave);
+      if (!outlineToSave?.outline?.length) {
+        updateMeta({ outline_word_control_snapshot_json: null });
+      }
+      const rows = flattenOutlineItems(outlineToSave?.outline || []);
+      const nextIds = new Set(rows.map((row) => row.node_id));
+      restoreMappedContentRows({ snapshot, idMap, affectedIds, nextIds, clearAll });
+      if (invalidatesContentTask) {
+        db.prepare("DELETE FROM technical_plan_tasks WHERE type = 'content-generation'").run();
+        clearTechnicalPlanMermaidCache();
+        updateMeta({ content_generation_runtime_json: null });
+      }
+      clearContentIllustrationPlan();
+    });
+    transaction();
+    const sortedContentRuntime = reason === 'sort'
+      ? safeJsonParse(readMetaRow().content_generation_runtime_json, undefined)
+      : undefined;
+    const sortedContentTask = reason === 'sort' ? loadTask('content-generation') : undefined;
+    return {
+      outlineData: savedOutlineData,
+      contentIllustrationPlan: reason === 'sort' ? savedIllustrationPlan : undefined,
+      ...(reason === 'sort' ? {
+        contentGenerationTask: sortedContentTask,
+        contentGenerationRuntime: sortedContentRuntime,
+      } : {}),
+      ...(invalidatesContentTask ? {
+        contentGenerationTask: undefined,
+        contentGenerationRuntime: undefined,
+      } : {}),
+    };
+  }
+
+  function saveGlobalFactsConfig({ globalFactsMode } = {}) {
+    const normalized = normalizeGlobalFactsMode(globalFactsMode);
+    updateTechnicalPlan({ globalFactsMode: normalized });
+    return { globalFactsMode: normalized };
+  }
+
+  function saveGlobalFacts(globalFacts) {
+    const normalizedGlobalFacts = normalizeGlobalFactGroups(globalFacts);
+    let savedTask;
+    const transaction = db.transaction(() => {
+      replaceGlobalFacts(normalizedGlobalFacts);
+      clearContentGenerationState();
+      const timestamp = now();
+      savedTask = {
+        task_id: `manual-global-facts-${Date.now()}`,
+        type: 'global-facts-generation',
+        status: 'success',
+        progress: 100,
+        logs: ['全局事实已保存。'],
+        started_at: timestamp,
+        updated_at: timestamp,
+      };
+      saveTask('global-facts-generation', savedTask);
+    });
+    transaction();
+    return {
+      globalFacts: normalizedGlobalFacts,
+      globalFactsTask: savedTask,
+      contentGenerationTask: undefined,
+      contentGenerationSections: {},
+      contentGenerationPlans: {},
+      contentIllustrationPlan: undefined,
+      contentGenerationRuntime: undefined,
+    };
+  }
+
+  function saveContentGenerationOptions(contentGenerationOptions) {
+    updateTechnicalPlan({ contentGenerationOptions, contentIllustrationPlan: undefined });
+    return { contentGenerationOptions, contentIllustrationPlan: undefined };
+  }
+
+  function saveChapterContent({ nodeId, content }) {
+    const transaction = db.transaction(() => {
+      assertContentEditingAllowed();
+      const timestamp = now();
+      const node = db.prepare('SELECT node_id, title FROM technical_plan_outline_nodes WHERE node_id = ?').get(nodeId);
+      if (!node) throw new Error('当前目录中未找到该章节');
+      const nextContent = String(content || '');
+      db.prepare('UPDATE technical_plan_outline_nodes SET content = ?, updated_at = ? WHERE node_id = ?').run(nextContent, timestamp, nodeId);
+      db.prepare(`
+        INSERT INTO technical_plan_content_sections (node_id, status, error, updated_at)
+        VALUES (?, ?, NULL, ?)
+        ON CONFLICT(node_id) DO UPDATE SET status = excluded.status, error = NULL, updated_at = excluded.updated_at
+      `).run(nodeId, nextContent.trim() ? 'success' : 'idle', timestamp);
+      clearContentIllustrationPlan();
+    });
+    transaction();
+    return { contentIllustrationPlan: undefined };
+  }
+
+  async function runBeforeCommit(beforeCommit) {
+    if (typeof beforeCommit === 'function') {
+      await beforeCommit();
+    }
+  }
+
+  async function importTenderDocument(filePaths, options = {}) {
+    if (!fileService?.importDocument) {
+      throw new Error('文件导入服务尚未初始化');
+    }
+
+    const result = await fileService.importDocument({ multiple: true, filePaths });
+    if (!result?.success || !result.file_content) {
+      return {
+        success: false,
+        message: result?.message || '未导入文件',
+        markdown: '',
+      };
+    }
+
+    const importedDocuments = Array.isArray(result.documents) && result.documents.length ? result.documents : [result];
+    const existingSourceDocuments = loadTenderSourceFiles().map((file) => {
+      const markdown = String(readTenderSourceMarkdown(file.id) || '').trim();
+      return markdown ? {
+        file_content: markdown,
+        file_name: file.fileName,
+        parser_label: file.parserLabel,
+        content_hash: file.contentHash || stableHash(markdown),
+        source_docx_path: file.sourceDocxPath,
+      } : null;
+    }).filter(Boolean);
+    const existingKeys = new Set(existingSourceDocuments.map((item) => `${item.file_name}\u0000${item.content_hash}`));
+    const existingOriginalPaths = new Set(existingSourceDocuments
+      .map((item) => String(item.source_docx_path || '').trim())
+      .filter(Boolean)
+      .map((item) => filePathKey(resolveMarkdownPath(item))));
+    const addedDocuments = [];
+    let skippedCount = 0;
+    importedDocuments.forEach((item) => {
+      const markdown = String(item.file_content || '').trim();
+      if (!markdown) return;
+      const fileName = item.file_name || '未命名文件';
+      const key = `${fileName}\u0000${stableHash(markdown)}`;
+      const sourcePath = String(item.source_path || '').trim();
+      if (existingKeys.has(key) || (sourcePath && existingOriginalPaths.has(filePathKey(sourcePath)))) {
+        skippedCount += 1;
+        return;
+      }
+      existingKeys.add(key);
+      addedDocuments.push(item);
+    });
+
+    if (!addedDocuments.length) {
+      const messageParts = [];
+      if (skippedCount > 0) messageParts.push(`已跳过 ${skippedCount} 份重复文件`);
+      appendImportFailureParts(messageParts, result.errors);
+      return {
+        success: false,
+        message: messageParts.join('，') || result.message || '未导入文件',
+        markdown: '',
+      };
+    }
+
+    await runBeforeCommit(options.beforeCommit);
+    clearBidTemplate();
+    cleanupPendingTenderSelection();
+
+    const mergedDocuments = [...existingSourceDocuments, ...addedDocuments];
+    pruneTenderOriginals([
+      ...existingSourceDocuments.map((item) => item.source_docx_path),
+      ...addedDocuments.map((item) => item.source_path),
+    ].filter(Boolean), 'import-preflight');
+    for (let index = 0; index < mergedDocuments.length; index += 1) {
+      const item = mergedDocuments[index];
+      const sourcePath = String(item.source_path || '').trim();
+      if (!sourcePath || item.source_docx_path || !fileService?.persistTenderSourceDocx) continue;
+      const sourceId = createTenderSourceId(item.file_name || '未命名文件', String(item.file_content || '').trim(), index);
+      const relativePath = path.join(tenderOriginalsDirRelativePath, `${sourceId}.docx`).replace(/\\/g, '/');
+      const destPath = resolveMarkdownPath(relativePath);
+      const managedRelativePath = getManagedTenderOriginalRelativePath(sourcePath);
+      if (managedRelativePath) {
+        item.source_docx_path = managedRelativePath;
+        tenderOriginalLogger.write('tender-original.persist.reused', { phase: 'import', source_path: sourcePath });
+        continue;
+      }
+      tenderOriginalLogger.write('tender-original.persist.started', { phase: 'import', source_path: sourcePath, dest_path: destPath });
+      try {
+        const persisted = filePathKey(sourcePath) === filePathKey(destPath)
+          ? true
+          : await fileService.persistTenderSourceDocx(sourcePath, destPath);
+        if (persisted) item.source_docx_path = relativePath;
+        tenderOriginalLogger.write('tender-original.persist.completed', { phase: 'import', source_path: sourcePath, dest_path: destPath, persisted: Boolean(persisted) });
+      } catch (error) {
+        tenderOriginalLogger.write('tender-original.persist.failed', {
+          phase: 'import',
+          source_path: sourcePath,
+          dest_path: destPath,
+          code: error?.code,
+          syscall: error?.syscall,
+          error: compactLogError(error),
+        });
+        throw new Error(`${item.file_name || '招标文件'}：无法保存 Word 原件，${error.message || error}`);
+      }
+    }
+    const markdown = combineTenderMarkdown(mergedDocuments.map((item) => item.file_content));
+    const fileName = mergedDocuments.length > 1 ? `${mergedDocuments.length} 份招标文件` : mergedDocuments[0].file_name || '未命名文件';
+    const parserLabel = mergedDocuments.length > 1 ? null : mergedDocuments[0].parser_label || null;
+    const messageParts = [`已解析 ${addedDocuments.length} 份招标文件`];
+    if (result.fallbackToLocal === true || mergedDocuments.some((item) => item.fallback_to_local)) {
+      messageParts.push('当前格式已自动使用本地解析');
+    }
+    if (skippedCount > 0) messageParts.push(`跳过 ${skippedCount} 份重复文件`);
+    appendImportFailureParts(messageParts, result.errors);
+
+    return saveTenderMarkdownAndState(markdown, {
+      fileName,
+      parserLabel,
+      message: messageParts.join('，'),
+      fallbackToLocal: result.fallbackToLocal === true,
+      resetOriginal: true,
+      sourceFiles: mergedDocuments,
+    });
+  }
+
+  async function removeTenderDocument(sourceId, options = {}) {
+    const targetId = String(sourceId || '');
+    const existingFiles = loadTenderSourceFiles();
+    const remainingFiles = existingFiles.filter((file) => file.id !== targetId);
+    if (!targetId || remainingFiles.length === existingFiles.length) {
+      return { success: false, message: '未找到要删除的招标文件', markdown: '' };
+    }
+
+    await runBeforeCommit(options.beforeCommit);
+    clearBidTemplate();
+    if (!remainingFiles.length) {
+      clearTenderSourceFiles('remove-last-tender');
+      removeWorkspacePathSync(tenderMarkdownPath);
+      removeWorkspacePathSync(tenderOriginalMarkdownPath);
+      const transaction = db.transaction(() => {
+        clearDownstreamFromTender();
+        updateMeta({
+          tender_file_name: null,
+          tender_markdown_path: null,
+          tender_markdown_hash: null,
+          tender_markdown_chars: 0,
+          tender_original_markdown_path: null,
+          tender_original_markdown_hash: null,
+          tender_original_markdown_chars: 0,
+          tender_parser_label: null,
+          tender_imported_at: null,
+          tender_files_json: null,
+          selected_section_id: null,
+          selected_section_title: null,
+        });
+      });
+      transaction();
+      return { success: true, message: '已移除招标文件', markdown: '' };
+    }
+
+    const sourceFiles = remainingFiles.map((file) => ({
+      file_content: String(readTenderSourceMarkdown(file.id) || '').trim(),
+      file_name: file.fileName,
+      parser_label: file.parserLabel,
+      source_docx_path: file.sourceDocxPath,
+    })).filter((item) => item.file_content);
+    const markdown = combineTenderMarkdown(sourceFiles.map((item) => item.file_content));
+    const fileName = sourceFiles.length > 1 ? `${sourceFiles.length} 份招标文件` : sourceFiles[0]?.file_name || '未命名文件';
+    const parserLabel = sourceFiles.length > 1 ? null : sourceFiles[0]?.parser_label || null;
+    return saveTenderMarkdownAndState(markdown, {
+      fileName,
+      parserLabel,
+      message: '已移除招标文件',
+      resetOriginal: true,
+      sourceFiles,
+    });
+  }
+
+  async function importOriginalPlanDocument(filePaths, options = {}) {
+    const importer = fileService?.importTechnicalPlanDocument || fileService?.importDocument;
+    if (!importer) {
+      throw new Error('文件导入服务尚未初始化');
+    }
+
+    const result = fileService.importTechnicalPlanDocument
+      ? await fileService.importTechnicalPlanDocument('原方案', { filePaths })
+      : await importer({ filePaths });
+    if (!result?.success || !result.file_content) {
+      return {
+        success: false,
+        message: result?.message || '未导入文件',
+        markdown: '',
+      };
+    }
+
+    const markdown = String(result.file_content || '').trim();
+    const fileName = result.file_name || '未命名文件';
+    const parserLabel = result.parser_label || null;
+    await runBeforeCommit(options.beforeCommit);
+    const targetDir = path.dirname(originalPlanMarkdownPath);
+    const tempPath = path.join(targetDir, `original-plan-${Date.now()}.tmp.md`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(tempPath, `${markdown}\n`, 'utf-8');
+
+    try {
+      fs.renameSync(tempPath, originalPlanMarkdownPath);
+      const timestamp = now();
+      const transaction = db.transaction(() => {
+        updateMeta({
+          workflow_kind: 'existing-plan-expansion',
+          original_plan_file_name: fileName,
+          original_plan_markdown_path: originalPlanMarkdownRelativePath,
+          original_plan_markdown_hash: stableHash(markdown),
+          original_plan_markdown_chars: markdown.length,
+          original_plan_parser_label: parserLabel || null,
+          original_plan_imported_at: timestamp,
+        });
+        clearDownstreamFromOriginalPlan();
+      });
+      transaction();
+      return {
+        success: true,
+        message: result.message || '原方案已导入',
+        markdown,
+      };
+    } catch (error) {
+      if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      throw error;
+    }
+  }
+
+  function saveTenderMarkdownAndState(markdown, { fileName, parserLabel, message, selectedSection, fallbackToLocal, resetOriginal, sourceFiles }) {
+    const nextMarkdown = String(markdown || '').trim();
+    if (Array.isArray(sourceFiles)) {
+      clearBidTemplate();
+      if (fs.existsSync(tenderSourceFilesDir)) {
+        removeWorkspacePathSync(tenderSourceFilesDir);
+      }
+    }
+    const tenderSourceFiles = Array.isArray(sourceFiles)
+      ? sourceFiles.map(writeTenderSourceMarkdown)
+      : undefined;
+    if (tenderSourceFiles) {
+      pruneTenderOriginals(tenderSourceFiles.map((file) => file.sourceDocxPath).filter(Boolean));
+    }
+    writeMarkdownFile(tenderMarkdownPath, nextMarkdown, 'tender');
+    if (resetOriginal) {
+      writeMarkdownFile(tenderOriginalMarkdownPath, nextMarkdown, 'tender-original');
+    }
+
+    const timestamp = now();
+    const transaction = db.transaction(() => {
+      clearDownstreamFromTender();
+      updateMeta({
+        tender_file_name: fileName || '未命名文件',
+        tender_markdown_path: tenderMarkdownRelativePath,
+        tender_markdown_hash: stableHash(nextMarkdown),
+        tender_markdown_chars: nextMarkdown.length,
+        tender_original_markdown_path: resetOriginal ? tenderOriginalMarkdownRelativePath : undefined,
+        tender_original_markdown_hash: resetOriginal ? stableHash(nextMarkdown) : undefined,
+        tender_original_markdown_chars: resetOriginal ? nextMarkdown.length : undefined,
+        tender_parser_label: parserLabel || null,
+        tender_imported_at: timestamp,
+        tender_files_json: tenderSourceFiles ? JSON.stringify(tenderSourceFiles) : undefined,
+        selected_section_id: selectedSection?.id || null,
+        selected_section_title: selectedSection?.title || null,
+      });
+    });
+    transaction();
+    return {
+      success: true,
+      message: message || (fallbackToLocal ? '文件解析完成，当前格式已自动使用本地解析' : '招标文件已导入'),
+      markdown: nextMarkdown,
+    };
+  }
+
+  function selectBidSection(selectedSection) {
+    const selected = selectedSection || {};
+    const meta = ensureMetaRow();
+    const aiSections = normalizeBidSections(safeJsonParse(meta.bid_sections_json, []));
+
+    if (aiSections.length >= 2) {
+      const matched = aiSections.find((section) => section.id === selected.id) || selected;
+      const originalMarkdown = readOriginalTenderMarkdown().trim();
+      if (!originalMarkdown) {
+        throw new Error('原始招标文件内容为空，请重新上传');
+      }
+      const workingMarkdown = buildSelectedSectionMarkdown(originalMarkdown, aiSections, matched.id);
+      clearBidTemplate();
+      writeMarkdownFile(tenderMarkdownPath, workingMarkdown, 'tender');
+      const transaction = db.transaction(() => {
+        clearDownstreamFromBidSectionChange();
+        updateMeta({
+          tender_markdown_path: tenderMarkdownRelativePath,
+          tender_markdown_hash: stableHash(workingMarkdown),
+          tender_markdown_chars: workingMarkdown.length,
+          bid_section_mode: 'multiple',
+          selected_section_id: matched.id || null,
+          selected_section_title: matched.title || null,
+        });
+      });
+      transaction();
+      return {
+        success: true,
+        message: `已选择【${matched.title || '投标范围'}】，招标文件解析将仅使用当前投标范围`,
+        markdown: workingMarkdown,
+      };
+    }
+
+    throw new Error('请先完成多标段识别，再选择投标范围');
+  }
+
+  function clearTechnicalPlan() {
+    const workflowKind = normalizeWorkflowKind(ensureMetaRow().workflow_kind);
+    clearTenderSourceFiles();
+    cleanupPendingTenderSelection();
+    removeWorkspacePathSync(tenderMarkdownPath);
+    removeWorkspacePathSync(tenderOriginalMarkdownPath);
+    removeWorkspacePathSync(originalPlanMarkdownPath);
+    clearOriginalOutlineRuntime();
+    clearTechnicalPlanMermaidCache();
+    clearIllustrationFiles();
+    deleteImportedImageBatches(app, 'technical-plan');
+    deleteOutlineAgentTask();
+    deleteGlobalFactsAgentTask();
+    const transaction = db.transaction(() => {
+      db.prepare('DELETE FROM technical_plan_tasks').run();
+      db.prepare('DELETE FROM technical_plan_bid_items').run();
+      db.prepare('DELETE FROM technical_plan_reference_docs').run();
+      db.prepare('DELETE FROM technical_plan_outline_nodes').run();
+      db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
+      clearContentIllustrationPlan();
+      db.prepare('DELETE FROM technical_plan_meta').run();
+      ensureMetaRow();
+      updateMeta({ workflow_kind: workflowKind });
+    });
+    transaction();
+    notifyAgentWorkspaceChange({ force: true });
+    return { success: true, message: '技术方案缓存已清空' };
+  }
+
+  cleanupLegacyPendingTenderState(ensureMetaRow());
+
+  return {
+    loadTechnicalPlan,
+    updateTechnicalPlan,
+    updateTechnicalPlanWithoutReload,
+    clearMermaidCache: clearTechnicalPlanMermaidCache,
+    clearIllustrationFiles,
+    clearUnreferencedGeneratedImages: clearUnreferencedRootGeneratedImages,
+    clearTechnicalPlan,
+    importTenderDocument,
+    removeTenderDocument,
+    importOriginalPlanDocument,
+    checkBidSections,
+    prepareBidSectionExtraction,
+    selectBidSection,
+    readTenderMarkdown,
+    readTenderSourceMarkdown,
+    readOriginalTenderMarkdown,
+    readOriginalPlanMarkdown,
+    readIllustrationHtml,
+    findIllustrationHtml,
+    readOriginalOutlineRuntime,
+    saveOriginalOutlineRuntime,
+    clearOriginalOutlineRuntime,
+    updateStep,
+    setWorkflowKind,
+    switchWorkflowKind,
+    setAgentWorkspaceChangeListener,
+    saveBidAnalysisConfig,
+    saveOutlineConfig,
+    saveOutlineSelection,
+    saveOutline,
+    saveGlobalFactsConfig,
+    saveGlobalFacts,
+    saveIllustrationHtml,
+    saveIllustrationPng,
+    saveContentGenerationOptions,
+    saveChapterContent,
+    clearBidTemplate,
+    listTenderSourceDocxRelativePaths() {
+      return loadTenderSourceFiles()
+        .map((file) => String(file.sourceDocxPath || '').trim())
+        .filter((item) => item && fs.existsSync(resolveMarkdownPath(item)));
+    },
+    getBidTemplateRelativePath() {
+      return bidTemplateRelativePath;
+    },
+    getBidTemplateSourceRelativePath() {
+      return bidTemplateSourceRelativePath;
+    },
+    getBidTemplateFieldsRelativePath() {
+      return bidTemplateFieldsRelativePath;
+    },
+    hasBidTemplate() {
+      return fs.existsSync(bidTemplatePath) && fs.existsSync(bidTemplateFieldsPath);
+    },
+    getBidTemplatePath() {
+      return bidTemplatePath;
+    },
+    getBidTemplateSourcePath() {
+      return bidTemplateSourcePath;
+    },
+    getBidTemplateFieldsPath() {
+      return bidTemplateFieldsPath;
+    },
+    copyTenderOriginalsToDirectory(destDir) {
+      const targetDir = String(destDir || '').trim();
+      if (!targetDir) return [];
+      fs.mkdirSync(targetDir, { recursive: true });
+      return loadTenderSourceFiles()
+        .map((file) => String(file.sourceDocxPath || '').trim())
+        .filter((item) => item && fs.existsSync(resolveMarkdownPath(item)))
+        .map((relativePath) => {
+          const fileName = path.basename(relativePath);
+          fs.copyFileSync(resolveMarkdownPath(relativePath), path.join(targetDir, fileName));
+          return fileName;
+        });
+    },
+    resolveTenderSourceDocxPath(sourceHint) {
+      const hint = String(sourceHint || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+      const sources = loadTenderSourceFiles()
+        .map((file) => String(file.sourceDocxPath || '').trim())
+        .filter((item) => item && fs.existsSync(resolveMarkdownPath(item)));
+      if (!hint || hint === '招标原件') return sources;
+      const fileName = path.posix.basename(hint);
+      if (!fileName || fileName === '招标原件') return sources;
+      const matched = sources.find((item) => path.posix.basename(item) === fileName || item === hint);
+      return matched ? [matched] : [];
+    },
+  };
+}
+
+module.exports = {
+  createTechnicalPlanStore,
+  originalPlanDownstreamTaskTypes,
+};

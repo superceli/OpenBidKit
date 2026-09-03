@@ -1,0 +1,458 @@
+name: Release Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '要发布的 tag，例如 v2.0.1'
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch-code-mirrors:
+    name: Dispatch code mirror sync
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch code mirror sync
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: gh workflow run sync-mirrors.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Detect release type
+        id: release_type
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release notes from commits
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            RANGE="$PREVIOUS_TAG..$TAG_NAME"
+            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${TAG_NAME}"
+          else
+            RANGE="$TAG_NAME"
+            COMPARE_URL="https://github.com/${{ github.repository }}/commits/${TAG_NAME}"
+          fi
+
+          {
+            echo "## 更新内容"
+            echo
+            git log "$RANGE" --no-merges --pretty=format:'- %s (%h)' || true
+            echo
+            echo
+            echo "**Full Changelog**: $COMPARE_URL"
+          } > release_notes.md
+
+      - name: Create or update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+          IS_PRERELEASE: ${{ steps.release_type.outputs.is_prerelease }}
+        run: |
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            release_flags=(--prerelease --latest=false)
+          else
+            release_flags=(--prerelease=false --latest)
+          fi
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file release_notes.md "${release_flags[@]}"
+          else
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --notes-file release_notes.md "${release_flags[@]}"
+          fi
+
+  build-windows:
+    name: Build Windows
+    needs: create-release
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: client
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Cache Electron build downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-x64-electron-${{ hashFiles('client/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-x64-electron-
+
+      - name: Cache Open XML helper
+        id: cache-openxml-helper
+        uses: actions/cache@v4
+        with:
+          path: client/vendor/openxml-tools/win32-x64
+          key: ${{ runner.os }}-x64-openxml-${{ hashFiles('openxmlhelper/**/*', 'client/scripts/prepare-openxml-helper.cjs') }}
+
+      - name: Setup .NET
+        if: steps.cache-openxml-helper.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Verify Agent tools
+        run: node scripts/verify-agent-tools.cjs --platform win32 --arch x64
+
+      - name: Publish Open XML helper
+        if: steps.cache-openxml-helper.outputs.cache-hit != 'true'
+        run: node scripts/prepare-openxml-helper.cjs --platform win32 --arch x64
+
+      - name: Smoke test Electron native dependencies
+        run: npm run smoke:electron-native
+
+      - name: Sync package version from tag
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Generate build attestation
+        env:
+          YIBIAO_LICENSE_PRIVATE_KEY_JWK: ${{ secrets.YIBIAO_LICENSE_PRIVATE_KEY_JWK }}
+          YIBIAO_LICENSE_KEY_ID: ${{ vars.YIBIAO_LICENSE_KEY_ID || 'official-build-key-2026-01' }}
+        run: |
+          if [ -z "$YIBIAO_LICENSE_PRIVATE_KEY_JWK" ]; then
+            echo "YIBIAO_LICENSE_PRIVATE_KEY_JWK is required for official release builds."
+            exit 1
+          fi
+          npm run generate-build-attestation
+
+      - name: Build renderer
+        run: npm run build
+
+      - name: Build Windows NSIS and ZIP artifacts
+        run: npx electron-builder --win nsis zip --publish never -c.npmRebuild=false
+
+      - name: Build Windows MSI artifact
+        run: npx electron-builder --win msi --publish never -c.npmRebuild=false -c.productName=OpenBidKit_Yibiao -c.extraMetadata.author=mark -c.copyright="Copyright (c) 2026 mark"
+
+      - name: Verify packaged Agent tools
+        run: node scripts/verify-packaged-agent-tools.cjs --platform win32 --arch x64 --release release
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          shopt -s nullglob
+          files=(release/*.exe release/*.msi release/*.zip release/*.blockmap release/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+          gh release upload "$TAG_NAME" "${files[@]}" --clobber
+
+  build-macos:
+    name: Build macOS ${{ matrix.arch }}
+    needs: create-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x64
+          - runner: macos-15
+            arch: arm64
+
+    defaults:
+      run:
+        working-directory: client
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Verify runner architecture
+        run: |
+          actual_arch="$(node -p process.arch)"
+          if [ "$actual_arch" != "${{ matrix.arch }}" ]; then
+            echo "Expected ${{ matrix.arch }} runner, got ${actual_arch}."
+            exit 1
+          fi
+
+      - name: Cache Electron build downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-${{ matrix.arch }}-electron-${{ hashFiles('client/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-electron-
+
+      - name: Cache Open XML helper
+        id: cache-openxml-helper
+        uses: actions/cache@v4
+        with:
+          path: client/vendor/openxml-tools/darwin-${{ matrix.arch }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-openxml-${{ hashFiles('openxmlhelper/**/*', 'client/scripts/prepare-openxml-helper.cjs') }}
+
+      - name: Setup .NET
+        if: steps.cache-openxml-helper.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Verify Agent tools
+        run: node scripts/verify-agent-tools.cjs --platform darwin --arch ${{ matrix.arch }}
+
+      - name: Publish Open XML helper
+        if: steps.cache-openxml-helper.outputs.cache-hit != 'true'
+        run: node scripts/prepare-openxml-helper.cjs --platform darwin --arch ${{ matrix.arch }}
+
+      - name: Smoke test Electron native dependencies
+        run: npm run smoke:electron-native
+
+      - name: Sync package version from tag
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Generate build attestation
+        env:
+          YIBIAO_LICENSE_PRIVATE_KEY_JWK: ${{ secrets.YIBIAO_LICENSE_PRIVATE_KEY_JWK }}
+          YIBIAO_LICENSE_KEY_ID: ${{ vars.YIBIAO_LICENSE_KEY_ID || 'official-build-key-2026-01' }}
+        run: |
+          if [ -z "$YIBIAO_LICENSE_PRIVATE_KEY_JWK" ]; then
+            echo "YIBIAO_LICENSE_PRIVATE_KEY_JWK is required for official release builds."
+            exit 1
+          fi
+          npm run generate-build-attestation
+
+      - name: Generate macOS icon
+        run: |
+          rm -rf assets/icon.iconset
+          mkdir -p assets/icon.iconset
+          sips -z 16 16 assets/icon_256.png --out assets/icon.iconset/icon_16x16.png
+          sips -z 32 32 assets/icon_256.png --out assets/icon.iconset/icon_16x16@2x.png
+          sips -z 32 32 assets/icon_256.png --out assets/icon.iconset/icon_32x32.png
+          sips -z 64 64 assets/icon_256.png --out assets/icon.iconset/icon_32x32@2x.png
+          sips -z 128 128 assets/icon_256.png --out assets/icon.iconset/icon_128x128.png
+          sips -z 256 256 assets/icon_256.png --out assets/icon.iconset/icon_128x128@2x.png
+          sips -z 256 256 assets/icon_256.png --out assets/icon.iconset/icon_256x256.png
+          sips -z 512 512 assets/icon_256.png --out assets/icon.iconset/icon_256x256@2x.png
+          sips -z 512 512 assets/icon_256.png --out assets/icon.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icon_256.png --out assets/icon.iconset/icon_512x512@2x.png
+          iconutil -c icns assets/icon.iconset -o assets/icon.icns
+
+      - name: Build renderer
+        run: npm run build
+
+      - name: Preload Electron macOS runtime
+        run: |
+          export ELECTRON_CACHE="$HOME/Library/Caches/electron"
+          ELECTRON_VERSION="$(node -p "require('./node_modules/electron/package.json').version")"
+          file="$ELECTRON_CACHE/electron-v${ELECTRON_VERSION}-darwin-${{ matrix.arch }}.zip"
+          mkdir -p "$ELECTRON_CACHE"
+
+          if [ -f "$file" ] && unzip -tq "$file" >/dev/null 2>&1; then
+            echo "Electron ${ELECTRON_VERSION} darwin-${{ matrix.arch }} already cached."
+            exit 0
+          fi
+
+          tmp="${file}.tmp"
+          rm -f "$file" "$tmp"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 10 \
+            "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-darwin-${{ matrix.arch }}.zip" \
+            --output "$tmp"
+          unzip -tq "$tmp" >/dev/null
+          mv "$tmp" "$file"
+
+      - name: Build macOS artifacts
+        run: |
+          export ELECTRON_CACHE="$HOME/Library/Caches/electron"
+          export ELECTRON_BUILDER_CACHE="$HOME/Library/Caches/electron-builder"
+
+          for attempt in 1 2 3; do
+            echo "Build macOS ${{ matrix.arch }} artifacts, attempt ${attempt}/3."
+            if npx electron-builder --mac dmg:${{ matrix.arch }} zip:${{ matrix.arch }} --publish never -c.npmRebuild=false; then
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+
+            sleep $((attempt * 20))
+          done
+
+      - name: Verify packaged native architectures
+        run: node scripts/verify-macos-native-arch.cjs "${{ matrix.arch }}" release
+
+      - name: Verify packaged Agent tools
+        run: node scripts/verify-packaged-agent-tools.cjs --platform darwin --arch ${{ matrix.arch }} --release release
+
+      - name: Upload macOS release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          shopt -s nullglob
+          dmgs=(release/*-mac-${{ matrix.arch }}.dmg)
+          zips=(release/*-mac-${{ matrix.arch }}.zip)
+          blockmaps=(release/*.blockmap)
+
+          if [ ${#dmgs[@]} -ne 1 ] || [ ${#zips[@]} -ne 1 ]; then
+            echo "Expected exactly one macOS ${{ matrix.arch }} DMG and ZIP."
+            exit 1
+          fi
+
+          gh release upload "$TAG_NAME" "${dmgs[@]}" "${zips[@]}" "${blockmaps[@]}" --clobber
+
+      - name: Stage macOS update manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: client/release/*-mac.yml
+          if-no-files-found: error
+
+  publish-macos:
+    name: Publish macOS
+    needs:
+      - create-release
+      - build-macos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install manifest tooling
+        working-directory: client
+        run: npm ci --ignore-scripts --omit=optional --prefer-offline --no-audit --no-fund
+
+      - name: Download macOS update manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Merge macOS update manifests
+        run: |
+          shopt -s nullglob
+          x64_manifests=(artifacts/macos-x64/*-mac.yml)
+          arm64_manifests=(artifacts/macos-arm64/*-mac.yml)
+
+          if [ ${#x64_manifests[@]} -ne 1 ] || [ ${#arm64_manifests[@]} -ne 1 ]; then
+            echo "Expected exactly one macOS update manifest for each architecture."
+            exit 1
+          fi
+
+          manifest_name="$(basename "${x64_manifests[0]}")"
+          if [ "$manifest_name" != "$(basename "${arm64_manifests[0]}")" ]; then
+            echo "macOS update manifest names do not match."
+            exit 1
+          fi
+
+          node client/scripts/merge-mac-update-manifests.cjs \
+            "${x64_manifests[0]}" \
+            "${arm64_manifests[0]}" \
+            "artifacts/$manifest_name"
+
+      - name: Upload merged macOS update manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          shopt -s nullglob
+          manifests=(artifacts/*-mac.yml)
+          if [ ${#manifests[@]} -ne 1 ]; then
+            echo "Expected exactly one merged macOS update manifest."
+            exit 1
+          fi
+          gh release upload "$TAG_NAME" "${manifests[@]}" --clobber
+
+  dispatch-mirror-releases:
+    name: Dispatch mirror Release sync
+    needs:
+      - build-windows
+      - publish-macos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch mirror Release sync
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: >-
+          gh workflow run sync-releases.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "$DEFAULT_BRANCH"
+          -f tag_name="$TAG_NAME"

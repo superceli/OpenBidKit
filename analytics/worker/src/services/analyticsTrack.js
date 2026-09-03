@@ -1,0 +1,174 @@
+import {
+  AGENT_RUNTIME_KIND_PATTERN,
+  AGENT_RUNTIME_MAX_RETRY_COUNT,
+  AGENT_RUNTIME_STATUSES,
+  ALLOWED_EVENTS,
+} from '../constants.js';
+import { getRequestClientIp, isValidProjectName, normalizeMetricValue, normalizeText } from '../utils.js';
+
+function normalizeTokenNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function normalizeAgentRetryCount(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0
+    ? Math.min(AGENT_RUNTIME_MAX_RETRY_COUNT, Math.floor(number))
+    : 0;
+}
+
+function normalizeAgentModelRetryCount(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? Math.min(9999, Math.floor(number)) : 0;
+}
+
+function encodeAgentRuntimeMetricPart(value, maxLength) {
+  return encodeURIComponent(normalizeText(value, maxLength));
+}
+
+function createAgentRuntimeMetricKey(runtime, status, retryCount, provider, endpointHost, model, modelRetryMetric) {
+  if (!AGENT_RUNTIME_KIND_PATTERN.test(runtime) || !AGENT_RUNTIME_STATUSES.has(status)) return '';
+  return [
+    modelRetryMetric ? 'v4' : 'v3',
+    runtime,
+    status,
+    modelRetryMetric ? `m${normalizeAgentModelRetryCount(retryCount)}` : `r${normalizeAgentRetryCount(retryCount)}`,
+    encodeAgentRuntimeMetricPart(provider, 80),
+    encodeAgentRuntimeMetricPart(endpointHost, 120),
+    encodeAgentRuntimeMetricPart(model, 160),
+  ].join('|');
+}
+
+function normalizeBaseUrlHost(value) {
+  const text = normalizeText(value, 200);
+  if (!text) return '';
+
+  const candidates = text.includes('://') ? [text] : [`https://${text}`];
+  for (const candidate of candidates) {
+    try {
+      return normalizeText(new URL(candidate).hostname.toLowerCase(), 120);
+    } catch {
+      // 尝试下一个候选格式。
+    }
+  }
+  return normalizeText(text.replace(/^https?:\/\//i, '').split('/')[0].toLowerCase(), 120);
+}
+
+function createMetricBlobs(event) {
+  const blob9 = event.event === 'ai_request'
+    ? event.aiModelProvider
+    : event.event === 'resource_click'
+      ? event.resourceKey
+      : event.event === 'config_usage'
+        ? event.configKey
+        : event.event === 'agent_runtime'
+          ? event.agentRuntimeMetricKey
+          : '';
+  const blob10 = event.event === 'ai_request'
+    ? event.aiModelEndpointHost
+    : event.event === 'config_usage'
+      ? event.configValue
+      : '';
+  const blob11 = event.event === 'ai_request' ? event.aiModelName : '';
+  const blob12 = event.event === 'ai_request' ? event.aiRequestType : '';
+
+  return [
+    event.projectName,
+    event.event,
+    event.page,
+    event.version,
+    event.platform,
+    event.arch,
+    event.clientId,
+    event.clientCreatedAt,
+    blob9,
+    blob10,
+    blob11,
+    blob12,
+    event.clientIp,
+    event.licenseStatus,
+    event.licensePlan,
+    event.licenseExpiresAt,
+    event.sourceTrusted,
+    event.untrustedReason,
+    '',
+    '',
+  ];
+}
+
+export function normalizeTrackBody(body, request) {
+  const promptTokens = normalizeTokenNumber(body.prompt_tokens ?? body.promptTokens);
+  const completionTokens = normalizeTokenNumber(body.completion_tokens ?? body.completionTokens);
+  const totalTokens = normalizeTokenNumber(body.total_tokens ?? body.totalTokens) || promptTokens + completionTokens;
+  const aiRequestType = normalizeText(body.ai_request_type || body.aiRequestType, 20);
+  const aiModelName = normalizeText(body.ai_model_name || body.aiModelName, 160);
+  const agentRuntimeKind = normalizeText(body.agent_runtime_kind || body.agentRuntimeKind, 40);
+  const agentRuntimeStatus = normalizeText(body.agent_runtime_status || body.agentRuntimeStatus, 20);
+  const agentRuntimeRetryCount = normalizeAgentRetryCount(body.agent_runtime_retry_count ?? body.agentRuntimeRetryCount);
+  const hasAgentRuntimeModelRetryCount = Object.prototype.hasOwnProperty.call(body, 'agent_runtime_model_retry_count')
+    || Object.prototype.hasOwnProperty.call(body, 'agentRuntimeModelRetryCount');
+  const agentRuntimeModelRetryCount = normalizeAgentModelRetryCount(body.agent_runtime_model_retry_count ?? body.agentRuntimeModelRetryCount);
+
+  const event = {
+    projectName: normalizeText(body.projectName || body.project_name, 80),
+    event: normalizeText(body.event, 50),
+    page: normalizeText(body.page, 120),
+    version: normalizeText(body.version, 50),
+    platform: normalizeText(body.platform, 50),
+    arch: normalizeText(body.arch, 50),
+    clientId: normalizeText(body.client_id || body.clientId, 120),
+    clientCreatedAt: normalizeText(body.client_created_at || body.clientCreatedAt, 20).slice(0, 10),
+    clientIp: getRequestClientIp(request),
+    configKey: normalizeText(body.config_key || body.configKey, 80),
+    configValue: normalizeMetricValue(body.config_value ?? body.configValue, 200),
+    aiRequestType,
+    aiModelProvider: normalizeText(body.ai_model_provider || body.aiModelProvider, 80),
+    aiModelEndpointHost: normalizeBaseUrlHost(body.ai_model_base_url || body.aiModelBaseUrl),
+    aiModelName,
+    resourceKey: normalizeText(body.resource_key || body.resourceKey, 80),
+    agentRuntimeKind,
+    agentRuntimeStatus,
+    agentRuntimeRetryCount,
+    agentRuntimeModelRetryCount,
+    agentRuntimeMetricKey: createAgentRuntimeMetricKey(
+      agentRuntimeKind,
+      agentRuntimeStatus,
+      hasAgentRuntimeModelRetryCount ? agentRuntimeModelRetryCount : agentRuntimeRetryCount,
+      normalizeText(body.ai_model_provider || body.aiModelProvider, 80),
+      normalizeBaseUrlHost(body.ai_model_base_url || body.aiModelBaseUrl),
+      aiModelName,
+      hasAgentRuntimeModelRetryCount,
+    ),
+    licenseStatus: normalizeText(body.license_status || body.licenseStatus, 30),
+    licensePlan: normalizeText(body.license_plan || body.licensePlan, 40),
+    licenseExpiresAt: normalizeText(body.license_expires_at || body.licenseExpiresAt, 20).slice(0, 10),
+    sourceTrusted: normalizeText(body.source_trusted ?? body.sourceTrusted, 20),
+    untrustedReason: normalizeText(body.untrusted_reason || body.untrustedReason, 80),
+    promptTokens,
+    completionTokens,
+    totalTokens,
+  };
+  event.blobs = createMetricBlobs(event);
+  event.doubles = [1, promptTokens, completionTokens, totalTokens];
+  return event;
+}
+
+export function validateTrackEvent(event) {
+  if (!isValidProjectName(event.projectName)) return 'invalid projectName';
+  if (!ALLOWED_EVENTS.has(event.event)) return 'invalid event';
+  if (event.event === 'agent_runtime' && !AGENT_RUNTIME_KIND_PATTERN.test(event.agentRuntimeKind)) return 'invalid agent_runtime_kind';
+  if (event.event === 'agent_runtime' && !AGENT_RUNTIME_STATUSES.has(event.agentRuntimeStatus)) return 'invalid agent_runtime_status';
+  if (!event.clientId) return 'missing client_id';
+  if (!event.clientCreatedAt) return 'missing client_created_at';
+  if (!event.version) return 'missing version';
+  return '';
+}
+
+export function writeAnalyticsDataPoint(env, event) {
+  env.ANALYTICS.writeDataPoint({
+    blobs: event.blobs,
+    doubles: event.doubles,
+    indexes: [event.projectName],
+  });
+}

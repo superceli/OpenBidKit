@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "后端服务 (FastAPI)",
+            "type": "python",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "app.main:app",
+                "--host=127.0.0.1",
+                "--port=8000",
+                "--reload",
+                "--log-level=info"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend"
+            }
+        },
+        {
+            "name": "前端服务 (React)",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["start"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/frontend",
+            "env": {
+                "BROWSER": "none"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "🚀 启动前后端项目",
+            "configurations": [
+                "后端服务 (FastAPI)",
+                "前端服务 (React)"
+            ],
+            "stopAll": true
+        }
+    ]
+}

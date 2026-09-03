@@ -1,0 +1,434 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const workerDir = resolve(__dirname, '../worker');
+const workerConfigPath = resolve(workerDir, 'wrangler.jsonc');
+const migrationsDirName = 'analytics-migrations';
+
+const d1BindingName = 'ANALYTICS_DB';
+const d1DatabaseName = 'openbidkit-analytics';
+const noticeBindingName = 'NOTICE_STORE';
+const legacyIpBlockKey = 'security:ip-block-list:v1';
+// 这里只维护 5 个埋点汇总 Cron；付费计划下的模型信息同步 Cron 独立配置在 wrangler.jsonc。
+const dailyRollupCrons = [
+  '0 17 * * *',
+  '30 17 * * *',
+  '0 18 * * *',
+  '30 18 * * *',
+  '0 19 * * *',
+];
+
+function readConfig() {
+  return readFileSync(workerConfigPath, 'utf8');
+}
+
+function writeConfig(source) {
+  writeFileSync(workerConfigPath, source, 'utf8');
+}
+
+function runWrangler(args) {
+  const result = spawnSync('npx', ['wrangler', ...args], {
+    cwd: workerDir,
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+
+  return {
+    status: result.status ?? 1,
+    output,
+  };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseJsonArrayFromOutput(output) {
+  try {
+    const parsed = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    const start = output.indexOf('[');
+    const end = output.lastIndexOf(']');
+    if (start === -1 || end === -1 || end <= start) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(output.slice(start, end + 1));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+}
+
+function normalizeD1Item(item) {
+  return {
+    id: String(item.uuid || item.id || item.database_id || '').trim(),
+    name: String(item.name || item.database_name || '').trim(),
+  };
+}
+
+function parseD1CreateId(output) {
+  const patterns = [
+    /database_id\s*=\s*"([^"]+)"/i,
+    /"database_id"\s*:\s*"([^"]+)"/i,
+    /"uuid"\s*:\s*"([^"]+)"/i,
+    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = output.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return '';
+}
+
+function getConfiguredD1DatabaseId(source) {
+  const escapedBinding = escapeRegExp(d1BindingName);
+  const pattern = new RegExp(`\\{[\\s\\S]*?"binding"\\s*:\\s*"${escapedBinding}"[\\s\\S]*?"database_id"\\s*:\\s*"([^"]*)"[\\s\\S]*?\\}`);
+  const id = source.match(pattern)?.[1]?.trim() || '';
+  return id && !id.includes('<') ? id : '';
+}
+
+function insertConfigArrayBlock(source, propertyName, objectBlock) {
+  const propertyPattern = new RegExp(`"${escapeRegExp(propertyName)}"\\s*:\\s*\\[`);
+  if (propertyPattern.test(source)) {
+    return source.replace(propertyPattern, `"${propertyName}": [\n    ${objectBlock},`);
+  }
+
+  const insertAt = source.lastIndexOf('\n}');
+  if (insertAt === -1) {
+    throw new Error('Unable to locate closing brace in wrangler.jsonc');
+  }
+
+  const block = `  "${propertyName}": [\n    ${objectBlock}\n  ]`;
+  return `${source.slice(0, insertAt)},\n${block}${source.slice(insertAt)}`;
+}
+
+function insertTopLevelObjectBlock(source, propertyName, objectBody) {
+  const insertAt = source.lastIndexOf('\n}');
+  if (insertAt === -1) {
+    throw new Error('Unable to locate closing brace in wrangler.jsonc');
+  }
+
+  const block = `  "${propertyName}": {\n${objectBody}\n  }`;
+  return `${source.slice(0, insertAt)},\n${block}${source.slice(insertAt)}`;
+}
+
+function updateD1Config(databaseId) {
+  const source = readConfig();
+  const escapedBinding = escapeRegExp(d1BindingName);
+  const bindingObjectPattern = new RegExp(`(\\{[\\s\\S]*?"binding"\\s*:\\s*"${escapedBinding}"[\\s\\S]*?"database_id"\\s*:\\s*")[^"]*("[\\s\\S]*?\\})`);
+
+  if (bindingObjectPattern.test(source)) {
+    const updatedSource = source.replace(bindingObjectPattern, `$1${databaseId}$2`);
+    const analyticsBindingPattern = new RegExp(`\\{[^{}]*?"binding"\\s*:\\s*"${escapedBinding}"[^{}]*?\\}`);
+    writeConfig(updatedSource.replace(analyticsBindingPattern, (bindingBlock) => {
+      if (/"migrations_dir"\s*:/.test(bindingBlock)) {
+        return bindingBlock.replace(/("migrations_dir"\s*:\s*")[^"]*(")/, `$1${migrationsDirName}$2`);
+      }
+      return bindingBlock.replace(/\n(\s*)\}$/, `,\n      "migrations_dir": "${migrationsDirName}"\n$1}`);
+    }));
+    return;
+  }
+
+  const objectBlock = `{
+      "binding": "${d1BindingName}",
+      "database_name": "${d1DatabaseName}",
+      "database_id": "${databaseId}",
+      "migrations_dir": "${migrationsDirName}"
+    }`;
+  writeConfig(insertConfigArrayBlock(source, 'd1_databases', objectBlock));
+}
+
+function ensureCronTrigger() {
+  let source = readConfig();
+  const oldCron = '15 18 * * *';
+  if (source.includes(`"${oldCron}"`)) {
+    source = source.replace(`"${oldCron}"`, '"0 18 * * *"');
+    writeConfig(source);
+  }
+
+  source = readConfig();
+  const missingCrons = dailyRollupCrons.filter((cron) => !source.includes(`"${cron}"`));
+  if (!missingCrons.length) {
+    console.log(`Analytics staged daily rollup crons configured: ${dailyRollupCrons.join(', ')}`);
+    return;
+  }
+
+  const cronsPattern = /"crons"\s*:\s*\[/;
+  if (cronsPattern.test(source)) {
+    writeConfig(source.replace(cronsPattern, `"crons": [\n      ${missingCrons.map((cron) => `"${cron}"`).join(',\n      ')},`));
+    console.log(`Analytics staged daily rollup crons added: ${missingCrons.join(', ')}`);
+    return;
+  }
+
+  writeConfig(insertTopLevelObjectBlock(source, 'triggers', `    "crons": [\n      ${dailyRollupCrons.map((cron) => `"${cron}"`).join(',\n      ')}\n    ]`));
+  console.log(`Analytics staged daily rollup crons configured: ${dailyRollupCrons.join(', ')}`);
+}
+
+function printCredentialHelp(output) {
+  if (output) {
+    console.error(output);
+  }
+  console.error([
+    'Unable to create or find Cloudflare D1 resources for analytics stats.',
+    'For CI, set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID with D1 and Worker deployment permissions.',
+    'For local setup, run `npx wrangler login` or set CLOUDFLARE_API_TOKEN before `npm run setup:analytics-storage`.',
+  ].join('\n'));
+}
+
+function listD1Databases() {
+  const result = runWrangler(['d1', 'list', '--json']);
+  if (result.status !== 0) {
+    return { ok: false, output: result.output, items: [] };
+  }
+  return { ok: true, output: result.output, items: parseJsonArrayFromOutput(result.output).map(normalizeD1Item) };
+}
+
+function ensureD1Database() {
+  const configuredId = getConfiguredD1DatabaseId(readConfig());
+  const envDatabaseId = String(process.env.ANALYTICS_DB_ID || '').trim();
+
+  if (envDatabaseId) {
+    updateD1Config(envDatabaseId);
+    console.log(`ANALYTICS_DB D1 database configured from ANALYTICS_DB_ID: ${envDatabaseId}`);
+    return envDatabaseId;
+  }
+
+  const listResult = listD1Databases();
+  if (listResult.ok) {
+    const configured = configuredId ? listResult.items.find((item) => item.id === configuredId) : null;
+    if (configured?.id) {
+      console.log(`ANALYTICS_DB D1 database already configured: ${configured.id}`);
+      return configured.id;
+    }
+
+    const existingByName = listResult.items.find((item) => item.name === d1DatabaseName);
+    if (existingByName?.id) {
+      updateD1Config(existingByName.id);
+      console.log(`ANALYTICS_DB D1 database reused: ${existingByName.id}`);
+      return existingByName.id;
+    }
+  } else if (configuredId) {
+    console.warn('Unable to verify configured ANALYTICS_DB, using current wrangler.jsonc database_id.');
+    console.warn(listResult.output);
+    return configuredId;
+  }
+
+  const createResult = runWrangler(['d1', 'create', d1DatabaseName]);
+  if (createResult.status !== 0 && !/already exists/i.test(createResult.output)) {
+    printCredentialHelp(createResult.output || listResult.output);
+    process.exit(createResult.status || 1);
+  }
+
+  let databaseId = parseD1CreateId(createResult.output);
+  if (!databaseId) {
+    const retryListResult = listD1Databases();
+    if (retryListResult.ok) {
+      databaseId = retryListResult.items.find((item) => item.name === d1DatabaseName)?.id || '';
+    }
+  }
+
+  if (!databaseId) {
+    console.error(createResult.output || listResult.output);
+    throw new Error('Unable to parse D1 database id from Wrangler output.');
+  }
+
+  updateD1Config(databaseId);
+  console.log(`ANALYTICS_DB D1 database created and configured: ${databaseId}`);
+  return databaseId;
+}
+
+function applyAnalyticsMigrations() {
+  const result = runWrangler(['d1', 'migrations', 'apply', d1BindingName, '--remote']);
+  if (result.status !== 0) {
+    console.error(result.output);
+    process.exit(result.status || 1);
+  }
+
+  console.log('ANALYTICS_DB D1 migrations applied.');
+}
+
+function ensureAnalyticsColumns() {
+  const columns = [
+    {
+      table: 'stats_versions',
+      column: 'client_count',
+      sql: 'ALTER TABLE stats_versions ADD COLUMN client_count INTEGER NOT NULL DEFAULT 0',
+    },
+    {
+      table: 'stats_models',
+      column: 'total_tokens',
+      sql: 'ALTER TABLE stats_models ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0',
+    },
+    {
+      table: 'stats_totals',
+      column: 'total_text_tokens',
+      sql: 'ALTER TABLE stats_totals ADD COLUMN total_text_tokens INTEGER NOT NULL DEFAULT 0',
+    },
+    {
+      table: 'stats_totals',
+      column: 'total_generated_images',
+      sql: 'ALTER TABLE stats_totals ADD COLUMN total_generated_images INTEGER NOT NULL DEFAULT 0',
+    },
+    {
+      table: 'stats_clients',
+      column: 'last_access_ip',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN last_access_ip TEXT NOT NULL DEFAULT \'\'',
+    },
+    {
+      table: 'stats_clients',
+      column: 'license_status',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN license_status TEXT NOT NULL DEFAULT \'\'',
+    },
+    {
+      table: 'stats_clients',
+      column: 'license_plan',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN license_plan TEXT NOT NULL DEFAULT \'\'',
+    },
+    {
+      table: 'stats_clients',
+      column: 'license_expires_at',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN license_expires_at TEXT NOT NULL DEFAULT \'\'',
+    },
+    {
+      table: 'stats_clients',
+      column: 'source_trusted',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN source_trusted TEXT NOT NULL DEFAULT \'\'',
+    },
+    {
+      table: 'stats_clients',
+      column: 'untrusted_reason',
+      sql: 'ALTER TABLE stats_clients ADD COLUMN untrusted_reason TEXT NOT NULL DEFAULT \'\'',
+    },
+  ];
+
+  for (const item of columns) {
+    const result = runWrangler(['d1', 'execute', d1BindingName, '--remote', '--command', item.sql]);
+    if (result.status === 0) {
+      console.log(`ANALYTICS_DB column added: ${item.table}.${item.column}`);
+      continue;
+    }
+
+    if (/duplicate column name|already exists/i.test(result.output)) {
+      console.log(`ANALYTICS_DB column already exists: ${item.table}.${item.column}`);
+      continue;
+    }
+
+    console.error(result.output);
+    process.exit(result.status || 1);
+  }
+}
+
+function ensureAnalyticsIndexes() {
+  const indexes = [
+    {
+      name: 'idx_stats_clients_project_last_access_ip',
+      sql: 'CREATE INDEX IF NOT EXISTS idx_stats_clients_project_last_access_ip ON stats_clients (project_name, last_access_ip)',
+    },
+  ];
+
+  for (const item of indexes) {
+    const result = runWrangler(['d1', 'execute', d1BindingName, '--remote', '--command', item.sql]);
+    if (result.status === 0) {
+      console.log(`ANALYTICS_DB index ensured: ${item.name}`);
+      continue;
+    }
+
+    console.error(result.output);
+    process.exit(result.status || 1);
+  }
+}
+
+function sqlString(value) {
+  return `'${String(value ?? '').replace(/'/g, "''")}'`;
+}
+
+function parseLegacyIpBlocks(output) {
+  const source = String(output || '').trim();
+  if (!source || source === 'null') return [];
+
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    const start = source.indexOf('[');
+    const end = source.lastIndexOf(']');
+    if (start === -1 || end <= start) throw new Error('Unable to parse legacy IP block KV value.');
+    parsed = JSON.parse(source.slice(start, end + 1));
+  }
+
+  const seen = new Set();
+  return (Array.isArray(parsed) ? parsed : []).map((item) => ({
+    ip: String(item?.ip || '').trim().toLowerCase(),
+    reason: String(item?.reason || '').trim().slice(0, 500),
+    createdAt: String(item?.createdAt || '').trim().slice(0, 40),
+  })).filter((item) => item.ip && !seen.has(item.ip) && seen.add(item.ip));
+}
+
+// 将旧 KV 封禁记录一次性迁移到 D1，旧 Worker 切换完成前仍继续读取 KV。
+function migrateLegacyIpBlocks() {
+  const stateResult = runWrangler([
+    'd1', 'execute', d1BindingName, '--remote', '--json',
+    '--command', 'SELECT kv_migrated_at FROM ip_block_storage_meta WHERE id = 1',
+  ]);
+  if (stateResult.status !== 0) {
+    console.error(stateResult.output);
+    process.exit(stateResult.status || 1);
+  }
+  const stateRows = parseJsonArrayFromOutput(stateResult.output).flatMap((item) => item?.results || []);
+  if (stateRows.length) {
+    console.log('Legacy IP block KV records already migrated to D1.');
+    return;
+  }
+
+  const kvResult = runWrangler([
+    'kv', 'key', 'get', legacyIpBlockKey,
+    '--binding', noticeBindingName,
+    '--remote', '--text',
+  ]);
+  if (kvResult.status !== 0 && !/not found|404/i.test(kvResult.output)) {
+    console.error(kvResult.output);
+    process.exit(kvResult.status || 1);
+  }
+
+  let entries;
+  try {
+    entries = kvResult.status === 0 ? parseLegacyIpBlocks(kvResult.output) : [];
+  } catch (error) {
+    console.error(error?.message || String(error));
+    process.exit(1);
+  }
+  const fallbackCreatedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const insertSql = entries.length
+    ? `INSERT INTO ip_blocks (ip, reason, created_at) VALUES ${entries.map((item) => `(${sqlString(item.ip)}, ${sqlString(item.reason)}, ${sqlString(item.createdAt || fallbackCreatedAt)})`).join(', ')} ON CONFLICT(ip) DO NOTHING;`
+    : '';
+  const migratedAt = new Date().toISOString();
+  const migrationResult = runWrangler([
+    'd1', 'execute', d1BindingName, '--remote',
+    '--command', `${insertSql} INSERT INTO ip_block_storage_meta (id, kv_migrated_at) VALUES (1, ${sqlString(migratedAt)}) ON CONFLICT(id) DO NOTHING;`,
+  ]);
+  if (migrationResult.status !== 0) {
+    console.error(migrationResult.output);
+    process.exit(migrationResult.status || 1);
+  }
+  console.log(`Migrated ${entries.length} legacy IP block record(s) from KV to D1.`);
+}
+
+const analyticsDatabaseId = ensureD1Database();
+updateD1Config(analyticsDatabaseId);
+ensureCronTrigger();
+applyAnalyticsMigrations();
+ensureAnalyticsColumns();
+ensureAnalyticsIndexes();
+migrateLegacyIpBlocks();

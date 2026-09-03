@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState } from 'react';
-import { dismissRemoteNotice, fetchRemoteNotice, hasDismissedRemoteNotice, reportRemoteNoticeDelivered, type RemoteNotice } from '../shared/remoteNotice';
+import { dismissRemoteNotice, fetchRemoteNotice, hasDismissedRemoteNotice, type RemoteNotice } from '../shared/remoteNotice';
 import { MarkdownFullscreenViewer, MarkdownRenderer, useToast } from '../shared/ui';
 import type { PluginUpdateInfo } from '../shared/types/ipc';
 import { hasPromptedUpdate, showUpdateReadyToast } from '../shared/updateToast';
@@ -24,7 +24,6 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
   const updateCheckingRef = useRef(false);
   const pluginUpdateRunningRef = useRef(false);
   const activeNoticeIdRef = useRef('');
-  const reportedNoticeIdsRef = useRef(new Set<string>());
   const promptedPluginUpdatesRef = useRef(new Set<string>());
   const [remoteNotice, setRemoteNotice] = useState<RemoteNotice | null>(null);
   const [remainingNoticeCloseSeconds, setRemainingNoticeCloseSeconds] = useState(noticeCloseDelaySeconds);
@@ -41,16 +40,6 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
     setPreviewImage(null);
     setRemoteNotice(null);
   };
-
-  useEffect(() => {
-    if (!noticeEnabled || !remoteNotice?.id) return;
-    const reportKey = `${remoteNotice.projectName}:${remoteNotice.id}`;
-    if (reportedNoticeIdsRef.current.has(reportKey)) return;
-    reportedNoticeIdsRef.current.add(reportKey);
-    void reportRemoteNoticeDelivered(remoteNotice).catch((error) => {
-      console.info(noticeLogPrefix, 'delivery report failed', error);
-    });
-  }, [noticeEnabled, remoteNotice]);
 
   useEffect(() => {
     if (!visibleNoticeId) {
@@ -228,7 +217,7 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
         >
           <Dialog.Title className="remote-notice-title">{remoteNotice?.title || '公告'}</Dialog.Title>
           <Dialog.Description className="sr-only">远程公告</Dialog.Description>
-          {remoteNotice?.updatedAt ? <div className="remote-notice-time">公告时间：{remoteNotice.updatedAt}</div> : null}
+          {remoteNotice?.updatedAt ? <div className="remote-notice-time">发布时间：{remoteNotice.updatedAt}</div> : null}
           <MarkdownFullscreenViewer className="markdown-viewer remote-notice-content" fullscreenClassName="markdown-viewer" title={`${remoteNotice?.title || '公告'}全屏查看`}>
             <MarkdownRenderer
               allowRawHtml

@@ -1,21 +1,28 @@
-const NOTICE_ENDPOINT = 'https://analytics.agnet.top/notice';
-const PROJECT_NAME = 'yibiao-client';
+const RELEASE_API_URL = 'https://api.atomgit.com/api/v5/repos/qq_45963071/OpenBidKit/releases/latest';
 const DISMISSED_NOTICE_ID_KEY = 'remote_notice_dismissed_id';
 const LOG_PREFIX = '[remote-notice]';
 
 export interface RemoteNotice {
   id: string;
-  projectName: string;
-  enabled: boolean;
   title: string;
   content: string;
   createdAt: string;
   updatedAt: string;
 }
 
-interface RemoteNoticeResponse {
-  code?: number;
-  notice?: RemoteNotice | null;
+interface AtomGitRelease {
+  tag_name?: string;
+  name?: string;
+  body?: string;
+  created_at?: string;
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function readDismissedNoticeId() {
@@ -40,47 +47,23 @@ export function dismissRemoteNotice(noticeId: string) {
   }
 }
 
-// 公告弹窗展示后上报一次送达计数。
-export async function reportRemoteNoticeDelivered(notice: Pick<RemoteNotice, 'id' | 'projectName'>) {
-  const response = await fetch(`${NOTICE_ENDPOINT}/delivered`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      projectName: notice.projectName || PROJECT_NAME,
-      noticeId: notice.id,
-    }),
-    cache: 'no-store',
-  });
-
-  if (!response.ok) {
-    console.info(LOG_PREFIX, 'delivery report failed', response.status);
-  }
-}
-
-function normalizeNotice(notice: RemoteNotice | null | undefined): RemoteNotice | null {
-  if (!notice?.id || !notice.content || notice.enabled === false) {
+function normalizeNotice(release: AtomGitRelease | null | undefined): RemoteNotice | null {
+  if (!release?.tag_name || !release.body) {
     return null;
   }
 
+  const tag = String(release.tag_name);
   return {
-    id: String(notice.id),
-    projectName: String(notice.projectName || PROJECT_NAME),
-    enabled: true,
-    title: String(notice.title || '公告'),
-    content: String(notice.content),
-    createdAt: String(notice.createdAt || ''),
-    updatedAt: String(notice.updatedAt || ''),
+    id: tag,
+    title: String(release.name || tag),
+    content: String(release.body),
+    createdAt: formatTime(String(release.created_at || '')),
+    updatedAt: formatTime(String(release.created_at || '')),
   };
 }
 
 export async function fetchRemoteNotice() {
-  const url = new URL(NOTICE_ENDPOINT);
-  url.searchParams.set('projectName', PROJECT_NAME);
-
-  const response = await fetch(url.toString(), {
+  const response = await fetch(RELEASE_API_URL, {
     headers: {
       Accept: 'application/json',
     },
@@ -92,14 +75,14 @@ export async function fetchRemoteNotice() {
     return null;
   }
 
-  const data = await response.json().catch(() => null) as RemoteNoticeResponse | null;
+  const data = await response.json().catch(() => null) as AtomGitRelease | null;
   console.info(LOG_PREFIX, 'response', data);
-  if (!data || data.code !== 0) {
-    console.info(LOG_PREFIX, 'invalid response', data?.code);
+  if (!data) {
+    console.info(LOG_PREFIX, 'invalid response');
     return null;
   }
 
-  const notice = normalizeNotice(data.notice);
+  const notice = normalizeNotice(data);
   console.info(LOG_PREFIX, 'normalized notice', notice?.id || null);
   return notice;
 }

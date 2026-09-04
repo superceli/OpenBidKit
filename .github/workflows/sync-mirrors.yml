@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: atomgit-code-sync
-      cancel-in-progress: false
+      cancel-in-progress: true
 
     steps:
       - name: Checkout

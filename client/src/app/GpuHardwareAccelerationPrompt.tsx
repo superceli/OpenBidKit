@@ -11,7 +11,7 @@ function GpuHardwareAccelerationPrompt() {
     let cancelled = false;
 
     const loadStatus = async () => {
-      const status = await window.yibiao?.getGpuHardwareAccelerationStatus();
+      const status = await window.lvcert?.getGpuHardwareAccelerationStatus();
       if (!status || cancelled) {
         return;
       }
@@ -31,7 +31,7 @@ function GpuHardwareAccelerationPrompt() {
   const saveEnabled = async () => {
     try {
       setBusy(true);
-      await window.yibiao?.saveGpuHardwareAccelerationPreference(true);
+      await window.lvcert?.saveGpuHardwareAccelerationPreference(true);
       setOpen(false);
       showToast('GPU 硬件加速已启用', 'success');
     } catch (error) {
@@ -44,7 +44,7 @@ function GpuHardwareAccelerationPrompt() {
   const disableAndRestart = async () => {
     try {
       setBusy(true);
-      await window.yibiao?.relaunchWithGpuHardwareAccelerationDisabled();
+      await window.lvcert?.relaunchWithGpuHardwareAccelerationDisabled();
     } catch (error) {
       const message = error instanceof Error ? error.message : '切回兼容模式失败';
       setBusy(false);

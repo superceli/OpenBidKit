@@ -224,14 +224,14 @@ async function captureFullContent(webContents, width, height, options = {}) {
 }
 
 // 轮询页面资源与布局状态（单次不阻塞，便于主进程响应暂停）。
-// contentOnly：只量 #yibiao-capture-root 内容包围盒，避免 body 固定宽导致右侧留白。
+// contentOnly：只量 #lvcert-capture-root 内容包围盒，避免 body 固定宽导致右侧留白。
 async function probeLayoutMetrics(webContents, minWidth, contentOnly = false) {
   const floorWidth = Math.max(1, Math.round(Number(minWidth) || 1));
   return webContents.executeJavaScript(`(() => {
     const contentOnly = ${contentOnly ? 'true' : 'false'};
     const root = document.documentElement;
     const body = document.body;
-    const target = document.getElementById('yibiao-capture-root') || body || root;
+    const target = document.getElementById('lvcert-capture-root') || body || root;
     if (!target) return { ready: false, width: 0, height: 0 };
     const images = Array.from(document.images || []);
     const imagesReady = images.every((img) => img.complete);
@@ -296,7 +296,7 @@ async function probeLayoutMetrics(webContents, minWidth, contentOnly = false) {
 // 只检查文字的 transform；writing-mode 不在检查范围内，竖排文字保持允许。
 function buildHtmlLayoutProbeScript() {
   return `(() => {
-    const root=document.getElementById('yibiao-capture-root')||document.body||document.documentElement;
+    const root=document.getElementById('lvcert-capture-root')||document.body||document.documentElement;
     if(!root)return ['未找到截图画布'];
     const issues=[];
     const add=(value)=>{if(value&&!issues.includes(value)&&issues.length<12)issues.push(value)};
@@ -429,7 +429,7 @@ html, body {
   box-sizing: border-box !important;
 }
 *, *::before, *::after { box-sizing: border-box; }
-#yibiao-capture-root {
+#lvcert-capture-root {
   display: block;
   width: ${HTML_DESIGN_WIDTH}px;
   min-width: ${HTML_DESIGN_WIDTH}px;
@@ -444,9 +444,9 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   const wrapScript = `<script>
 (() => {
   const body = document.body;
-  if (!body || document.getElementById('yibiao-capture-root')) return;
+  if (!body || document.getElementById('lvcert-capture-root')) return;
   const root = document.createElement('div');
-  root.id = 'yibiao-capture-root';
+  root.id = 'lvcert-capture-root';
   while (body.firstChild) root.appendChild(body.firstChild);
   body.appendChild(root);
 })();
@@ -474,7 +474,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   ${styleTag}
 </head>
 <body>
-  <div id="yibiao-capture-root">${source}</div>
+  <div id="lvcert-capture-root">${source}</div>
 </body>
 </html>`;
 }
@@ -496,7 +496,7 @@ function buildMermaidDocument(code, mermaidScriptUrl) {
       height: fit-content;
       overflow: hidden;
     }
-    #yibiao-capture-root {
+    #lvcert-capture-root {
       display: inline-block;
       margin: 0;
       padding: 8px;
@@ -507,14 +507,14 @@ function buildMermaidDocument(code, mermaidScriptUrl) {
       min-height: 1px;
       line-height: 0;
     }
-    #yibiao-capture-root svg {
+    #lvcert-capture-root svg {
       display: block;
     }
   </style>
   <script src="${mermaidScriptUrl}"></script>
 </head>
 <body>
-  <div id="yibiao-capture-root"></div>
+  <div id="lvcert-capture-root"></div>
   <script>
     (async () => {
       try {
@@ -525,7 +525,7 @@ function buildMermaidDocument(code, mermaidScriptUrl) {
         mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
         const id = 'mermaid-' + Date.now();
         const { svg } = await mermaid.render(id, code);
-        const root = document.getElementById('yibiao-capture-root');
+        const root = document.getElementById('lvcert-capture-root');
         root.innerHTML = svg;
         const svgEl = root.querySelector('svg');
         if (svgEl) {

@@ -343,7 +343,7 @@ function createAssetContext(app, scope = 'documents') {
   const batchId = `${safeScope}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   return {
     baseDir: path.join(getImportedImagesDir(app), batchId),
-    urlPrefix: `yibiao-asset://imported-images/${encodeURIComponent(batchId)}`,
+    urlPrefix: `lvcert-asset://imported-images/${encodeURIComponent(batchId)}`,
     index: 0,
   };
 }
@@ -435,7 +435,7 @@ function isPathInsideDirectory(baseDir, targetPath) {
 async function resolveImageToAssetUrl(source, assets, context = {}) {
   const value = cleanMarkdownImageTarget(source);
   if (!value) return null;
-  if (/^yibiao-asset:\/\//i.test(value)) return value;
+  if (/^lvcert-asset:\/\//i.test(value)) return value;
 
   const data = parseDataUrl(value);
   if (data) {

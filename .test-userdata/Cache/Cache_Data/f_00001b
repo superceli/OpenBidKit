@@ -1,0 +1,232 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/shared/ui/MarkdownEditor.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=24542da6"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+var _s = $RefreshSig$();
+import * as Dialog from "/node_modules/.vite/deps/@radix-ui_react-dialog.js?v=24542da6";
+import __vite__cjsImport2_react from "/node_modules/.vite/deps/react.js?v=24542da6"; const useRef = __vite__cjsImport2_react["useRef"];
+const toolbarActions = [
+  { id: "bold", label: "加粗", title: "加粗", prefix: "**", suffix: "**", content: /* @__PURE__ */ jsxDEV("strong", { children: "B" }, void 0, false, {
+    fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+    lineNumber: 15,
+    columnNumber: 78
+  }, this) },
+  { id: "italic", label: "斜体", title: "斜体", prefix: "*", suffix: "*", content: /* @__PURE__ */ jsxDEV("em", { children: "I" }, void 0, false, {
+    fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+    lineNumber: 16,
+    columnNumber: 78
+  }, this) },
+  { id: "heading", label: "标题", title: "标题", prefix: "## ", suffix: "", content: "H" },
+  { id: "quote", label: "引用", title: "引用", prefix: "> ", suffix: "", content: "❝" },
+  { id: "unordered-list", label: "无序列表", title: "无序列表", prefix: "- ", suffix: "", content: "•" },
+  { id: "ordered-list", label: "有序列表", title: "有序列表", prefix: "1. ", suffix: "", content: "1." }
+];
+function MarkdownEditor({
+  value,
+  onChange,
+  placeholder = "输入 Markdown 内容...",
+  className,
+  disabled = false,
+  fullscreenTitle = "Markdown 全屏编辑",
+  fullscreenDescription = "全屏编辑当前 Markdown 内容。"
+}) {
+  _s();
+  const textareaRef = useRef(null);
+  const fullscreenTextareaRef = useRef(null);
+  function insertMarkdown(targetRef, prefix, suffix = "") {
+    const textarea = targetRef.current;
+    if (!textarea || disabled) {
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const scrollTop = textarea.scrollTop;
+    const selected = value.slice(start, end) || "文本";
+    const next = value.slice(0, start) + prefix + selected + suffix + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.scrollTop = scrollTop;
+      textarea.selectionStart = start + prefix.length;
+      textarea.selectionEnd = start + prefix.length + selected.length;
+    });
+  }
+  function renderToolbarButtons(targetRef) {
+    return toolbarActions.map(
+      (action) => /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          type: "button",
+          title: action.title,
+          "aria-label": action.label,
+          disabled,
+          onClick: () => insertMarkdown(targetRef, action.prefix, action.suffix),
+          children: action.content
+        },
+        action.id,
+        false,
+        {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 58,
+          columnNumber: 5
+        },
+        this
+      )
+    );
+  }
+  return /* @__PURE__ */ jsxDEV(Dialog.Root, { children: [
+    /* @__PURE__ */ jsxDEV("div", { className: `markdown-editor${className ? ` ${className}` : ""}`, children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "markdown-editor-toolbar", "aria-label": "Markdown 编辑工具栏", children: [
+        renderToolbarButtons(textareaRef),
+        /* @__PURE__ */ jsxDEV("span", { className: "markdown-editor-toolbar-spacer" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 76,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV(Dialog.Trigger, { asChild: true, children: /* @__PURE__ */ jsxDEV("button", { type: "button", className: "markdown-editor-fullscreen-trigger", disabled, "aria-label": "全屏编辑", title: "全屏编辑", children: "全屏" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 78,
+          columnNumber: 13
+        }, this) }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 77,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+        lineNumber: 74,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "textarea",
+        {
+          ref: textareaRef,
+          className: "markdown-editor-textarea",
+          value,
+          onChange: (event) => onChange(event.target.value),
+          placeholder,
+          disabled
+        },
+        void 0,
+        false,
+        {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 83,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+      lineNumber: 73,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Dialog.Portal, { children: [
+      /* @__PURE__ */ jsxDEV(Dialog.Overlay, { className: "markdown-fullscreen-overlay" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+        lineNumber: 93,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        Dialog.Content,
+        {
+          className: "markdown-editor-fullscreen-dialog",
+          onOpenAutoFocus: (event) => {
+            event.preventDefault();
+            requestAnimationFrame(() => fullscreenTextareaRef.current?.focus());
+          },
+          children: [
+            /* @__PURE__ */ jsxDEV(Dialog.Title, { className: "markdown-fullscreen-title", children: fullscreenTitle }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+              lineNumber: 101,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV(Dialog.Description, { className: "markdown-fullscreen-description", children: fullscreenDescription }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+              lineNumber: 102,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV(Dialog.Close, { className: "markdown-fullscreen-close", type: "button", children: "退出全屏" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+              lineNumber: 103,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "markdown-editor markdown-editor-fullscreen-body", children: [
+              /* @__PURE__ */ jsxDEV("div", { className: "markdown-editor-toolbar", "aria-label": "Markdown 全屏编辑工具栏", children: renderToolbarButtons(fullscreenTextareaRef) }, void 0, false, {
+                fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+                lineNumber: 105,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV(
+                "textarea",
+                {
+                  ref: fullscreenTextareaRef,
+                  className: "markdown-editor-textarea",
+                  value,
+                  onChange: (event) => onChange(event.target.value),
+                  placeholder,
+                  disabled
+                },
+                void 0,
+                false,
+                {
+                  fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+                  lineNumber: 108,
+                  columnNumber: 13
+                },
+                this
+              )
+            ] }, void 0, true, {
+              fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+              lineNumber: 104,
+              columnNumber: 11
+            }, this)
+          ]
+        },
+        void 0,
+        true,
+        {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+          lineNumber: 94,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+      lineNumber: 92,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx",
+    lineNumber: 72,
+    columnNumber: 5
+  }, this);
+}
+_s(MarkdownEditor, "SLje6kqdQNJBVcbFQyoOw4MHbJQ=");
+_c = MarkdownEditor;
+export default MarkdownEditor;
+var _c;
+$RefreshReg$(_c, "MarkdownEditor");
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+function $RefreshReg$(type, id) {
+  return RefreshRuntime.register(type, "D:/develop/OpenBidKit/client/src/shared/ui/MarkdownEditor.tsx " + id);
+}
+function $RefreshSig$() {
+  return RefreshRuntime.createSignatureFunctionForTransform();
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFBLFlBQ3JFLHVCQUFDLE9BQU8sYUFBUCxFQUFtQixXQUFVLG1DQUFtQ0MsbUNBQWpFO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXVGO0FBQUEsWUFDdkYsdUJBQUMsT0FBTyxPQUFQLEVBQWEsV0FBVSw2QkFBNEIsTUFBSyxVQUFTLG9CQUFsRTtBQUFBO0FBQUE7QUFBQTtBQUFBLG1CQUFzRTtBQUFBLFlBQ3RFLHVCQUFDLFNBQUksV0FBVSxtREFDYjtBQUFBLHFDQUFDLFNBQUksV0FBVSwyQkFBMEIsY0FBVyxvQkFDakRtQiwrQkFBcUJoQixxQkFBcUIsS0FEN0M7QUFBQTtBQUFBO0FBQUE7QUFBQSxxQkFFQTtBQUFBLGNBQ0E7QUFBQSxnQkFBQztBQUFBO0FBQUEsa0JBQ0MsS0FBS0E7QUFBQUEsa0JBQ0wsV0FBVTtBQUFBLGtCQUNWO0FBQUEsa0JBQ0EsVUFBVSxDQUFDbUIsVUFBVTNCLFNBQVMyQixNQUFNQyxPQUFPN0IsS0FBSztBQUFBLGtCQUNoRDtBQUFBLGtCQUNBO0FBQUE7QUFBQSxnQkFORjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsY0FNcUI7QUFBQSxpQkFWdkI7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFZQTtBQUFBO0FBQUE7QUFBQSxRQXRCRjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsTUF1QkE7QUFBQSxTQXpCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBMEJBO0FBQUEsT0E5Q0Y7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQStDQTtBQUVKO0FBQUNPLEdBbEdRUixnQkFBYztBQUFBLEtBQWRBO0FBb0dULGVBQWVBO0FBQWUsSUFBQWdDO0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbIkRpYWxvZyIsInVzZVJlZiIsInRvb2xiYXJBY3Rpb25zIiwiaWQiLCJsYWJlbCIsInRpdGxlIiwicHJlZml4Iiwic3VmZml4IiwiY29udGVudCIsIk1hcmtkb3duRWRpdG9yIiwidmFsdWUiLCJvbkNoYW5nZSIsInBsYWNlaG9sZGVyIiwiY2xhc3NOYW1lIiwiZGlzYWJsZWQiLCJmdWxsc2NyZWVuVGl0bGUiLCJmdWxsc2NyZWVuRGVzY3JpcHRpb24iLCJfcyIsInRleHRhcmVhUmVmIiwiZnVsbHNjcmVlblRleHRhcmVhUmVmIiwiaW5zZXJ0TWFya2Rvd24iLCJ0YXJnZXRSZWYiLCJ0ZXh0YXJlYSIsImN1cnJlbnQiLCJzdGFydCIsInNlbGVjdGlvblN0YXJ0IiwiZW5kIiwic2VsZWN0aW9uRW5kIiwic2Nyb2xsVG9wIiwic2VsZWN0ZWQiLCJzbGljZSIsIm5leHQiLCJyZXF1ZXN0QW5pbWF0aW9uRnJhbWUiLCJmb2N1cyIsImxlbmd0aCIsInJlbmRlclRvb2xiYXJCdXR0b25zIiwibWFwIiwiYWN0aW9uIiwiZXZlbnQiLCJ0YXJnZXQiLCJwcmV2ZW50RGVmYXVsdCIsIl9jIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIk1hcmtkb3duRWRpdG9yLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgKiBhcyBEaWFsb2cgZnJvbSAnQHJhZGl4LXVpL3JlYWN0LWRpYWxvZyc7XG5pbXBvcnQgeyB1c2VSZWYsIHR5cGUgUmVmT2JqZWN0IH0gZnJvbSAncmVhY3QnO1xuXG5leHBvcnQgaW50ZXJmYWNlIE1hcmtkb3duRWRpdG9yUHJvcHMge1xuICB2YWx1ZTogc3RyaW5nO1xuICBvbkNoYW5nZTogKHZhbHVlOiBzdHJpbmcpID0+IHZvaWQ7XG4gIHBsYWNlaG9sZGVyPzogc3RyaW5nO1xuICBjbGFzc05hbWU/OiBzdHJpbmc7XG4gIGRpc2FibGVkPzogYm9vbGVhbjtcbiAgZnVsbHNjcmVlblRpdGxlPzogc3RyaW5nO1xuICBmdWxsc2NyZWVuRGVzY3JpcHRpb24/OiBzdHJpbmc7XG59XG5cbmNvbnN0IHRvb2xiYXJBY3Rpb25zID0gW1xuICB7IGlkOiAnYm9sZCcsIGxhYmVsOiAn5Yqg57KXJywgdGl0bGU6ICfliqDnspcnLCBwcmVmaXg6ICcqKicsIHN1ZmZpeDogJyoqJywgY29udGVudDogPHN0cm9uZz5CPC9zdHJvbmc+IH0sXG4gIHsgaWQ6ICdpdGFsaWMnLCBsYWJlbDogJ+aWnOS9kycsIHRpdGxlOiAn5pac5L2TJywgcHJlZml4OiAnKicsIHN1ZmZpeDogJyonLCBjb250ZW50OiA8ZW0+STwvZW0+IH0sXG4gIHsgaWQ6ICdoZWFkaW5nJywgbGFiZWw6ICfmoIfpopgnLCB0aXRsZTogJ+agh+mimCcsIHByZWZpeDogJyMjICcsIHN1ZmZpeDogJycsIGNvbnRlbnQ6ICdIJyB9LFxuICB7IGlkOiAncXVvdGUnLCBsYWJlbDogJ+W8leeUqCcsIHRpdGxlOiAn5byV55SoJywgcHJlZml4OiAnPiAnLCBzdWZmaXg6ICcnLCBjb250ZW50OiAn4p2dJyB9LFxuICB7IGlkOiAndW5vcmRlcmVkLWxpc3QnLCBsYWJlbDogJ+aXoOW6j+WIl+ihqCcsIHRpdGxlOiAn5peg5bqP5YiX6KGoJywgcHJlZml4OiAnLSAnLCBzdWZmaXg6ICcnLCBjb250ZW50OiAn4oCiJyB9LFxuICB7IGlkOiAnb3JkZXJlZC1saXN0JywgbGFiZWw6ICfmnInluo/liJfooagnLCB0aXRsZTogJ+acieW6j+WIl+ihqCcsIHByZWZpeDogJzEuICcsIHN1ZmZpeDogJycsIGNvbnRlbnQ6ICcxLicgfSxcbl07XG5cbmZ1bmN0aW9uIE1hcmtkb3duRWRpdG9yKHtcbiAgdmFsdWUsXG4gIG9uQ2hhbmdlLFxuICBwbGFjZWhvbGRlciA9ICfovpPlhaUgTWFya2Rvd24g5YaF5a65Li4uJyxcbiAgY2xhc3NOYW1lLFxuICBkaXNhYmxlZCA9IGZhbHNlLFxuICBmdWxsc2NyZWVuVGl0bGUgPSAnTWFya2Rvd24g5YWo5bGP57yW6L6RJyxcbiAgZnVsbHNjcmVlbkRlc2NyaXB0aW9uID0gJ+WFqOWxj+e8lui+keW9k+WJjSBNYXJrZG93biDlhoXlrrnjgIInLFxufTogTWFya2Rvd25FZGl0b3JQcm9wcykge1xuICBjb25zdCB0ZXh0YXJlYVJlZiA9IHVzZVJlZjxIVE1MVGV4dEFyZWFFbGVtZW50PihudWxsKTtcbiAgY29uc3QgZnVsbHNjcmVlblRleHRhcmVhUmVmID0gdXNlUmVmPEhUTUxUZXh0QXJlYUVsZW1lbnQ+KG51bGwpO1xuXG4gIGZ1bmN0aW9uIGluc2VydE1hcmtkb3duKHRhcmdldFJlZjogUmVmT2JqZWN0PEhUTUxUZXh0QXJlYUVsZW1lbnQgfCBudWxsPiwgcHJlZml4OiBzdHJpbmcsIHN1ZmZpeCA9ICcnKSB7XG4gICAgY29uc3QgdGV4dGFyZWEgPSB0YXJnZXRSZWYuY3VycmVudDtcbiAgICBpZiAoIXRleHRhcmVhIHx8IGRpc2FibGVkKSB7XG4gICAgICByZXR1cm47XG4gICAgfVxuXG4gICAgY29uc3Qgc3RhcnQgPSB0ZXh0YXJlYS5zZWxlY3Rpb25TdGFydDtcbiAgICBjb25zdCBlbmQgPSB0ZXh0YXJlYS5zZWxlY3Rpb25FbmQ7XG4gICAgY29uc3Qgc2Nyb2xsVG9wID0gdGV4dGFyZWEuc2Nyb2xsVG9wO1xuICAgIGNvbnN0IHNlbGVjdGVkID0gdmFsdWUuc2xpY2Uoc3RhcnQsIGVuZCkgfHwgJ+aWh+acrCc7XG4gICAgY29uc3QgbmV4dCA9IHZhbHVlLnNsaWNlKDAsIHN0YXJ0KSArIHByZWZpeCArIHNlbGVjdGVkICsgc3VmZml4ICsgdmFsdWUuc2xpY2UoZW5kKTtcbiAgICBvbkNoYW5nZShuZXh0KTtcblxuICAgIHJlcXVlc3RBbmltYXRpb25GcmFtZSgoKSA9PiB7XG4gICAgICB0ZXh0YXJlYS5mb2N1cygpO1xuICAgICAgdGV4dGFyZWEuc2Nyb2xsVG9wID0gc2Nyb2xsVG9wO1xuICAgICAgdGV4dGFyZWEuc2VsZWN0aW9uU3RhcnQgPSBzdGFydCArIHByZWZpeC5sZW5ndGg7XG4gICAgICB0ZXh0YXJlYS5zZWxlY3Rpb25FbmQgPSBzdGFydCArIHByZWZpeC5sZW5ndGggKyBzZWxlY3RlZC5sZW5ndGg7XG4gICAgfSk7XG4gIH1cblxuICBmdW5jdGlvbiByZW5kZXJUb29sYmFyQnV0dG9ucyh0YXJnZXRSZWY6IFJlZk9iamVjdDxIVE1MVGV4dEFyZWFFbGVtZW50IHwgbnVsbD4pIHtcbiAgICByZXR1cm4gdG9vbGJhckFjdGlvbnMubWFwKChhY3Rpb24pID0+IChcbiAgICAgIDxidXR0b25cbiAgICAgICAgdHlwZT1cImJ1dHRvblwiXG4gICAgICAgIHRpdGxlPXthY3Rpb24udGl0bGV9XG4gICAgICAgIGFyaWEtbGFiZWw9e2FjdGlvbi5sYWJlbH1cbiAgICAgICAgZGlzYWJsZWQ9e2Rpc2FibGVkfVxuICAgICAgICBvbkNsaWNrPXsoKSA9PiBpbnNlcnRNYXJrZG93bih0YXJnZXRSZWYsIGFjdGlvbi5wcmVmaXgsIGFjdGlvbi5zdWZmaXgpfVxuICAgICAgICBrZXk9e2FjdGlvbi5pZH1cbiAgICAgID5cbiAgICAgICAge2FjdGlvbi5jb250ZW50fVxuICAgICAgPC9idXR0b24+XG4gICAgKSk7XG4gIH1cblxuICByZXR1cm4gKFxuICAgIDxEaWFsb2cuUm9vdD5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPXtgbWFya2Rvd24tZWRpdG9yJHtjbGFzc05hbWUgPyBgICR7Y2xhc3NOYW1lfWAgOiAnJ31gfT5cbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtYXJrZG93bi1lZGl0b3ItdG9vbGJhclwiIGFyaWEtbGFiZWw9XCJNYXJrZG93biDnvJbovpHlt6XlhbfmoI9cIj5cbiAgICAgICAgICB7cmVuZGVyVG9vbGJhckJ1dHRvbnModGV4dGFyZWFSZWYpfVxuICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cIm1hcmtkb3duLWVkaXRvci10b29sYmFyLXNwYWNlclwiIC8+XG4gICAgICAgICAgPERpYWxvZy5UcmlnZ2VyIGFzQ2hpbGQ+XG4gICAgICAgICAgICA8YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJtYXJrZG93bi1lZGl0b3ItZnVsbHNjcmVlbi10cmlnZ2VyXCIgZGlzYWJsZWQ9e2Rpc2FibGVkfSBhcmlhLWxhYmVsPVwi5YWo5bGP57yW6L6RXCIgdGl0bGU9XCLlhajlsY/nvJbovpFcIj5cbiAgICAgICAgICAgICAg5YWo5bGPXG4gICAgICAgICAgICA8L2J1dHRvbj5cbiAgICAgICAgICA8L0RpYWxvZy5UcmlnZ2VyPlxuICAgICAgICA8L2Rpdj5cbiAgICAgICAgPHRleHRhcmVhXG4gICAgICAgICAgcmVmPXt0ZXh0YXJlYVJlZn1cbiAgICAgICAgICBjbGFzc05hbWU9XCJtYXJrZG93bi1lZGl0b3ItdGV4dGFyZWFcIlxuICAgICAgICAgIHZhbHVlPXt2YWx1ZX1cbiAgICAgICAgICBvbkNoYW5nZT17KGV2ZW50KSA9PiBvbkNoYW5nZShldmVudC50YXJnZXQudmFsdWUpfVxuICAgICAgICAgIHBsYWNlaG9sZGVyPXtwbGFjZWhvbGRlcn1cbiAgICAgICAgICBkaXNhYmxlZD17ZGlzYWJsZWR9XG4gICAgICAgIC8+XG4gICAgICA8L2Rpdj5cbiAgICAgIDxEaWFsb2cuUG9ydGFsPlxuICAgICAgICA8RGlhbG9nLk92ZXJsYXkgY2xhc3NOYW1lPVwibWFya2Rvd24tZnVsbHNjcmVlbi1vdmVybGF5XCIgLz5cbiAgICAgICAgPERpYWxvZy5Db250ZW50XG4gICAgICAgICAgY2xhc3NOYW1lPVwibWFya2Rvd24tZWRpdG9yLWZ1bGxzY3JlZW4tZGlhbG9nXCJcbiAgICAgICAgICBvbk9wZW5BdXRvRm9jdXM9eyhldmVudCkgPT4ge1xuICAgICAgICAgICAgZXZlbnQucHJldmVudERlZmF1bHQoKTtcbiAgICAgICAgICAgIHJlcXVlc3RBbmltYXRpb25GcmFtZSgoKSA9PiBmdWxsc2NyZWVuVGV4dGFyZWFSZWYuY3VycmVudD8uZm9jdXMoKSk7XG4gICAgICAgICAgfX1cbiAgICAgICAgPlxuICAgICAgICAgIDxEaWFsb2cuVGl0bGUgY2xhc3NOYW1lPVwibWFya2Rvd24tZnVsbHNjcmVlbi10aXRsZVwiPntmdWxsc2NyZWVuVGl0bGV9PC9EaWFsb2cuVGl0bGU+XG4gICAgICAgICAgPERpYWxvZy5EZXNjcmlwdGlvbiBjbGFzc05hbWU9XCJtYXJrZG93bi1mdWxsc2NyZWVuLWRlc2NyaXB0aW9uXCI+e2Z1bGxzY3JlZW5EZXNjcmlwdGlvbn08L0RpYWxvZy5EZXNjcmlwdGlvbj5cbiAgICAgICAgICA8RGlhbG9nLkNsb3NlIGNsYXNzTmFtZT1cIm1hcmtkb3duLWZ1bGxzY3JlZW4tY2xvc2VcIiB0eXBlPVwiYnV0dG9uXCI+6YCA5Ye65YWo5bGPPC9EaWFsb2cuQ2xvc2U+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtYXJrZG93bi1lZGl0b3IgbWFya2Rvd24tZWRpdG9yLWZ1bGxzY3JlZW4tYm9keVwiPlxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtYXJrZG93bi1lZGl0b3ItdG9vbGJhclwiIGFyaWEtbGFiZWw9XCJNYXJrZG93biDlhajlsY/nvJbovpHlt6XlhbfmoI9cIj5cbiAgICAgICAgICAgICAge3JlbmRlclRvb2xiYXJCdXR0b25zKGZ1bGxzY3JlZW5UZXh0YXJlYVJlZil9XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIDx0ZXh0YXJlYVxuICAgICAgICAgICAgICByZWY9e2Z1bGxzY3JlZW5UZXh0YXJlYVJlZn1cbiAgICAgICAgICAgICAgY2xhc3NOYW1lPVwibWFya2Rvd24tZWRpdG9yLXRleHRhcmVhXCJcbiAgICAgICAgICAgICAgdmFsdWU9e3ZhbHVlfVxuICAgICAgICAgICAgICBvbkNoYW5nZT17KGV2ZW50KSA9PiBvbkNoYW5nZShldmVudC50YXJnZXQudmFsdWUpfVxuICAgICAgICAgICAgICBwbGFjZWhvbGRlcj17cGxhY2Vob2xkZXJ9XG4gICAgICAgICAgICAgIGRpc2FibGVkPXtkaXNhYmxlZH1cbiAgICAgICAgICAgIC8+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvRGlhbG9nLkNvbnRlbnQ+XG4gICAgICA8L0RpYWxvZy5Qb3J0YWw+XG4gICAgPC9EaWFsb2cuUm9vdD5cbiAgKTtcbn1cblxuZXhwb3J0IGRlZmF1bHQgTWFya2Rvd25FZGl0b3I7XG4iXSwiZmlsZSI6IkQ6L2RldmVsb3AvT3BlbkJpZEtpdC9jbGllbnQvc3JjL3NoYXJlZC91aS9NYXJrZG93bkVkaXRvci50c3gifQ==

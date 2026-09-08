@@ -36,7 +36,7 @@ const JINLONG_DEPRECATED_MODEL_MAP = {
 };
 const IMAGE_MODEL_TEST_TIMEOUT_MESSAGE = '生图模型测试超时，请检查 Base URL、API Key 或模型名称';
 const ANALYTICS_ENDPOINT = 'https://analytics.agnet.top/track';
-const ANALYTICS_PROJECT_NAME = 'yibiao-client';
+const ANALYTICS_PROJECT_NAME = 'lvcert-client';
 const MODEL_INFO_ENDPOINT = 'https://analytics.agnet.top/model-info';
 const OPENAI_IMAGE_PROVIDER_META = {
   jinlong: {
@@ -473,7 +473,7 @@ function saveGeneratedImage(app, image) {
   const filePath = path.join(imagesDir, fileName);
   fs.writeFileSync(filePath, image.buffer);
   return {
-    asset_url: `yibiao-asset://generated-images/${encodeURIComponent(fileName)}`,
+    asset_url: `lvcert-asset://generated-images/${encodeURIComponent(fileName)}`,
     file_path: filePath,
     mime_type: image.mime_type,
   };

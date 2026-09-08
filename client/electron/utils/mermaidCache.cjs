@@ -36,7 +36,7 @@ function getMermaidCacheFilePath(app, hash) {
 }
 
 function getMermaidCacheAssetUrl(hash) {
-  return `yibiao-asset://generated-images/${encodeURIComponent(MERMAID_CACHE_DIR_NAME)}/${encodeURIComponent(`${hash}.png`)}?pixel-density=3`;
+  return `lvcert-asset://generated-images/${encodeURIComponent(MERMAID_CACHE_DIR_NAME)}/${encodeURIComponent(`${hash}.png`)}?pixel-density=3`;
 }
 
 function getMermaidCacheEntry(app, code, options = {}) {

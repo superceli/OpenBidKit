@@ -1,0 +1,209 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/shared/ui/OfflineLicenseActivationDialog.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=24542da6"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+var _s = $RefreshSig$();
+import * as Dialog from "/node_modules/.vite/deps/@radix-ui_react-dialog.js?v=24542da6";
+import __vite__cjsImport2_react from "/node_modules/.vite/deps/react.js?v=24542da6"; const useEffect = __vite__cjsImport2_react["useEffect"]; const useState = __vite__cjsImport2_react["useState"];
+import { useToast } from "/src/shared/ui/ToastProvider.tsx";
+function OfflineLicenseActivationDialog({ open, onOpenChange, onActivated }) {
+  _s();
+  const [clientId, setClientId] = useState("");
+  const [licenseCode, setLicenseCode] = useState("");
+  const [busyAction, setBusyAction] = useState(null);
+  const { showToast } = useToast();
+  useEffect(() => {
+    if (!open) return;
+    let disposed = false;
+    void window.lvcert?.config.load().then((config) => {
+      if (!disposed) {
+        setClientId(config?.analytics_client_id || "");
+      }
+    }).catch(() => {
+      if (!disposed) {
+        setClientId("");
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [open]);
+  const handleActivationResult = (result) => {
+    if (!result) {
+      throw new Error("离线授权激活未返回结果");
+    }
+    if (result.canceled) {
+      showToast(result.message || "已取消选择", "info");
+      return;
+    }
+    if (!result.success) {
+      showToast(result.message || "离线授权激活失败", "error");
+      return;
+    }
+    showToast(result.message || "离线授权已激活", "success");
+    onActivated?.(result.status);
+    onOpenChange(false);
+    setLicenseCode("");
+  };
+  const importOfflineFile = async () => {
+    if (busyAction) return;
+    try {
+      setBusyAction("file");
+      const result = await window.lvcert?.license.importOfflineFile();
+      handleActivationResult(result);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "导入离线授权文件失败", "error");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+  const activateOfflineCode = async () => {
+    if (busyAction) return;
+    if (!licenseCode.trim()) {
+      showToast("请先粘贴离线授权码", "info");
+      return;
+    }
+    try {
+      setBusyAction("code");
+      const result = await window.lvcert?.license.activateOfflineCode(licenseCode);
+      handleActivationResult(result);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "离线授权码激活失败", "error");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+  const copyClientId = async () => {
+    if (!clientId) {
+      showToast("当前 Client ID 仍在读取中", "info");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(clientId);
+      showToast("Client ID 已复制", "success");
+    } catch {
+      showToast("复制失败，请手动选择 Client ID", "error");
+    }
+  };
+  return /* @__PURE__ */ jsxDEV(Dialog.Root, { open, onOpenChange, children: /* @__PURE__ */ jsxDEV(Dialog.Portal, { children: [
+    /* @__PURE__ */ jsxDEV(Dialog.Overlay, { className: "content-regenerate-modal" }, void 0, false, {
+      fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+      lineNumber: 103,
+      columnNumber: 9
+    }, this),
+    /* @__PURE__ */ jsxDEV(Dialog.Content, { className: "offline-license-dialog", children: [
+      /* @__PURE__ */ jsxDEV(Dialog.Title, { children: "离线激活授权" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 105,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "offline-license-client", children: [
+        /* @__PURE__ */ jsxDEV("span", { children: "当前 Client ID" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 107,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("code", { children: clientId || "读取中..." }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 108,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("button", { type: "button", className: "secondary-action", onClick: copyClientId, children: "复制" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 109,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 106,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "offline-license-import", children: /* @__PURE__ */ jsxDEV("button", { type: "button", className: "primary-action", onClick: importOfflineFile, disabled: Boolean(busyAction), children: busyAction === "file" ? "导入中..." : "导入授权文件" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 112,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 111,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("label", { className: "offline-license-code-field", children: [
+        /* @__PURE__ */ jsxDEV("span", { children: "离线授权码" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 117,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("textarea", { value: licenseCode, onChange: (event) => setLicenseCode(event.target.value), placeholder: "粘贴 Dashboard 生成的离线授权码" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 118,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 116,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "offline-license-actions", children: [
+        /* @__PURE__ */ jsxDEV(Dialog.Close, { asChild: true, children: /* @__PURE__ */ jsxDEV("button", { type: "button", className: "secondary-action", disabled: Boolean(busyAction), children: "取消" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 122,
+          columnNumber: 15
+        }, this) }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 121,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("button", { type: "button", className: "primary-action", onClick: activateOfflineCode, disabled: Boolean(busyAction), children: busyAction === "code" ? "激活中..." : "激活授权码" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+          lineNumber: 124,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+        lineNumber: 120,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+      lineNumber: 104,
+      columnNumber: 9
+    }, this)
+  ] }, void 0, true, {
+    fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+    lineNumber: 102,
+    columnNumber: 7
+  }, this) }, void 0, false, {
+    fileName: "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx",
+    lineNumber: 101,
+    columnNumber: 5
+  }, this);
+}
+_s(OfflineLicenseActivationDialog, "C2FP/cmFrgzCwfZrl4THJ8xBkt4=", false, function() {
+  return [useToast];
+});
+_c = OfflineLicenseActivationDialog;
+export default OfflineLicenseActivationDialog;
+var _c;
+$RefreshReg$(_c, "OfflineLicenseActivationDialog");
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+function $RefreshReg$(type, id) {
+  return RefreshRuntime.register(type, "D:/develop/OpenBidKit/client/src/shared/ui/OfflineLicenseActivationDialog.tsx " + id);
+}
+function $RefreshSig$() {
+  return RefreshRuntime.createSignatureFunctionForTransform();
+}
+
+//# sourceMappingURL=data:application/json;base64,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QTBIO0FBQUEsV0FGNUg7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQUdBO0FBQUEsTUFDQSx1QkFBQyxTQUFJLFdBQVUsMkJBQ2I7QUFBQSwrQkFBQyxPQUFPLE9BQVAsRUFBYSxTQUFPLE1BQ25CLGlDQUFDLFlBQU8sTUFBSyxVQUFTLFdBQVUsb0JBQW1CLFVBQVVILFFBQVEzQixVQUFVLEdBQUcsa0JBQWxGO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFBb0YsS0FEdEY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUVBO0FBQUEsUUFDQSx1QkFBQyxZQUFPLE1BQUssVUFBUyxXQUFVLGtCQUFpQixTQUFTcUIscUJBQXFCLFVBQVVNLFFBQVEzQixVQUFVLEdBQ3hHQSx5QkFBZSxTQUFTLFdBQVcsV0FEdEM7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUVBO0FBQUEsV0FORjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBT0E7QUFBQSxTQXZCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBd0JBO0FBQUEsT0ExQkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQTJCQSxLQTVCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBNkJBO0FBRUo7QUFBQ0wsR0F0SFFKLGdDQUE4QjtBQUFBLFVBSWZELFFBQVE7QUFBQTtBQUFBLEtBSnZCQztBQXdIVCxlQUFlQTtBQUErQixJQUFBd0M7QUFBQSxhQUFBQSxJQUFBIiwibmFtZXMiOlsiRGlhbG9nIiwidXNlRWZmZWN0IiwidXNlU3RhdGUiLCJ1c2VUb2FzdCIsIk9mZmxpbmVMaWNlbnNlQWN0aXZhdGlvbkRpYWxvZyIsIm9wZW4iLCJvbk9wZW5DaGFuZ2UiLCJvbkFjdGl2YXRlZCIsIl9zIiwiY2xpZW50SWQiLCJzZXRDbGllbnRJZCIsImxpY2Vuc2VDb2RlIiwic2V0TGljZW5zZUNvZGUiLCJidXN5QWN0aW9uIiwic2V0QnVzeUFjdGlvbiIsInNob3dUb2FzdCIsImRpc3Bvc2VkIiwid2luZG93IiwibHZjZXJ0IiwiY29uZmlnIiwibG9hZCIsInRoZW4iLCJhbmFseXRpY3NfY2xpZW50X2lkIiwiY2F0Y2giLCJoYW5kbGVBY3RpdmF0aW9uUmVzdWx0IiwicmVzdWx0IiwiRXJyb3IiLCJjYW5jZWxlZCIsIm1lc3NhZ2UiLCJzdWNjZXNzIiwic3RhdHVzIiwiaW1wb3J0T2ZmbGluZUZpbGUiLCJsaWNlbnNlIiwiZXJyb3IiLCJhY3RpdmF0ZU9mZmxpbmVDb2RlIiwidHJpbSIsImNvcHlDbGllbnRJZCIsIm5hdmlnYXRvciIsImNsaXBib2FyZCIsIndyaXRlVGV4dCIsIkJvb2xlYW4iLCJldmVudCIsInRhcmdldCIsInZhbHVlIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiT2ZmbGluZUxpY2Vuc2VBY3RpdmF0aW9uRGlhbG9nLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgKiBhcyBEaWFsb2cgZnJvbSAnQHJhZGl4LXVpL3JlYWN0LWRpYWxvZyc7XG5pbXBvcnQgeyB1c2VFZmZlY3QsIHVzZVN0YXRlIH0gZnJvbSAncmVhY3QnO1xuaW1wb3J0IHR5cGUgeyBMaWNlbnNlT2ZmbGluZUFjdGl2YXRpb25SZXN1bHQsIExpY2Vuc2VSdW50aW1lU3RhdHVzIH0gZnJvbSAnLi4vdHlwZXMnO1xuaW1wb3J0IHsgdXNlVG9hc3QgfSBmcm9tICcuL1RvYXN0UHJvdmlkZXInO1xuXG5pbnRlcmZhY2UgT2ZmbGluZUxpY2Vuc2VBY3RpdmF0aW9uRGlhbG9nUHJvcHMge1xuICBvcGVuOiBib29sZWFuO1xuICBvbk9wZW5DaGFuZ2U6IChvcGVuOiBib29sZWFuKSA9PiB2b2lkO1xuICBvbkFjdGl2YXRlZD86IChzdGF0dXM6IExpY2Vuc2VSdW50aW1lU3RhdHVzKSA9PiB2b2lkO1xufVxuXG50eXBlIEJ1c3lBY3Rpb24gPSAnZmlsZScgfCAnY29kZScgfCBudWxsO1xuXG5mdW5jdGlvbiBPZmZsaW5lTGljZW5zZUFjdGl2YXRpb25EaWFsb2coeyBvcGVuLCBvbk9wZW5DaGFuZ2UsIG9uQWN0aXZhdGVkIH06IE9mZmxpbmVMaWNlbnNlQWN0aXZhdGlvbkRpYWxvZ1Byb3BzKSB7XG4gIGNvbnN0IFtjbGllbnRJZCwgc2V0Q2xpZW50SWRdID0gdXNlU3RhdGUoJycpO1xuICBjb25zdCBbbGljZW5zZUNvZGUsIHNldExpY2Vuc2VDb2RlXSA9IHVzZVN0YXRlKCcnKTtcbiAgY29uc3QgW2J1c3lBY3Rpb24sIHNldEJ1c3lBY3Rpb25dID0gdXNlU3RhdGU8QnVzeUFjdGlvbj4obnVsbCk7XG4gIGNvbnN0IHsgc2hvd1RvYXN0IH0gPSB1c2VUb2FzdCgpO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKCFvcGVuKSByZXR1cm47XG4gICAgbGV0IGRpc3Bvc2VkID0gZmFsc2U7XG4gICAgdm9pZCB3aW5kb3cubHZjZXJ0Py5jb25maWcubG9hZCgpXG4gICAgICAudGhlbigoY29uZmlnKSA9PiB7XG4gICAgICAgIGlmICghZGlzcG9zZWQpIHtcbiAgICAgICAgICBzZXRDbGllbnRJZChjb25maWc/LmFuYWx5dGljc19jbGllbnRfaWQgfHwgJycpO1xuICAgICAgICB9XG4gICAgICB9KVxuICAgICAgLmNhdGNoKCgpID0+IHtcbiAgICAgICAgaWYgKCFkaXNwb3NlZCkge1xuICAgICAgICAgIHNldENsaWVudElkKCcnKTtcbiAgICAgICAgfVxuICAgICAgfSk7XG4gICAgcmV0dXJuICgpID0+IHtcbiAgICAgIGRpc3Bvc2VkID0gdHJ1ZTtcbiAgICB9O1xuICB9LCBbb3Blbl0pO1xuXG4gIGNvbnN0IGhhbmRsZUFjdGl2YXRpb25SZXN1bHQgPSAocmVzdWx0OiBMaWNlbnNlT2ZmbGluZUFjdGl2YXRpb25SZXN1bHQgfCB1bmRlZmluZWQpID0+IHtcbiAgICBpZiAoIXJlc3VsdCkge1xuICAgICAgdGhyb3cgbmV3IEVycm9yKCfnprvnur/mjojmnYPmv4DmtLvmnKrov5Tlm57nu5PmnpwnKTtcbiAgICB9XG4gICAgaWYgKHJlc3VsdC5jYW5jZWxlZCkge1xuICAgICAgc2hvd1RvYXN0KHJlc3VsdC5tZXNzYWdlIHx8ICflt7Llj5bmtojpgInmi6knLCAnaW5mbycpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cbiAgICBpZiAoIXJlc3VsdC5zdWNjZXNzKSB7XG4gICAgICBzaG93VG9hc3QocmVzdWx0Lm1lc3NhZ2UgfHwgJ+emu+e6v+aOiOadg+a/gOa0u+Wksei0pScsICdlcnJvcicpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cbiAgICBzaG93VG9hc3QocmVzdWx0Lm1lc3NhZ2UgfHwgJ+emu+e6v+aOiOadg+W3sua/gOa0uycsICdzdWNjZXNzJyk7XG4gICAgb25BY3RpdmF0ZWQ/LihyZXN1bHQuc3RhdHVzKTtcbiAgICBvbk9wZW5DaGFuZ2UoZmFsc2UpO1xuICAgIHNldExpY2Vuc2VDb2RlKCcnKTtcbiAgfTtcblxuICBjb25zdCBpbXBvcnRPZmZsaW5lRmlsZSA9IGFzeW5jICgpID0+IHtcbiAgICBpZiAoYnVzeUFjdGlvbikgcmV0dXJuO1xuICAgIHRyeSB7XG4gICAgICBzZXRCdXN5QWN0aW9uKCdmaWxlJyk7XG4gICAgICBjb25zdCByZXN1bHQgPSBhd2FpdCB3aW5kb3cubHZjZXJ0Py5saWNlbnNlLmltcG9ydE9mZmxpbmVGaWxlKCk7XG4gICAgICBoYW5kbGVBY3RpdmF0aW9uUmVzdWx0KHJlc3VsdCk7XG4gICAgfSBjYXRjaCAoZXJyb3IpIHtcbiAgICAgIHNob3dUb2FzdChlcnJvciBpbnN0YW5jZW9mIEVycm9yID8gZXJyb3IubWVzc2FnZSA6ICflr7zlhaXnprvnur/mjojmnYPmlofku7blpLHotKUnLCAnZXJyb3InKTtcbiAgICB9IGZpbmFsbHkge1xuICAgICAgc2V0QnVzeUFjdGlvbihudWxsKTtcbiAgICB9XG4gIH07XG5cbiAgY29uc3QgYWN0aXZhdGVPZmZsaW5lQ29kZSA9IGFzeW5jICgpID0+IHtcbiAgICBpZiAoYnVzeUFjdGlvbikgcmV0dXJuO1xuICAgIGlmICghbGljZW5zZUNvZGUudHJpbSgpKSB7XG4gICAgICBzaG93VG9hc3QoJ+ivt+WFiOeymOi0tOemu+e6v+aOiOadg+eggScsICdpbmZvJyk7XG4gICAgICByZXR1cm47XG4gICAgfVxuICAgIHRyeSB7XG4gICAgICBzZXRCdXN5QWN0aW9uKCdjb2RlJyk7XG4gICAgICBjb25zdCByZXN1bHQgPSBhd2FpdCB3aW5kb3cubHZjZXJ0Py5saWNlbnNlLmFjdGl2YXRlT2ZmbGluZUNvZGUobGljZW5zZUNvZGUpO1xuICAgICAgaGFuZGxlQWN0aXZhdGlvblJlc3VsdChyZXN1bHQpO1xuICAgIH0gY2F0Y2ggKGVycm9yKSB7XG4gICAgICBzaG93VG9hc3QoZXJyb3IgaW5zdGFuY2VvZiBFcnJvciA/IGVycm9yLm1lc3NhZ2UgOiAn56a757q/5o6I5p2D56CB5r+A5rS75aSx6LSlJywgJ2Vycm9yJyk7XG4gICAgfSBmaW5hbGx5IHtcbiAgICAgIHNldEJ1c3lBY3Rpb24obnVsbCk7XG4gICAgfVxuICB9O1xuXG4gIGNvbnN0IGNvcHlDbGllbnRJZCA9IGFzeW5jICgpID0+IHtcbiAgICBpZiAoIWNsaWVudElkKSB7XG4gICAgICBzaG93VG9hc3QoJ+W9k+WJjSBDbGllbnQgSUQg5LuN5Zyo6K+75Y+W5LitJywgJ2luZm8nKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG4gICAgdHJ5IHtcbiAgICAgIGF3YWl0IG5hdmlnYXRvci5jbGlwYm9hcmQud3JpdGVUZXh0KGNsaWVudElkKTtcbiAgICAgIHNob3dUb2FzdCgnQ2xpZW50IElEIOW3suWkjeWIticsICdzdWNjZXNzJyk7XG4gICAgfSBjYXRjaCB7XG4gICAgICBzaG93VG9hc3QoJ+WkjeWItuWksei0pe+8jOivt+aJi+WKqOmAieaLqSBDbGllbnQgSUQnLCAnZXJyb3InKTtcbiAgICB9XG4gIH07XG5cbiAgcmV0dXJuIChcbiAgICA8RGlhbG9nLlJvb3Qgb3Blbj17b3Blbn0gb25PcGVuQ2hhbmdlPXtvbk9wZW5DaGFuZ2V9PlxuICAgICAgPERpYWxvZy5Qb3J0YWw+XG4gICAgICAgIDxEaWFsb2cuT3ZlcmxheSBjbGFzc05hbWU9XCJjb250ZW50LXJlZ2VuZXJhdGUtbW9kYWxcIiAvPlxuICAgICAgICA8RGlhbG9nLkNvbnRlbnQgY2xhc3NOYW1lPVwib2ZmbGluZS1saWNlbnNlLWRpYWxvZ1wiPlxuICAgICAgICAgIDxEaWFsb2cuVGl0bGU+56a757q/5r+A5rS75o6I5p2DPC9EaWFsb2cuVGl0bGU+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJvZmZsaW5lLWxpY2Vuc2UtY2xpZW50XCI+XG4gICAgICAgICAgICA8c3Bhbj7lvZPliY0gQ2xpZW50IElEPC9zcGFuPlxuICAgICAgICAgICAgPGNvZGU+e2NsaWVudElkIHx8ICfor7vlj5bkuK0uLi4nfTwvY29kZT5cbiAgICAgICAgICAgIDxidXR0b24gdHlwZT1cImJ1dHRvblwiIGNsYXNzTmFtZT1cInNlY29uZGFyeS1hY3Rpb25cIiBvbkNsaWNrPXtjb3B5Q2xpZW50SWR9PuWkjeWItjwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwib2ZmbGluZS1saWNlbnNlLWltcG9ydFwiPlxuICAgICAgICAgICAgPGJ1dHRvbiB0eXBlPVwiYnV0dG9uXCIgY2xhc3NOYW1lPVwicHJpbWFyeS1hY3Rpb25cIiBvbkNsaWNrPXtpbXBvcnRPZmZsaW5lRmlsZX0gZGlzYWJsZWQ9e0Jvb2xlYW4oYnVzeUFjdGlvbil9PlxuICAgICAgICAgICAgICB7YnVzeUFjdGlvbiA9PT0gJ2ZpbGUnID8gJ+WvvOWFpeS4rS4uLicgOiAn5a+85YWl5o6I5p2D5paH5Lu2J31cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJvZmZsaW5lLWxpY2Vuc2UtY29kZS1maWVsZFwiPlxuICAgICAgICAgICAgPHNwYW4+56a757q/5o6I5p2D56CBPC9zcGFuPlxuICAgICAgICAgICAgPHRleHRhcmVhIHZhbHVlPXtsaWNlbnNlQ29kZX0gb25DaGFuZ2U9eyhldmVudCkgPT4gc2V0TGljZW5zZUNvZGUoZXZlbnQudGFyZ2V0LnZhbHVlKX0gcGxhY2Vob2xkZXI9XCLnspjotLQgRGFzaGJvYXJkIOeUn+aIkOeahOemu+e6v+aOiOadg+eggVwiIC8+XG4gICAgICAgICAgPC9sYWJlbD5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm9mZmxpbmUtbGljZW5zZS1hY3Rpb25zXCI+XG4gICAgICAgICAgICA8RGlhbG9nLkNsb3NlIGFzQ2hpbGQ+XG4gICAgICAgICAgICAgIDxidXR0b24gdHlwZT1cImJ1dHRvblwiIGNsYXNzTmFtZT1cInNlY29uZGFyeS1hY3Rpb25cIiBkaXNhYmxlZD17Qm9vbGVhbihidXN5QWN0aW9uKX0+5Y+W5raIPC9idXR0b24+XG4gICAgICAgICAgICA8L0RpYWxvZy5DbG9zZT5cbiAgICAgICAgICAgIDxidXR0b24gdHlwZT1cImJ1dHRvblwiIGNsYXNzTmFtZT1cInByaW1hcnktYWN0aW9uXCIgb25DbGljaz17YWN0aXZhdGVPZmZsaW5lQ29kZX0gZGlzYWJsZWQ9e0Jvb2xlYW4oYnVzeUFjdGlvbil9PlxuICAgICAgICAgICAgICB7YnVzeUFjdGlvbiA9PT0gJ2NvZGUnID8gJ+a/gOa0u+S4rS4uLicgOiAn5r+A5rS75o6I5p2D56CBJ31cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L0RpYWxvZy5Db250ZW50PlxuICAgICAgPC9EaWFsb2cuUG9ydGFsPlxuICAgIDwvRGlhbG9nLlJvb3Q+XG4gICk7XG59XG5cbmV4cG9ydCBkZWZhdWx0IE9mZmxpbmVMaWNlbnNlQWN0aXZhdGlvbkRpYWxvZztcbiJdLCJmaWxlIjoiRDovZGV2ZWxvcC9PcGVuQmlkS2l0L2NsaWVudC9zcmMvc2hhcmVkL3VpL09mZmxpbmVMaWNlbnNlQWN0aXZhdGlvbkRpYWxvZy50c3gifQ==

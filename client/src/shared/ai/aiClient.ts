@@ -1,11 +1,11 @@
 import type { ChatCompletionRequest, JsonCompletionRequest } from '../types';
 
 const getBridge = () => {
-  if (!window.yibiao) {
+  if (!window.lvcert) {
     throw new Error('客户端桥接层未初始化');
   }
 
-  return window.yibiao;
+  return window.lvcert;
 };
 
 export const aiClient = {

@@ -10,6 +10,7 @@ const { getGeneratedImagesDir, getImportedImagesDir } = require('../utils/paths.
 const { REMOTE_IMAGE_RETRY_ATTEMPTS, REMOTE_IMAGE_RETRY_DELAY_MS } = require('../utils/remoteImageRetry.cjs');
 const { renderMarkdownHtml } = require('../utils/renderMarkdownHtml.cjs');
 const { getLocalImageRenderService } = require('./localImageRenderService.cjs');
+const { findLibreOfficeCommand, runLibreOfficeConvertToPdf } = require('../utils/libreOffice.cjs');
 const {
   AlignmentType,
   BorderStyle,
@@ -1044,7 +1045,7 @@ function describeImageSourceForLog(source) {
   if (/^data:/i.test(value)) return { kind: 'data-url' };
   try {
     const url = new URL(value);
-    if (url.protocol === 'yibiao-asset:') {
+    if (url.protocol === 'lvcert-asset:') {
       return { kind: 'asset', host: url.hostname, extension: path.extname(url.pathname || '').toLowerCase() };
     }
     if (url.protocol === 'http:' || url.protocol === 'https:') {
@@ -1111,7 +1112,7 @@ async function loadImage(source, context = {}) {
     };
   }
 
-  if (/^yibiao-asset:\/\//i.test(url)) {
+  if (/^lvcert-asset:\/\//i.test(url)) {
     const assetPath = resolveAssetImagePath(url);
     if (!assetPath || !fs.existsSync(assetPath)) {
       return null;
@@ -1240,7 +1241,7 @@ async function resolveMermaidImageForExport(code, context = {}, options = {}) {
 function getImagePixelDensity(source) {
   try {
     const url = new URL(String(source || ''));
-    const isInternalRenderAsset = url.protocol === 'yibiao-asset:'
+    const isInternalRenderAsset = url.protocol === 'lvcert-asset:'
       && url.hostname === 'generated-images'
       && (url.pathname.startsWith('/mermaid-cache/')
         || url.pathname.startsWith('/technical-plan/illustrations/'));
@@ -2460,6 +2461,102 @@ function createExportService({ configStore } = {}) {
           error: compactLogError(error),
         });
         throw error;
+      }
+    },
+
+    async exportPdf(payload = {}, onProgress) {
+      const stats = countOutlineStats(Array.isArray(payload.outline) ? payload.outline : []);
+      const developerLogger = createDeveloperLogger({
+        app,
+        config: loadDeveloperConfig(configStore),
+        moduleName: 'export',
+        name: 'pdf-export',
+        meta: {
+          project_name: sanitizeFilename(payload.project_name || '绿色报告'),
+          stats,
+        },
+      });
+      developerLogger.write('export.pdf.started', {
+        project_name: sanitizeFilename(payload.project_name || '绿色报告'),
+        stats,
+      });
+      if (!Array.isArray(payload.outline) || !payload.outline.length) {
+        const error = new Error('没有可导出的目录内容');
+        developerLogger.write('export.pdf.error', { error: compactLogError(error) });
+        throw error;
+      }
+
+      const progressContext = { onProgress, warnings: [], stats };
+      reportProgress(progressContext, 2, '正在准备 PDF 导出。');
+      const defaultFilename = `${sanitizeFilename(payload.project_name || '绿色报告')}_${formatExportTimestamp()}.pdf`;
+      const defaultDir = app?.getPath ? app.getPath('downloads') : process.env.USERPROFILE || process.cwd();
+      const result = await dialog.showSaveDialog({
+        title: '导出 PDF 文档',
+        defaultPath: path.join(defaultDir, defaultFilename),
+        filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        reportProgress(progressContext, 0, '已取消导出。', { phase: 'canceled' });
+        developerLogger.write('export.pdf.canceled', { stats });
+        return { success: false, canceled: true, message: '已取消导出' };
+      }
+
+      reportProgress(progressContext, 10, '正在生成 Word 中间文件。');
+      const soffice = await findLibreOfficeCommand();
+      if (!soffice) {
+        const message = '未检测到 LibreOffice，无法生成 PDF。请先安装 LibreOffice 后重试。';
+        reportProgress(progressContext, 100, message, { phase: 'error' });
+        developerLogger.write('export.pdf.error', { error: new Error('LibreOffice not found') });
+        return { success: false, message };
+      }
+
+      const tmpDir = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'green-report-pdf-'));
+      let tempDocxPath = null;
+      try {
+        const buildResult = await buildDocxResult(payload, { onProgress, warnings: progressContext.warnings, developerLogger });
+        reportProgress(progressContext, 55, '正在写入 Word 中间文件。');
+        tempDocxPath = path.join(tmpDir, `green-report-${Date.now()}.docx`);
+        await fs.promises.writeFile(tempDocxPath, buildResult.buffer);
+
+        reportProgress(progressContext, 65, '正在通过 LibreOffice 转换为 PDF。');
+        developerLogger.write('export.pdf.convert.started', {
+          libre_office: soffice,
+          temp_docx: path.basename(tempDocxPath),
+        });
+        await runLibreOfficeConvertToPdf(soffice, tempDocxPath, tmpDir);
+
+        const pdfFileName = `${path.basename(tempDocxPath, '.docx')}.pdf`;
+        const tempPdfPath = path.join(tmpDir, pdfFileName);
+        if (!fs.existsSync(tempPdfPath)) {
+          throw new Error('LibreOffice 转换完成但未找到 PDF 输出文件');
+        }
+        reportProgress(progressContext, 90, '正在保存 PDF 文件。');
+        await fs.promises.copyFile(tempPdfPath, result.filePath);
+
+        const message = buildResult.warnings.length
+          ? `PDF 已导出，但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`
+          : 'PDF 已导出，请打开文档核对图片、表格和版式。';
+        reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 100, message, { phase: 'success' });
+        developerLogger.write('export.pdf.completed', {
+          output_file_name: path.basename(result.filePath),
+          buffer_bytes: buildResult.buffer.length,
+          warning_count: buildResult.warnings.length,
+          stats: buildResult.stats,
+        });
+        return { success: true, path: result.filePath, message, warnings: buildResult.warnings };
+      } catch (error) {
+        developerLogger.write('export.pdf.error', {
+          output_file_name: path.basename(result.filePath),
+          error: compactLogError(error),
+        });
+        throw error;
+      } finally {
+        try {
+          await fs.promises.rm(tmpDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          console.warn('[export] 清理 PDF 临时目录失败', cleanupError?.message || String(cleanupError));
+        }
       }
     },
   };

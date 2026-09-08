@@ -20,7 +20,7 @@ function OfflineLicenseActivationDialog({ open, onOpenChange, onActivated }: Off
   useEffect(() => {
     if (!open) return;
     let disposed = false;
-    void window.yibiao?.config.load()
+    void window.lvcert?.config.load()
       .then((config) => {
         if (!disposed) {
           setClientId(config?.analytics_client_id || '');
@@ -58,7 +58,7 @@ function OfflineLicenseActivationDialog({ open, onOpenChange, onActivated }: Off
     if (busyAction) return;
     try {
       setBusyAction('file');
-      const result = await window.yibiao?.license.importOfflineFile();
+      const result = await window.lvcert?.license.importOfflineFile();
       handleActivationResult(result);
     } catch (error) {
       showToast(error instanceof Error ? error.message : '导入离线授权文件失败', 'error');
@@ -75,7 +75,7 @@ function OfflineLicenseActivationDialog({ open, onOpenChange, onActivated }: Off
     }
     try {
       setBusyAction('code');
-      const result = await window.yibiao?.license.activateOfflineCode(licenseCode);
+      const result = await window.lvcert?.license.activateOfflineCode(licenseCode);
       handleActivationResult(result);
     } catch (error) {
       showToast(error instanceof Error ? error.message : '离线授权码激活失败', 'error');

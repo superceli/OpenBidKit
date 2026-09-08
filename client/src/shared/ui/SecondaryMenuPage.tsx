@@ -72,8 +72,8 @@ function SecondaryMenuPage({ menuItem, onNavigate }: SecondaryMenuPageProps) {
 async function openExternalUrl(url: string) {
   if (!url) return;
 
-  if (window.yibiao?.openExternal) {
-    await window.yibiao.openExternal(url);
+  if (window.lvcert?.openExternal) {
+    await window.lvcert.openExternal(url);
     return;
   }
 

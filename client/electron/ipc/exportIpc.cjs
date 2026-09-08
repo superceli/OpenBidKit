@@ -22,6 +22,27 @@ function registerExportIpc({ exportService, donationService }) {
     }
   });
 
+  ipcMain.handle('export:pdf', async (event, payload = {}) => {
+    const requestId = payload.requestId || payload.request_id;
+    const donationPrompt = donationService.recordWordExport({ deferPrompt: true });
+    const sendProgress = (progress) => {
+      event.sender.send('export:pdf-progress', { requestId, ...progress });
+    };
+
+    try {
+      return await exportService.exportPdf(payload, sendProgress);
+    } catch (error) {
+      sendProgress({
+        phase: 'error',
+        progress: 100,
+        message: error.message || '导出 PDF 失败',
+      });
+      throw error;
+    } finally {
+      donationService.showPrompt(donationPrompt);
+    }
+  });
+
   ipcMain.handle('export:open-file', async (_event, filePath) => {
     const targetPath = String(filePath || '').trim();
     if (!targetPath) {

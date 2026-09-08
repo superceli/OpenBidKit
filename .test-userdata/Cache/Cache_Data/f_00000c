@@ -1,0 +1,354 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/features/developer/pages/DeveloperMultimodalTestPage.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=24542da6"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+var _s = $RefreshSig$();
+import __vite__cjsImport1_react from "/node_modules/.vite/deps/react.js?v=24542da6"; const useEffect = __vite__cjsImport1_react["useEffect"]; const useRef = __vite__cjsImport1_react["useRef"]; const useState = __vite__cjsImport1_react["useState"];
+import { aiClient } from "/src/shared/ai/aiClient.ts";
+import { useToast } from "/src/shared/ui/index.ts";
+const DEFAULT_PROMPT = "请描述这张图片的内容。";
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function DeveloperMultimodalTestPage() {
+  _s();
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [running, setRunning] = useState(false);
+  const [events, setEvents] = useState([]);
+  const [result, setResult] = useState("");
+  const fileInputRef = useRef(null);
+  const { showToast } = useToast();
+  useEffect(() => () => {
+    if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl);
+  }, [selectedImage]);
+  const appendEvent = (message) => {
+    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString("zh-CN", { hour12: false });
+    setEvents((current) => [...current, `[${time}] ${message}`]);
+  };
+  const handleImageSelect = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const filePath = window.lvcert?.file.getPathForFile(file) || "";
+    if (!filePath) {
+      showToast("无法读取图片本地路径，请重新选择", "error");
+      return;
+    }
+    setSelectedImage({
+      name: file.name,
+      path: filePath,
+      previewUrl: URL.createObjectURL(file),
+      size: file.size
+    });
+    setEvents([]);
+    setResult("");
+  };
+  const runTest = async () => {
+    if (!selectedImage) {
+      showToast("请先选择一张测试图片", "info");
+      return;
+    }
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      showToast("请输入测试提示词", "info");
+      return;
+    }
+    setRunning(true);
+    setEvents([]);
+    setResult("");
+    appendEvent(`开始测试图片：${selectedImage.name}`);
+    try {
+      const response = await aiClient.chat({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: normalizedPrompt },
+              { type: "local_image", path: selectedImage.path, detail: "auto" }
+            ]
+          }
+        ],
+        logTitle: "开发者测试-多模态"
+      });
+      if (!response.trim()) {
+        throw new Error("模型未返回有效内容");
+      }
+      setResult(response);
+      appendEvent("多模态请求完成。");
+      showToast("多模态测试完成", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "多模态测试失败";
+      appendEvent(`多模态请求错误：${message}`);
+      showToast(message, "error");
+    } finally {
+      setRunning(false);
+    }
+  };
+  return /* @__PURE__ */ jsxDEV("div", { className: "page-stack developer-multimodal-test-page", children: [
+    /* @__PURE__ */ jsxDEV("section", { className: "panel developer-multimodal-hero", children: /* @__PURE__ */ jsxDEV("div", { className: "hero-copy", children: [
+      /* @__PURE__ */ jsxDEV("span", { className: "eyebrow", children: "Multimodal Lab" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+        lineNumber: 109,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("h2", { children: "多模态测试" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+        lineNumber: 110,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("p", { children: "选择一张本地图片并输入提示词，通过当前文本模型配置验证图片理解能力。" }, void 0, false, {
+        fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+        lineNumber: 111,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+      lineNumber: 108,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+      lineNumber: 107,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-grid", children: [
+      /* @__PURE__ */ jsxDEV("section", { className: "panel developer-multimodal-form", children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "settings-section-title", children: [
+          /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 118,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("strong", { children: "测试输入" }, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 119,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 117,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-upload", children: [
+          /* @__PURE__ */ jsxDEV(
+            "input",
+            {
+              ref: fileInputRef,
+              className: "sr-only",
+              type: "file",
+              accept: "image/*",
+              "aria-label": "选择多模态测试图片",
+              disabled: running,
+              onChange: handleImageSelect
+            },
+            void 0,
+            false,
+            {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 123,
+              columnNumber: 13
+            },
+            this
+          ),
+          selectedImage ? /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-image-card", children: [
+            /* @__PURE__ */ jsxDEV("img", { src: selectedImage.previewUrl, alt: "多模态测试图片预览" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 134,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { children: [
+              /* @__PURE__ */ jsxDEV("strong", { title: selectedImage.name, children: selectedImage.name }, void 0, false, {
+                fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+                lineNumber: 136,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV("span", { children: formatFileSize(selectedImage.size) }, void 0, false, {
+                fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+                lineNumber: 137,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 135,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("button", { type: "button", className: "text-button", onClick: () => setSelectedImage(null), disabled: running, children: "移除" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 139,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 133,
+            columnNumber: 13
+          }, this) : /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-empty", children: [
+            /* @__PURE__ */ jsxDEV("strong", { children: "尚未选择图片" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 143,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("span", { children: "支持当前系统可读取的常见图片格式" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 144,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 142,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("button", { type: "button", className: "secondary-action", onClick: () => fileInputRef.current?.click(), disabled: running, children: selectedImage ? "重新选择图片" : "选择图片" }, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 147,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 122,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { className: "developer-multimodal-prompt", children: [
+          /* @__PURE__ */ jsxDEV("span", { children: "自定义提示词" }, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 153,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "textarea",
+            {
+              value: prompt,
+              rows: 6,
+              placeholder: "请输入希望模型结合图片回答的问题",
+              disabled: running,
+              onChange: (event) => setPrompt(event.target.value)
+            },
+            void 0,
+            false,
+            {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 154,
+              columnNumber: 13
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 152,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-actions", children: /* @__PURE__ */ jsxDEV("button", { type: "button", className: "primary-action", onClick: () => void runTest(), disabled: running, children: running ? "测试中..." : "测试多模态" }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 164,
+          columnNumber: 13
+        }, this) }, void 0, false, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 163,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+        lineNumber: 116,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "developer-multimodal-output", children: [
+        /* @__PURE__ */ jsxDEV("section", { className: "panel developer-test-panel", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "settings-section-title", children: [
+            /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 173,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV("strong", { children: "事件日志" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 174,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 172,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("pre", { children: events.length ? events.join("\n") : "尚未开始请求。" }, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 176,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 171,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "panel developer-test-panel", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "settings-section-title", children: [
+            /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 181,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV("strong", { children: "模型返回" }, void 0, false, {
+              fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+              lineNumber: 182,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 180,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("pre", { children: result || (running ? "正在等待模型返回..." : "暂无内容。") }, void 0, false, {
+            fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+            lineNumber: 184,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+          lineNumber: 179,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+        lineNumber: 170,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+      lineNumber: 115,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx",
+    lineNumber: 106,
+    columnNumber: 5
+  }, this);
+}
+_s(DeveloperMultimodalTestPage, "5zVEic1YyJEIO0FlQrHe4WjZBn4=", false, function() {
+  return [useToast];
+});
+_c = DeveloperMultimodalTestPage;
+export default DeveloperMultimodalTestPage;
+var _c;
+$RefreshReg$(_c, "DeveloperMultimodalTestPage");
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+function $RefreshReg$(type, id) {
+  return RefreshRuntime.register(type, "D:/develop/OpenBidKit/client/src/features/developer/pages/DeveloperMultimodalTestPage.tsx " + id);
+}
+function $RefreshSig$() {
+  return RefreshRuntime.createSignatureFunctionForTransform();
+}
+
+//# sourceMappingURL=data:application/json;base64,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LFNBQVM3QyxPQUFPOEMsS0FBSyxJQUFJLElBQUksYUFBMUM7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBb0Q7QUFBQSxhQUx0RDtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBTUE7QUFBQSxRQUVBLHVCQUFDLGFBQVEsV0FBVSw4QkFDakI7QUFBQSxpQ0FBQyxTQUFJLFdBQVUsMEJBQ2I7QUFBQSxtQ0FBQyxZQUFEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQUs7QUFBQSxZQUNMLHVCQUFDLFlBQU8sb0JBQVI7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFBWTtBQUFBLGVBRmQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFHQTtBQUFBLFVBQ0EsdUJBQUMsU0FBSzVDLHFCQUFXSixVQUFVLGdCQUFnQixZQUEzQztBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUFvRDtBQUFBLGFBTHREO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFNQTtBQUFBLFdBZkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQWdCQTtBQUFBLFNBdkVGO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0F3RUE7QUFBQSxPQWpGRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBa0ZBO0FBRUo7QUFBQ0wsR0F4S1FELDZCQUEyQjtBQUFBLFVBT1pMLFFBQVE7QUFBQTtBQUFBLEtBUHZCSztBQTBLVCxlQUFlQTtBQUE0QixJQUFBdUQ7QUFBQSxhQUFBQSxJQUFBIiwibmFtZXMiOlsidXNlRWZmZWN0IiwidXNlUmVmIiwidXNlU3RhdGUiLCJhaUNsaWVudCIsInVzZVRvYXN0IiwiREVGQVVMVF9QUk9NUFQiLCJmb3JtYXRGaWxlU2l6ZSIsImJ5dGVzIiwidG9GaXhlZCIsIkRldmVsb3Blck11bHRpbW9kYWxUZXN0UGFnZSIsIl9zIiwic2VsZWN0ZWRJbWFnZSIsInNldFNlbGVjdGVkSW1hZ2UiLCJwcm9tcHQiLCJzZXRQcm9tcHQiLCJydW5uaW5nIiwic2V0UnVubmluZyIsImV2ZW50cyIsInNldEV2ZW50cyIsInJlc3VsdCIsInNldFJlc3VsdCIsImZpbGVJbnB1dFJlZiIsInNob3dUb2FzdCIsInByZXZpZXdVcmwiLCJVUkwiLCJyZXZva2VPYmplY3RVUkwiLCJhcHBlbmRFdmVudCIsIm1lc3NhZ2UiLCJ0aW1lIiwiRGF0ZSIsInRvTG9jYWxlVGltZVN0cmluZyIsImhvdXIxMiIsImN1cnJlbnQiLCJoYW5kbGVJbWFnZVNlbGVjdCIsImV2ZW50IiwiZmlsZSIsInRhcmdldCIsImZpbGVzIiwidmFsdWUiLCJmaWxlUGF0aCIsIndpbmRvdyIsImx2Y2VydCIsImdldFBhdGhGb3JGaWxlIiwibmFtZSIsInBhdGgiLCJjcmVhdGVPYmplY3RVUkwiLCJzaXplIiwicnVuVGVzdCIsIm5vcm1hbGl6ZWRQcm9tcHQiLCJ0cmltIiwicmVzcG9uc2UiLCJjaGF0IiwibWVzc2FnZXMiLCJyb2xlIiwiY29udGVudCIsInR5cGUiLCJ0ZXh0IiwiZGV0YWlsIiwibG9nVGl0bGUiLCJFcnJvciIsImVycm9yIiwiY2xpY2siLCJsZW5ndGgiLCJqb2luIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiRGV2ZWxvcGVyTXVsdGltb2RhbFRlc3RQYWdlLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VFZmZlY3QsIHVzZVJlZiwgdXNlU3RhdGUsIHR5cGUgQ2hhbmdlRXZlbnQgfSBmcm9tICdyZWFjdCc7XG5pbXBvcnQgeyBhaUNsaWVudCB9IGZyb20gJy4uLy4uLy4uL3NoYXJlZC9haS9haUNsaWVudCc7XG5pbXBvcnQgeyB1c2VUb2FzdCB9IGZyb20gJy4uLy4uLy4uL3NoYXJlZC91aSc7XG5cbmNvbnN0IERFRkFVTFRfUFJPTVBUID0gJ+ivt+aPj+i/sOi/meW8oOWbvueJh+eahOWGheWuueOAgic7XG5cbmludGVyZmFjZSBTZWxlY3RlZEltYWdlIHtcbiAgbmFtZTogc3RyaW5nO1xuICBwYXRoOiBzdHJpbmc7XG4gIHByZXZpZXdVcmw6IHN0cmluZztcbiAgc2l6ZTogbnVtYmVyO1xufVxuXG4vLyDmoLzlvI/ljJbmtYvor5Xlm77niYflpKflsI/vvIzkvr/kuo7noa7orqTlvZPliY3pgInmi6nnmoTmlofku7bjgIJcbmZ1bmN0aW9uIGZvcm1hdEZpbGVTaXplKGJ5dGVzOiBudW1iZXIpIHtcbiAgaWYgKGJ5dGVzIDwgMTAyNCkgcmV0dXJuIGAke2J5dGVzfSBCYDtcbiAgaWYgKGJ5dGVzIDwgMTAyNCAqIDEwMjQpIHJldHVybiBgJHsoYnl0ZXMgLyAxMDI0KS50b0ZpeGVkKDEpfSBLQmA7XG4gIHJldHVybiBgJHsoYnl0ZXMgLyAoMTAyNCAqIDEwMjQpKS50b0ZpeGVkKDEpfSBNQmA7XG59XG5cbi8vIOW8gOWPkeiAheWkmuaooeaAgea1i+ivlemhte+8muWPkemAgeWNleW8oOacrOWcsOWbvueJh+WSjOiHquWumuS5ieaPkOekuuivje+8jOW5tuWxleekuuaooeWei+i/lOWbnue7k+aenOOAglxuZnVuY3Rpb24gRGV2ZWxvcGVyTXVsdGltb2RhbFRlc3RQYWdlKCkge1xuICBjb25zdCBbc2VsZWN0ZWRJbWFnZSwgc2V0U2VsZWN0ZWRJbWFnZV0gPSB1c2VTdGF0ZTxTZWxlY3RlZEltYWdlIHwgbnVsbD4obnVsbCk7XG4gIGNvbnN0IFtwcm9tcHQsIHNldFByb21wdF0gPSB1c2VTdGF0ZShERUZBVUxUX1BST01QVCk7XG4gIGNvbnN0IFtydW5uaW5nLCBzZXRSdW5uaW5nXSA9IHVzZVN0YXRlKGZhbHNlKTtcbiAgY29uc3QgW2V2ZW50cywgc2V0RXZlbnRzXSA9IHVzZVN0YXRlPHN0cmluZ1tdPihbXSk7XG4gIGNvbnN0IFtyZXN1bHQsIHNldFJlc3VsdF0gPSB1c2VTdGF0ZSgnJyk7XG4gIGNvbnN0IGZpbGVJbnB1dFJlZiA9IHVzZVJlZjxIVE1MSW5wdXRFbGVtZW50PihudWxsKTtcbiAgY29uc3QgeyBzaG93VG9hc3QgfSA9IHVzZVRvYXN0KCk7XG5cbiAgdXNlRWZmZWN0KCgpID0+ICgpID0+IHtcbiAgICBpZiAoc2VsZWN0ZWRJbWFnZT8ucHJldmlld1VybCkgVVJMLnJldm9rZU9iamVjdFVSTChzZWxlY3RlZEltYWdlLnByZXZpZXdVcmwpO1xuICB9LCBbc2VsZWN0ZWRJbWFnZV0pO1xuXG4gIGNvbnN0IGFwcGVuZEV2ZW50ID0gKG1lc3NhZ2U6IHN0cmluZykgPT4ge1xuICAgIGNvbnN0IHRpbWUgPSBuZXcgRGF0ZSgpLnRvTG9jYWxlVGltZVN0cmluZygnemgtQ04nLCB7IGhvdXIxMjogZmFsc2UgfSk7XG4gICAgc2V0RXZlbnRzKChjdXJyZW50KSA9PiBbLi4uY3VycmVudCwgYFske3RpbWV9XSAke21lc3NhZ2V9YF0pO1xuICB9O1xuXG4gIGNvbnN0IGhhbmRsZUltYWdlU2VsZWN0ID0gKGV2ZW50OiBDaGFuZ2VFdmVudDxIVE1MSW5wdXRFbGVtZW50PikgPT4ge1xuICAgIGNvbnN0IGZpbGUgPSBldmVudC50YXJnZXQuZmlsZXM/LlswXTtcbiAgICBldmVudC50YXJnZXQudmFsdWUgPSAnJztcbiAgICBpZiAoIWZpbGUpIHJldHVybjtcblxuICAgIGNvbnN0IGZpbGVQYXRoID0gd2luZG93Lmx2Y2VydD8uZmlsZS5nZXRQYXRoRm9yRmlsZShmaWxlKSB8fCAnJztcbiAgICBpZiAoIWZpbGVQYXRoKSB7XG4gICAgICBzaG93VG9hc3QoJ+aXoOazleivu+WPluWbvueJh+acrOWcsOi3r+W+hO+8jOivt+mHjeaWsOmAieaLqScsICdlcnJvcicpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIHNldFNlbGVjdGVkSW1hZ2Uoe1xuICAgICAgbmFtZTogZmlsZS5uYW1lLFxuICAgICAgcGF0aDogZmlsZVBhdGgsXG4gICAgICBwcmV2aWV3VXJsOiBVUkwuY3JlYXRlT2JqZWN0VVJMKGZpbGUpLFxuICAgICAgc2l6ZTogZmlsZS5zaXplLFxuICAgIH0pO1xuICAgIHNldEV2ZW50cyhbXSk7XG4gICAgc2V0UmVzdWx0KCcnKTtcbiAgfTtcblxuICBjb25zdCBydW5UZXN0ID0gYXN5bmMgKCkgPT4ge1xuICAgIGlmICghc2VsZWN0ZWRJbWFnZSkge1xuICAgICAgc2hvd1RvYXN0KCfor7flhYjpgInmi6nkuIDlvKDmtYvor5Xlm77niYcnLCAnaW5mbycpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cbiAgICBjb25zdCBub3JtYWxpemVkUHJvbXB0ID0gcHJvbXB0LnRyaW0oKTtcbiAgICBpZiAoIW5vcm1hbGl6ZWRQcm9tcHQpIHtcbiAgICAgIHNob3dUb2FzdCgn6K+36L6T5YWl5rWL6K+V5o+Q56S66K+NJywgJ2luZm8nKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG5cbiAgICBzZXRSdW5uaW5nKHRydWUpO1xuICAgIHNldEV2ZW50cyhbXSk7XG4gICAgc2V0UmVzdWx0KCcnKTtcbiAgICBhcHBlbmRFdmVudChg5byA5aeL5rWL6K+V5Zu+54mH77yaJHtzZWxlY3RlZEltYWdlLm5hbWV9YCk7XG5cbiAgICB0cnkge1xuICAgICAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBhaUNsaWVudC5jaGF0KHtcbiAgICAgICAgbWVzc2FnZXM6IFtcbiAgICAgICAgICB7XG4gICAgICAgICAgICByb2xlOiAndXNlcicsXG4gICAgICAgICAgICBjb250ZW50OiBbXG4gICAgICAgICAgICAgIHsgdHlwZTogJ3RleHQnLCB0ZXh0OiBub3JtYWxpemVkUHJvbXB0IH0sXG4gICAgICAgICAgICAgIHsgdHlwZTogJ2xvY2FsX2ltYWdlJywgcGF0aDogc2VsZWN0ZWRJbWFnZS5wYXRoLCBkZXRhaWw6ICdhdXRvJyB9LFxuICAgICAgICAgICAgXSxcbiAgICAgICAgICB9LFxuICAgICAgICBdLFxuICAgICAgICBsb2dUaXRsZTogJ+W8gOWPkeiAhea1i+ivlS3lpJrmqKHmgIEnLFxuICAgICAgfSk7XG4gICAgICBpZiAoIXJlc3BvbnNlLnRyaW0oKSkge1xuICAgICAgICB0aHJvdyBuZXcgRXJyb3IoJ+aooeWei+acqui/lOWbnuacieaViOWGheWuuScpO1xuICAgICAgfVxuICAgICAgc2V0UmVzdWx0KHJlc3BvbnNlKTtcbiAgICAgIGFwcGVuZEV2ZW50KCflpJrmqKHmgIHor7fmsYLlrozmiJDjgIInKTtcbiAgICAgIHNob3dUb2FzdCgn5aSa5qih5oCB5rWL6K+V5a6M5oiQJywgJ3N1Y2Nlc3MnKTtcbiAgICB9IGNhdGNoIChlcnJvcikge1xuICAgICAgY29uc3QgbWVzc2FnZSA9IGVycm9yIGluc3RhbmNlb2YgRXJyb3IgPyBlcnJvci5tZXNzYWdlIDogJ+WkmuaooeaAgea1i+ivleWksei0pSc7XG4gICAgICBhcHBlbmRFdmVudChg5aSa5qih5oCB6K+35rGC6ZSZ6K+v77yaJHttZXNzYWdlfWApO1xuICAgICAgc2hvd1RvYXN0KG1lc3NhZ2UsICdlcnJvcicpO1xuICAgIH0gZmluYWxseSB7XG4gICAgICBzZXRSdW5uaW5nKGZhbHNlKTtcbiAgICB9XG4gIH07XG5cbiAgcmV0dXJuIChcbiAgICA8ZGl2IGNsYXNzTmFtZT1cInBhZ2Utc3RhY2sgZGV2ZWxvcGVyLW11bHRpbW9kYWwtdGVzdC1wYWdlXCI+XG4gICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJwYW5lbCBkZXZlbG9wZXItbXVsdGltb2RhbC1oZXJvXCI+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiaGVyby1jb3B5XCI+XG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiZXllYnJvd1wiPk11bHRpbW9kYWwgTGFiPC9zcGFuPlxuICAgICAgICAgIDxoMj7lpJrmqKHmgIHmtYvor5U8L2gyPlxuICAgICAgICAgIDxwPumAieaLqeS4gOW8oOacrOWcsOWbvueJh+W5tui+k+WFpeaPkOekuuivje+8jOmAmui/h+W9k+WJjeaWh+acrOaooeWei+mFjee9rumqjOivgeWbvueJh+eQhuino+iDveWKm+OAgjwvcD5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L3NlY3Rpb24+XG5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZGV2ZWxvcGVyLW11bHRpbW9kYWwtZ3JpZFwiPlxuICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJwYW5lbCBkZXZlbG9wZXItbXVsdGltb2RhbC1mb3JtXCI+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzZXR0aW5ncy1zZWN0aW9uLXRpdGxlXCI+XG4gICAgICAgICAgICA8c3BhbiAvPlxuICAgICAgICAgICAgPHN0cm9uZz7mtYvor5XovpPlhaU8L3N0cm9uZz5cbiAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZGV2ZWxvcGVyLW11bHRpbW9kYWwtdXBsb2FkXCI+XG4gICAgICAgICAgICA8aW5wdXRcbiAgICAgICAgICAgICAgcmVmPXtmaWxlSW5wdXRSZWZ9XG4gICAgICAgICAgICAgIGNsYXNzTmFtZT1cInNyLW9ubHlcIlxuICAgICAgICAgICAgICB0eXBlPVwiZmlsZVwiXG4gICAgICAgICAgICAgIGFjY2VwdD1cImltYWdlLypcIlxuICAgICAgICAgICAgICBhcmlhLWxhYmVsPVwi6YCJ5oup5aSa5qih5oCB5rWL6K+V5Zu+54mHXCJcbiAgICAgICAgICAgICAgZGlzYWJsZWQ9e3J1bm5pbmd9XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXtoYW5kbGVJbWFnZVNlbGVjdH1cbiAgICAgICAgICAgIC8+XG4gICAgICAgICAgICB7c2VsZWN0ZWRJbWFnZSA/IChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJkZXZlbG9wZXItbXVsdGltb2RhbC1pbWFnZS1jYXJkXCI+XG4gICAgICAgICAgICAgICAgPGltZyBzcmM9e3NlbGVjdGVkSW1hZ2UucHJldmlld1VybH0gYWx0PVwi5aSa5qih5oCB5rWL6K+V5Zu+54mH6aKE6KeIXCIgLz5cbiAgICAgICAgICAgICAgICA8ZGl2PlxuICAgICAgICAgICAgICAgICAgPHN0cm9uZyB0aXRsZT17c2VsZWN0ZWRJbWFnZS5uYW1lfT57c2VsZWN0ZWRJbWFnZS5uYW1lfTwvc3Ryb25nPlxuICAgICAgICAgICAgICAgICAgPHNwYW4+e2Zvcm1hdEZpbGVTaXplKHNlbGVjdGVkSW1hZ2Uuc2l6ZSl9PC9zcGFuPlxuICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgIDxidXR0b24gdHlwZT1cImJ1dHRvblwiIGNsYXNzTmFtZT1cInRleHQtYnV0dG9uXCIgb25DbGljaz17KCkgPT4gc2V0U2VsZWN0ZWRJbWFnZShudWxsKX0gZGlzYWJsZWQ9e3J1bm5pbmd9Puenu+mZpDwvYnV0dG9uPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICkgOiAoXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZGV2ZWxvcGVyLW11bHRpbW9kYWwtZW1wdHlcIj5cbiAgICAgICAgICAgICAgICA8c3Ryb25nPuWwmuacqumAieaLqeWbvueJhzwvc3Ryb25nPlxuICAgICAgICAgICAgICAgIDxzcGFuPuaUr+aMgeW9k+WJjeezu+e7n+WPr+ivu+WPlueahOW4uOingeWbvueJh+agvOW8jzwvc3Bhbj5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICApfVxuICAgICAgICAgICAgPGJ1dHRvbiB0eXBlPVwiYnV0dG9uXCIgY2xhc3NOYW1lPVwic2Vjb25kYXJ5LWFjdGlvblwiIG9uQ2xpY2s9eygpID0+IGZpbGVJbnB1dFJlZi5jdXJyZW50Py5jbGljaygpfSBkaXNhYmxlZD17cnVubmluZ30+XG4gICAgICAgICAgICAgIHtzZWxlY3RlZEltYWdlID8gJ+mHjeaWsOmAieaLqeWbvueJhycgOiAn6YCJ5oup5Zu+54mHJ31cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgPGxhYmVsIGNsYXNzTmFtZT1cImRldmVsb3Blci1tdWx0aW1vZGFsLXByb21wdFwiPlxuICAgICAgICAgICAgPHNwYW4+6Ieq5a6a5LmJ5o+Q56S66K+NPC9zcGFuPlxuICAgICAgICAgICAgPHRleHRhcmVhXG4gICAgICAgICAgICAgIHZhbHVlPXtwcm9tcHR9XG4gICAgICAgICAgICAgIHJvd3M9ezZ9XG4gICAgICAgICAgICAgIHBsYWNlaG9sZGVyPVwi6K+36L6T5YWl5biM5pyb5qih5Z6L57uT5ZCI5Zu+54mH5Zue562U55qE6Zeu6aKYXCJcbiAgICAgICAgICAgICAgZGlzYWJsZWQ9e3J1bm5pbmd9XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZXZlbnQpID0+IHNldFByb21wdChldmVudC50YXJnZXQudmFsdWUpfVxuICAgICAgICAgICAgLz5cbiAgICAgICAgICA8L2xhYmVsPlxuXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJkZXZlbG9wZXItbXVsdGltb2RhbC1hY3Rpb25zXCI+XG4gICAgICAgICAgICA8YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJwcmltYXJ5LWFjdGlvblwiIG9uQ2xpY2s9eygpID0+IHZvaWQgcnVuVGVzdCgpfSBkaXNhYmxlZD17cnVubmluZ30+XG4gICAgICAgICAgICAgIHtydW5uaW5nID8gJ+a1i+ivleS4rS4uLicgOiAn5rWL6K+V5aSa5qih5oCBJ31cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L3NlY3Rpb24+XG5cbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJkZXZlbG9wZXItbXVsdGltb2RhbC1vdXRwdXRcIj5cbiAgICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJwYW5lbCBkZXZlbG9wZXItdGVzdC1wYW5lbFwiPlxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzZXR0aW5ncy1zZWN0aW9uLXRpdGxlXCI+XG4gICAgICAgICAgICAgIDxzcGFuIC8+XG4gICAgICAgICAgICAgIDxzdHJvbmc+5LqL5Lu25pel5b+XPC9zdHJvbmc+XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIDxwcmU+e2V2ZW50cy5sZW5ndGggPyBldmVudHMuam9pbignXFxuJykgOiAn5bCa5pyq5byA5aeL6K+35rGC44CCJ308L3ByZT5cbiAgICAgICAgICA8L3NlY3Rpb24+XG5cbiAgICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJwYW5lbCBkZXZlbG9wZXItdGVzdC1wYW5lbFwiPlxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzZXR0aW5ncy1zZWN0aW9uLXRpdGxlXCI+XG4gICAgICAgICAgICAgIDxzcGFuIC8+XG4gICAgICAgICAgICAgIDxzdHJvbmc+5qih5Z6L6L+U5ZuePC9zdHJvbmc+XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIDxwcmU+e3Jlc3VsdCB8fCAocnVubmluZyA/ICfmraPlnKjnrYnlvoXmqKHlnovov5Tlm54uLi4nIDogJ+aaguaXoOWGheWuueOAgicpfTwvcHJlPlxuICAgICAgICAgIDwvc2VjdGlvbj5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L2Rpdj5cbiAgICA8L2Rpdj5cbiAgKTtcbn1cblxuZXhwb3J0IGRlZmF1bHQgRGV2ZWxvcGVyTXVsdGltb2RhbFRlc3RQYWdlO1xuIl0sImZpbGUiOiJEOi9kZXZlbG9wL09wZW5CaWRLaXQvY2xpZW50L3NyYy9mZWF0dXJlcy9kZXZlbG9wZXIvcGFnZXMvRGV2ZWxvcGVyTXVsdGltb2RhbFRlc3RQYWdlLnRzeCJ9

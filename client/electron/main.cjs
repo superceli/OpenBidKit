@@ -6,11 +6,16 @@ const { registerIpcHandlers } = require('./ipc/index.cjs');
 const { setupAutoUpdate, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall, getLatestVersion, getUpdateDownloadUrl } = require('./services/updateService.cjs');
 const { getConfigFilePath, getGeneratedImagesDir, getGpuStartupProbePath, getImportedImagesDir } = require('./utils/paths.cjs');
 
+// 支持通过环境变量覆盖 userData 路径（用于测试/沙箱环境）
+if (process.env.LVCERT_USER_DATA_DIR) {
+  app.setPath('userData', process.env.LVCERT_USER_DATA_DIR);
+}
+
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const iconPath = path.join(__dirname, '../assets/icon.ico');
 const packagedIndexUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).toString();
 const IP_BLOCK_LIST_ENDPOINT = 'https://analytics.agnet.top/ip-blocks';
-const GPU_HARDWARE_ACCELERATION_TRIAL_ARG = '--yibiao-trial-hardware-acceleration';
+const GPU_HARDWARE_ACCELERATION_TRIAL_ARG = '--lvcert-trial-hardware-acceleration';
 const FORCE_DISABLE_GPU_ARGS = ['--disable-gpu', '--disable-hardware-acceleration'];
 let appQuitting = false;
 let gpuRecoveryRelaunchStarted = false;
@@ -252,12 +257,12 @@ async function relaunchWithGpuDisabled() {
 const gpuStartupState = configureGpuHardwareAcceleration();
 
 protocol.registerSchemesAsPrivileged([{
-  scheme: 'yibiao-asset',
+  scheme: 'lvcert-asset',
   privileges: { standard: true, secure: true, supportFetchAPI: true },
 }]);
 
 function registerAssetProtocol() {
-  protocol.handle('yibiao-asset', (request) => {
+  protocol.handle('lvcert-asset', (request) => {
     try {
       const url = new URL(request.url);
       const assetRoots = {
@@ -336,7 +341,7 @@ function createMainWindow() {
     minWidth: 1040,
     minHeight: 720,
     backgroundColor: '#f8fafd',
-    title: '创合投标工具箱',
+    title: '绿证报告工具箱',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

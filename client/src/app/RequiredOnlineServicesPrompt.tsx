@@ -9,7 +9,7 @@ function RequiredOnlineServicesPrompt() {
   useEffect(() => {
     let disposed = false;
 
-    void window.yibiao?.requiredOnlineServices.getStatus()
+    void window.lvcert?.requiredOnlineServices.getStatus()
       .then((status) => {
         if (!disposed) {
           setUnavailableServices(status?.unavailableServices || []);

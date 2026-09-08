@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const bridge = {
-  appName: '创合投标工具箱',
+  appName: '绿证报告工具箱',
   platform: process.platform,
   getVersion: () => ipcRenderer.invoke('app:get-version'),
   getGpuHardwareAccelerationStatus: () => ipcRenderer.invoke('app:get-gpu-hardware-acceleration-status'),
@@ -140,11 +140,7 @@ const bridge = {
       return () => ipcRenderer.removeListener('developer-agent-monitor:event', listener);
     },
   },
-  developerExpansionReplaceTest: {
-    run: (payload) => ipcRenderer.invoke('developer-expansion-replace-test:run', payload),
-  },
   file: {
-    selectDuplicateCheckFiles: (options) => ipcRenderer.invoke('file:select-duplicate-check-files', options),
     /** 把拖拽进来的 File 对象换成本地绝对路径，供各上传区拖拽导入使用 */
     getPathForFile: (file) => webUtils.getPathForFile(file),
   },
@@ -162,68 +158,24 @@ const bridge = {
     readMarkdown: (documentId) => ipcRenderer.invoke('knowledge-base:read-markdown', documentId),
     readItems: (documentId) => ipcRenderer.invoke('knowledge-base:read-items', documentId),
     readAnalysis: (documentId) => ipcRenderer.invoke('knowledge-base:read-analysis', documentId),
+    searchItems: (keyword, options) => ipcRenderer.invoke('knowledge-base:search-items', keyword, options),
     onEvent: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on('knowledge-base:event', listener);
       return () => ipcRenderer.removeListener('knowledge-base:event', listener);
     },
   },
-  technicalPlan: {
-    loadState: () => ipcRenderer.invoke('technical-plan:load-state'),
-    importTenderDocument: (filePaths) => ipcRenderer.invoke('technical-plan:import-tender-document', filePaths),
-    removeTenderDocument: (sourceId) => ipcRenderer.invoke('technical-plan:remove-tender-document', sourceId),
-    importOriginalPlanDocument: (filePaths) => ipcRenderer.invoke('technical-plan:import-original-plan-document', filePaths),
-    checkBidSections: () => ipcRenderer.invoke('technical-plan:check-bid-sections'),
-    selectBidSection: (selectedSection) => ipcRenderer.invoke('technical-plan:select-bid-section', selectedSection),
-    readTenderMarkdown: () => ipcRenderer.invoke('technical-plan:read-tender-markdown'),
-    readTenderSourceMarkdown: (sourceId) => ipcRenderer.invoke('technical-plan:read-tender-source-markdown', sourceId),
-    readOriginalPlanMarkdown: () => ipcRenderer.invoke('technical-plan:read-original-plan-markdown'),
-    updateStep: (step) => ipcRenderer.invoke('technical-plan:update-step', step),
-    setWorkflowKind: (workflowKind) => ipcRenderer.invoke('technical-plan:set-workflow-kind', workflowKind),
-    switchWorkflowKind: (workflowKind) => ipcRenderer.invoke('technical-plan:switch-workflow-kind', workflowKind),
-    saveBidAnalysisConfig: (payload) => ipcRenderer.invoke('technical-plan:save-bid-analysis-config', payload),
-    saveOutlineConfig: (payload) => ipcRenderer.invoke('technical-plan:save-outline-config', payload),
-    saveOutlineSelection: (payload) => ipcRenderer.invoke('tasks:confirm-outline-selection', payload),
-    saveOutline: (outlineData) => ipcRenderer.invoke('technical-plan:save-outline', outlineData),
-    saveGlobalFactsConfig: (payload) => ipcRenderer.invoke('technical-plan:save-global-facts-config', payload),
-    saveGlobalFacts: (globalFacts) => ipcRenderer.invoke('technical-plan:save-global-facts', globalFacts),
-    saveContentGenerationOptions: (options) => ipcRenderer.invoke('technical-plan:save-content-generation-options', options),
-    saveChapterContent: (payload) => ipcRenderer.invoke('technical-plan:save-chapter-content', payload),
-    clear: () => ipcRenderer.invoke('technical-plan:clear'),
-    openBidTemplate: () => ipcRenderer.invoke('technical-plan:open-bid-template'),
-  },
-  feasibilityReport: {
-    loadState: () => ipcRenderer.invoke('feasibility-report:load-state'),
-    importSourceDocuments: (filePaths) => ipcRenderer.invoke('feasibility-report:import-source-documents', filePaths),
-    removeSourceDocument: (sourceId) => ipcRenderer.invoke('feasibility-report:remove-source-document', sourceId),
-    readSourceMarkdown: (sourceId) => ipcRenderer.invoke('feasibility-report:read-source-markdown', sourceId),
-    readCombinedSourceMarkdown: () => ipcRenderer.invoke('feasibility-report:read-combined-source-markdown'),
-    updateStep: (step) => ipcRenderer.invoke('feasibility-report:update-step', step),
-    saveProjectInfo: (projectInfo) => ipcRenderer.invoke('feasibility-report:save-project-info', projectInfo),
-    saveAnalysis: (markdown) => ipcRenderer.invoke('feasibility-report:save-analysis', markdown),
-    saveOutlineConfig: (payload) => ipcRenderer.invoke('feasibility-report:save-outline-config', payload),
-    saveOutline: (payload) => ipcRenderer.invoke('feasibility-report:save-outline', payload),
-    saveKeyParameters: (markdown) => ipcRenderer.invoke('feasibility-report:save-key-parameters', markdown),
-    saveChapterContent: (payload) => ipcRenderer.invoke('feasibility-report:save-chapter-content', payload),
-    clear: () => ipcRenderer.invoke('feasibility-report:clear'),
-  },
-  duplicateCheck: {
-    loadState: () => ipcRenderer.invoke('duplicate-check:load-state'),
-    saveFiles: (payload) => ipcRenderer.invoke('duplicate-check:save-files', payload),
-    saveUiState: (payload) => ipcRenderer.invoke('duplicate-check:save-ui-state', payload),
-    updateState: (partial) => ipcRenderer.invoke('duplicate-check:update-state', partial),
-    exportExcel: (request) => ipcRenderer.invoke('duplicate-check:export-excel', request),
-    clear: () => ipcRenderer.invoke('duplicate-check:clear'),
-  },
-  rejectionCheck: {
-    loadState: () => ipcRenderer.invoke('rejection-check:load-state'),
-    importDocument: (role, filePaths) => ipcRenderer.invoke('rejection-check:import-document', role, filePaths),
-    importTenderFromTechnicalPlan: () => ipcRenderer.invoke('rejection-check:import-tender-from-technical-plan'),
-    removeDocument: (role, documentId) => ipcRenderer.invoke('rejection-check:remove-document', role, documentId),
-    saveUiState: (payload) => ipcRenderer.invoke('rejection-check:save-ui-state', payload),
-    updateState: (partial) => ipcRenderer.invoke('rejection-check:update-state', partial),
-    exportExcel: (request) => ipcRenderer.invoke('rejection-check:export-excel', request),
-    clear: () => ipcRenderer.invoke('rejection-check:clear'),
+  greenReport: {
+    loadState: () => ipcRenderer.invoke('green-report:load-state'),
+    updateStep: (step) => ipcRenderer.invoke('green-report:update-step', step),
+    saveReportType: (reportType) => ipcRenderer.invoke('green-report:save-report-type', reportType),
+    saveProjectInfo: (projectInfo) => ipcRenderer.invoke('green-report:save-project-info', projectInfo),
+    saveOutlineConfig: (payload) => ipcRenderer.invoke('green-report:save-outline-config', payload),
+    saveReportConfig: (payload) => ipcRenderer.invoke('green-report:save-report-config', payload),
+    saveKnowledgeContext: (context) => ipcRenderer.invoke('green-report:save-knowledge-context', context),
+    saveOutline: (payload) => ipcRenderer.invoke('green-report:save-outline', payload),
+    saveChapterContent: (payload) => ipcRenderer.invoke('green-report:save-chapter-content', payload),
+    clear: () => ipcRenderer.invoke('green-report:clear'),
   },
   templates: {
     list: () => ipcRenderer.invoke('templates:list'),
@@ -233,22 +185,8 @@ const bridge = {
     delete: (templateId) => ipcRenderer.invoke('templates:delete', templateId),
   },
   tasks: {
-    startBidSectionExtraction: (payload) => ipcRenderer.invoke('tasks:start-bid-section-extraction', payload),
-    startBidAnalysis: (payload) => ipcRenderer.invoke('tasks:start-bid-analysis', payload),
-    startOutlineGeneration: (payload) => ipcRenderer.invoke('tasks:start-outline-generation', payload),
-    suppressOutlineSelectionAutoConfirmation: (payload) => ipcRenderer.invoke('tasks:suppress-outline-selection-auto-confirmation', payload),
-    startGlobalFactsGeneration: (payload) => ipcRenderer.invoke('tasks:start-global-facts-generation', payload),
-    startContentGeneration: (payload) => ipcRenderer.invoke('tasks:start-content-generation', payload),
-    pauseContentGeneration: () => ipcRenderer.invoke('tasks:pause-content-generation'),
-    startRejectionItemsExtraction: (payload) => ipcRenderer.invoke('tasks:start-rejection-items-extraction', payload),
-    startRejectionCheck: (payload) => ipcRenderer.invoke('tasks:start-rejection-check', payload),
-    startDuplicateAnalysis: (payload) => ipcRenderer.invoke('tasks:start-duplicate-analysis', payload),
-    startFeasibilityAnalysis: (payload) => ipcRenderer.invoke('tasks:start-feasibility-analysis', payload),
-    startFeasibilityOutline: (payload) => ipcRenderer.invoke('tasks:start-feasibility-outline', payload),
-    startFeasibilityParameters: (payload) => ipcRenderer.invoke('tasks:start-feasibility-parameters', payload),
-    startFeasibilityContent: (payload) => ipcRenderer.invoke('tasks:start-feasibility-content', payload),
-    pauseFeasibilityContent: () => ipcRenderer.invoke('tasks:pause-feasibility-content'),
-    startFeasibilityHumanWriting: (payload) => ipcRenderer.invoke('tasks:start-feasibility-human-writing', payload),
+    startGreenReportOutline: (payload) => ipcRenderer.invoke('tasks:start-green-report-outline', payload),
+    startGreenReportContent: (payload) => ipcRenderer.invoke('tasks:start-green-report-content', payload),
     getActiveTasks: () => ipcRenderer.invoke('tasks:get-active'),
     onTaskEvent: (callback) => {
       ipcRenderer.send('tasks:subscribe');
@@ -259,11 +197,17 @@ const bridge = {
   },
   export: {
     exportWord: (payload) => ipcRenderer.invoke('export:word', payload),
+    exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
     openFile: (filePath) => ipcRenderer.invoke('export:open-file', filePath),
     onWordExportProgress: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on('export:word-progress', listener);
       return () => ipcRenderer.removeListener('export:word-progress', listener);
+    },
+    onPdfExportProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('export:pdf-progress', listener);
+      return () => ipcRenderer.removeListener('export:pdf-progress', listener);
     },
   },
   systemFonts: {
@@ -286,7 +230,7 @@ const bridge = {
   },
 };
 
-contextBridge.exposeInMainWorld('yibiao', bridge);
+contextBridge.exposeInMainWorld('lvcert', bridge);
 
 contextBridge.exposeInMainWorld('yibiaoClient', {
   appName: bridge.appName,

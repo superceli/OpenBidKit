@@ -513,6 +513,18 @@
 
 /* 统一进度条（shared/ui/ProgressBar.tsx）：--progress 变量控制宽度，
  * 语义色变体对应正文生成的不同阶段，is-active 提供可选扫光动效 */
+.yb-progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.yb-progress-wrapper.has-percentage .yb-progress-track {
+  flex: 1;
+  min-width: 0;
+}
+
 .yb-progress-track {
   position: relative;
   display: block;
@@ -522,7 +534,7 @@
   border-radius: var(--yb-radius-pill);
 }
 
-.yb-progress-track > span {
+.yb-progress-track > span:first-child {
   display: block;
   width: var(--progress, 0%);
   height: 100%;
@@ -531,11 +543,23 @@
   transition: width var(--yb-duration) ease;
 }
 
+.yb-progress-percentage {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--yb-text-soft);
+  background: rgba(255, 255, 255, 0.88);
+  padding: 1px 6px;
+  border-radius: var(--yb-radius-pill);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .yb-progress-track.is-success {
   background: rgba(28, 184, 116, 0.12);
 }
 
-.yb-progress-track.is-success > span {
+.yb-progress-track.is-success > span:first-child {
   background: linear-gradient(90deg, var(--yb-success), #58d68d);
 }
 
@@ -543,7 +567,7 @@
   background: rgba(245, 158, 11, 0.14);
 }
 
-.yb-progress-track.is-warning > span {
+.yb-progress-track.is-warning > span:first-child {
   background: linear-gradient(90deg, var(--yb-warning), #f97316);
 }
 
@@ -551,7 +575,7 @@
   background: rgba(14, 165, 233, 0.13);
 }
 
-.yb-progress-track.is-sky > span {
+.yb-progress-track.is-sky > span:first-child {
   background: linear-gradient(90deg, #0ea5e9, #14b8a6);
 }
 
@@ -559,7 +583,7 @@
   background: rgba(139, 92, 246, 0.12);
 }
 
-.yb-progress-track.is-violet > span {
+.yb-progress-track.is-violet > span:first-child {
   background: linear-gradient(90deg, #8b5cf6, var(--yb-primary));
 }
 

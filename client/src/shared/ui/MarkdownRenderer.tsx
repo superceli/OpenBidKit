@@ -28,8 +28,8 @@ function isExternalHttpUrl(value: string) {
 }
 
 function openExternal(url: string) {
-  if (window.yibiao?.openExternal) {
-    void window.yibiao.openExternal(url);
+  if (window.lvcert?.openExternal) {
+    void window.lvcert.openExternal(url);
     return;
   }
 

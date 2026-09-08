@@ -5,25 +5,9 @@ const {
   getGeneratedImagesDir,
   getWorkspaceDir,
 } = require('../utils/paths.cjs');
-const {
-  OUTLINE_AGENT_TASK_KEY,
-  TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
-} = require('./outlineGenerationAgentV2Config.cjs');
-const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
-const { FEASIBILITY_OUTLINE_AGENT_TASK_KEY } = require('./feasibilityOutlineAgentConfig.cjs');
-
-const STORAGE_CLEANUP_VERSION = 1;
-const PERSISTENT_AGENT_TASK_KEYS = [
-  OUTLINE_AGENT_TASK_KEY,
-  TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
-  GLOBAL_FACTS_AGENT_TASK_KEY,
-  FEASIBILITY_OUTLINE_AGENT_TASK_KEY,
-];
-const LEGACY_WORKSPACE_FILES = [
-  'technical_plan.json',
-  'duplicate_check.json',
-  'rejection_check.json',
-];
+const STORAGE_CLEANUP_VERSION = 2;
+const PERSISTENT_AGENT_TASK_KEYS = [];
+const LEGACY_WORKSPACE_FILES = [];
 
 function removePath(targetPath) {
   fs.rmSync(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -54,7 +38,7 @@ function collectGeneratedImageReferences(db) {
   const references = new Set();
   const collect = (value) => {
     const source = String(value || '');
-    const pattern = /yibiao-asset:\/\/generated-images\/([^/?#\s"'<>\)]+)/g;
+    const pattern = /lvcert-asset:\/\/generated-images\/([^/?#\s"'<>\)]+)/g;
     for (const match of source.matchAll(pattern)) {
       try {
         references.add(decodeURIComponent(match[1]));
@@ -64,15 +48,15 @@ function collectGeneratedImageReferences(db) {
     }
   };
 
-  db.prepare(`
-    SELECT generation_asset_url AS value
-    FROM technical_plan_illustration_items
-    WHERE generation_asset_url IS NOT NULL AND generation_asset_url <> ''
-    UNION ALL
-    SELECT content AS value
-    FROM technical_plan_outline_nodes
-    WHERE content LIKE '%yibiao-asset://generated-images/%'
-  `).all().forEach((row) => collect(row.value));
+  try {
+    db.prepare(`
+      SELECT content AS value
+      FROM green_report_outline_nodes
+      WHERE content LIKE '%lvcert-asset://generated-images/%'
+    `).all().forEach((row) => collect(row.value));
+  } catch (error) {
+    // 表不存在时跳过
+  }
   return references;
 }
 
@@ -125,6 +109,11 @@ function runHistoricalStorageCleanup({ app, db, configStore, onStatus }) {
   run('清理旧 Agent 缓存', () => removePath(path.join(userDataDir, 'agent-cache')));
   run('清理废弃工作区状态', () => {
     LEGACY_WORKSPACE_FILES.forEach((fileName) => removePath(path.join(workspaceDir, fileName)));
+  });
+  run('清理投标工作区残留目录', () => {
+    ['technical-plan', 'duplicate-check', 'rejection-check', 'feasibility-report'].forEach((dirName) => {
+      removePath(path.join(workspaceDir, dirName));
+    });
   });
   run('清理未引用的旧生图', () => clearUnreferencedRootGeneratedImages(app, db));
 

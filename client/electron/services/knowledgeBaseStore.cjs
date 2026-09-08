@@ -1102,6 +1102,36 @@ function createKnowledgeBaseStore({ app, db }) {
     return { items };
   }
 
+  function searchItemsByKeyword(keyword, options = {}) {
+    const kw = String(keyword || '').trim();
+    if (!kw) return { keyword: kw, items: [] };
+    const limit = Math.max(1, Math.min(Number(options.limit) || 20, 50));
+    const contentExcerptChars = Number(options.contentExcerptChars) || 800;
+    const escaped = kw.replace(/[%_]/g, (m) => `\\${m}`);
+    const likePattern = `%${escaped}%`;
+    const rows = db.prepare(`
+      SELECT ki.item_id, ki.title, ki.resume, ki.content, ki.source_file,
+             kd.document_id, kd.file_name
+      FROM knowledge_items ki
+      JOIN knowledge_documents kd ON kd.document_id = ki.document_id
+      WHERE kd.status = 'success'
+        AND (ki.title LIKE ? ESCAPE '\\' OR ki.resume LIKE ? ESCAPE '\\' OR ki.content LIKE ? ESCAPE '\\')
+      ORDER BY
+        CASE WHEN ki.title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
+        ki.sort_order ASC, ki.id ASC
+      LIMIT ?
+    `).all(likePattern, likePattern, likePattern, likePattern, limit);
+    const items = rows.map((row) => ({
+      documentId: row.document_id,
+      documentName: row.file_name,
+      itemId: row.item_id,
+      title: row.title,
+      resume: row.resume,
+      content: String(row.content || '').slice(0, contentExcerptChars),
+    }));
+    return { keyword: kw, items };
+  }
+
   ensureBaseDir();
 
   return {
@@ -1135,6 +1165,7 @@ function createKnowledgeBaseStore({ app, db }) {
     readItems,
     readAnalysis,
     getOutlineReferences,
+    searchItemsByKeyword,
     resolvePath,
   };
 }

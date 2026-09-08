@@ -2284,6 +2284,10 @@ function createKnowledgeBaseService({ app, aiService, configStore, knowledgeBase
     readAnalysis(documentId) {
       return knowledgeBaseStore.readAnalysis(documentId, { debugLogPath: isDeveloperMode() ? getDebugLogPath(app, documentId) : '' });
     },
+
+    searchItems(keyword, options) {
+      return knowledgeBaseStore.searchItemsByKeyword(keyword, options);
+    },
   };
 }
 

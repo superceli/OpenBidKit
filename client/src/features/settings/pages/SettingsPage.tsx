@@ -642,18 +642,18 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   useEffect(() => {
     void loadTextConfig();
-    void window.yibiao?.getVersion().then(setAppVersion);
-    void window.yibiao?.license?.getStatus().then(setLicenseStatus).catch(() => setLicenseStatus(null));
+    void window.lvcert?.getVersion().then(setAppVersion);
+    void window.lvcert?.license?.getStatus().then(setLicenseStatus).catch(() => setLicenseStatus(null));
 
     const unsubs: Array<() => void> = [];
     unsubs.push(
-      window.yibiao?.onUpdateProgress(({ percent }) => {
+      window.lvcert?.onUpdateProgress(({ percent }) => {
         setUpdateStatus('downloading');
         setUpdatePercent(Math.round(percent));
       }) ?? (() => {})
     );
     unsubs.push(
-      window.yibiao?.onUpdateDownloaded(({ version }) => {
+      window.lvcert?.onUpdateDownloaded(({ version }) => {
         if (version) {
           setUpdateVersion(version);
         }
@@ -661,7 +661,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       }) ?? (() => {})
     );
     unsubs.push(
-      window.yibiao?.onUpdateError(({ message }) => {
+      window.lvcert?.onUpdateError(({ message }) => {
         setUpdateStatus('error');
         setUpdateError(message);
       }) ?? (() => {})
@@ -680,7 +680,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   const loadTextConfig = async () => {
     try {
-      const config = await window.yibiao?.config.load();
+      const config = await window.lvcert?.config.load();
       if (!config) {
         return;
       }
@@ -778,7 +778,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       setUpdateStatus('checking');
       setUpdatePercent(0);
       setUpdateError('');
-      const result = await window.yibiao?.checkUpdate();
+      const result = await window.lvcert?.checkUpdate();
       if (!result?.enabled) {
         setUpdateStatus('disabled');
         showToast('开发调试模式不执行自动更新', 'info');
@@ -817,7 +817,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   const installDownloadedUpdate = async () => {
     try {
-      const result = await window.yibiao?.quitAndInstall();
+      const result = await window.lvcert?.quitAndInstall();
       if (result && !result.success) {
         showToast(result.message || '安装更新失败', 'error');
       }
@@ -862,7 +862,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   const saveClientConfig = async (config: ClientConfig) => {
     try {
-      const result = await window.yibiao?.config.save(config);
+      const result = await window.lvcert?.config.save(config);
       showToast(result?.success ? '配置已保存' : result?.message || '配置保存失败', result?.success ? 'success' : 'error');
       if (result?.success) {
         setSavedConfig(config);
@@ -993,7 +993,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     try {
-      const result = await window.yibiao?.openExternal(url);
+      const result = await window.lvcert?.openExternal(url);
       if (result && !result.success) {
         showToast(result.message || '打开 API Key 获取页面失败', 'error');
       }
@@ -1010,7 +1010,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     try {
-      const result = await window.yibiao?.openExternal(url);
+      const result = await window.lvcert?.openExternal(url);
       if (result && !result.success) {
         showToast(result.message || '打开生图服务 API Key 获取页面失败', 'error');
       }
@@ -1023,11 +1023,11 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     try {
       setTestingTextModel(true);
       const config = createClientConfig();
-      const result = await window.yibiao?.config.save(config);
+      const result = await window.lvcert?.config.save(config);
       if (result?.success) {
         setSavedConfig(config);
       }
-      const content = await window.yibiao?.ai.chat({
+      const content = await window.lvcert?.ai.chat({
         messages: [{ role: 'user', content: 'hi' }],
         timeout_ms: 30000,
         timeout_message: '文本模型测试超时，请检查 Base URL、API Key 或模型名称',
@@ -1052,7 +1052,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       setAgentSelfCheckStatus('checking');
       setAgentSelfCheckResult(null);
 
-      const result = await window.yibiao?.agent.selfCheck();
+      const result = await window.lvcert?.agent.selfCheck();
       if (!result) {
         throw new Error('智能体自检未返回结果');
       }
@@ -1097,7 +1097,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
     try {
       setExportingAgentSelfCheckReport(true);
-      const result = await window.yibiao?.agent.exportSelfCheckReport(agentSelfCheckResult);
+      const result = await window.lvcert?.agent.exportSelfCheckReport(agentSelfCheckResult);
       if (!result) {
         throw new Error('导出智能体自检报告失败');
       }
@@ -1124,7 +1124,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     try {
       setTestingImageModel(true);
       const config = createClientConfig();
-      const result = await window.yibiao?.ai.testImageModel(config);
+      const result = await window.lvcert?.ai.testImageModel(config);
       if (!result?.success) {
         throw new Error(result?.message || '生图模型测试失败');
       }
@@ -1142,7 +1142,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
           [testedImageModel.provider]: testedImageModel,
         },
       };
-      await window.yibiao?.config.save(testedConfig);
+      await window.lvcert?.config.save(testedConfig);
       setState((prev) => ({
         ...prev,
         imageModel: testedConfig.image_model,
@@ -1177,7 +1177,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
           [failedImageModel.provider]: failedImageModel,
         },
       };
-      await window.yibiao?.config.save(failedConfig).catch(() => undefined);
+      await window.lvcert?.config.save(failedConfig).catch(() => undefined);
       setState((prev) => ({
         ...prev,
         imageModel: failedConfig.image_model,
@@ -1200,7 +1200,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   const openConfigFolder = async () => {
     try {
-      await window.yibiao?.config.openConfigFolder();
+      await window.lvcert?.config.openConfigFolder();
       showToast('已打开配置文件夹', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : '打开配置文件夹失败', 'error');
@@ -1211,7 +1211,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     try {
       setLoadingModels('text');
       setReasoningEfforts([]);
-      const result = await window.yibiao?.config.listModels(createClientConfig());
+      const result = await window.lvcert?.config.listModels(createClientConfig());
       const models = result?.models || [];
       setTextModels(models);
       if (result?.success && models.length > 0) {
@@ -1249,7 +1249,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
     try {
       setLoadingModelInfo(true);
-      const result = await window.yibiao?.config.getModelInfo(modelName);
+      const result = await window.lvcert?.config.getModelInfo(modelName);
       if (!result?.success || !result.model) {
         showToast(result?.message || '未获取到模型信息', 'info');
         return;
@@ -1308,7 +1308,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
         }
 
         const config = createClientConfig();
-        const result = await window.yibiao?.config.listModels({
+        const result = await window.lvcert?.config.listModels({
           ...config,
           api_key: state.imageModel.api_key,
           base_url: baseUrl,
@@ -1440,7 +1440,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     try {
-      const result = await window.yibiao?.developerTokenStats.openWindow();
+      const result = await window.lvcert?.developerTokenStats.openWindow();
       showToast(result?.success ? '已打开 Token 统计小窗' : '打开 Token 统计小窗失败', result?.success ? 'success' : 'error');
     } catch (error) {
       showToast(error instanceof Error ? error.message : '打开 Token 统计小窗失败', 'error');
@@ -1463,7 +1463,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     try {
-      const result = await window.yibiao?.developerAgentMonitor.openWindow();
+      const result = await window.lvcert?.developerAgentMonitor.openWindow();
       showToast(result?.success ? '已打开 Pi Agent 执行监视器' : '打开 Pi Agent 执行监视器失败', result?.success ? 'success' : 'error');
     } catch (error) {
       showToast(error instanceof Error ? error.message : '打开 Pi Agent 执行监视器失败', 'error');
@@ -1484,7 +1484,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
         });
         if (saved) {
           try {
-            const result = await window.yibiao?.startGpuHardwareAccelerationTrial();
+            const result = await window.lvcert?.startGpuHardwareAccelerationTrial();
             if (!result?.success) {
               throw new Error('GPU 硬件加速试启用失败');
             }
@@ -2429,16 +2429,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                     wiki.agnet.top
                   </a>
                 </li>
-                <li className="about-links-item">
-                  <span className="about-links-label">客户端授权状态</span>
-                  <span className={`about-links-value ${licenseStatus?.sourceTrusted ? 'is-trusted' : 'is-untrusted'}`}>
-                    {licenseSourceLabel}
-                  </span>
-                </li>
-              </ul>
-              <button type="button" className="about-links-activate" onClick={() => setOfflineLicenseDialogOpen(true)}>
-                离线激活授权
-              </button>
+                </ul>
             </article>
           </div>
           <div className="privacy-statement">

@@ -43,7 +43,7 @@ const SELF_CHECK_OUTPUT_SCHEMA = {
   required: ['message', 'input', 'node'],
   additionalProperties: false,
   properties: {
-    message: { const: 'YIBIAO_PI_AGENT_SELF_CHECK_OK' },
+    message: { const: 'LVCERT_PI_AGENT_SELF_CHECK_OK' },
     input: { const: 'YIBIAO_PI_AGENT_SELF_CHECK_INPUT' },
     node: { const: 'YIBIAO_PI_NODE_OK' },
   },
@@ -1157,7 +1157,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
         prompt: `请完成以下自检：
 1. 使用 read 工具读取 self-check-input.txt。
 2. 使用 bash 工具执行 node -e "console.log('YIBIAO_PI_NODE_OK')"。
-3. 使用 write 工具将 JSON 写入 ${SELF_CHECK_OUTPUT_FILE}，格式为 {"message":"YIBIAO_PI_AGENT_SELF_CHECK_OK","input":"YIBIAO_PI_AGENT_SELF_CHECK_INPUT","node":"YIBIAO_PI_NODE_OK"}。
+3. 使用 write 工具将 JSON 写入 ${SELF_CHECK_OUTPUT_FILE}，格式为 {"message":"LVCERT_PI_AGENT_SELF_CHECK_OK","input":"YIBIAO_PI_AGENT_SELF_CHECK_INPUT","node":"YIBIAO_PI_NODE_OK"}。
 4. 使用 json-validation 工具校验 ${SELF_CHECK_OUTPUT_FILE}。程序已预置 Schema，只传 file_path，不要传入 schema。
 5. 不要访问当前工作区以外的文件。`,
         json_validation_schemas: { [SELF_CHECK_OUTPUT_FILE]: SELF_CHECK_OUTPUT_SCHEMA },
@@ -1176,7 +1176,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
       let outputMessage = '';
       try {
         output = JSON.parse(result.output_content || '{}');
-        outputValid = output.message === 'YIBIAO_PI_AGENT_SELF_CHECK_OK'
+        outputValid = output.message === 'LVCERT_PI_AGENT_SELF_CHECK_OK'
           && output.input === 'YIBIAO_PI_AGENT_SELF_CHECK_INPUT'
           && output.node === 'YIBIAO_PI_NODE_OK';
         outputMessage = outputValid ? '输出内容符合预期' : 'Pi Agent 自检输出不符合预期';

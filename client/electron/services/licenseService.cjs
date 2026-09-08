@@ -9,8 +9,8 @@ const { getOsMachineId } = require('../utils/machineIdentity.cjs');
 
 const packageJson = require('../../package.json');
 
-const LICENSE_ENDPOINT = process.env.YIBIAO_LICENSE_ENDPOINT || 'https://analytics.agnet.top/license/activate';
-const PROJECT_NAME = packageJson.name || 'yibiao-client';
+const LICENSE_ENDPOINT = process.env.LVCERT_LICENSE_ENDPOINT || 'https://analytics.agnet.top/license/activate';
+const PROJECT_NAME = packageJson.name || 'lvcert-client';
 const APP_ID = packageJson.build?.appId || 'com.yibiao.openbidkit';
 const PRODUCT_NAME = packageJson.build?.productName || '易标投标工具箱';
 const FINGERPRINT_VERSION = '2026-01';
@@ -532,7 +532,7 @@ function createLicenseService({ app, configStore }) {
       title: '选择离线授权文件',
       properties: ['openFile'],
       filters: [
-        { name: '易标离线授权文件', extensions: ['json', 'license', 'txt'] },
+        { name: '绿证离线授权文件', extensions: ['json', 'license', 'txt'] },
         { name: '所有文件', extensions: ['*'] },
       ],
     });

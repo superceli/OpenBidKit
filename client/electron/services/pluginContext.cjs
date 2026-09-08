@@ -71,24 +71,6 @@ function createPluginContext(app, pluginId, services) {
       }
       return [];
     },
-    getTechnicalPlanState() {
-      if (services.technicalPlanStore) {
-        return services.technicalPlanStore.loadTechnicalPlan();
-      }
-      return null;
-    },
-    getDuplicateCheckState() {
-      if (services.duplicateCheckStore) {
-        return services.duplicateCheckStore.loadDuplicateCheck();
-      }
-      return null;
-    },
-    getRejectionCheckState() {
-      if (services.rejectionCheckStore) {
-        return services.rejectionCheckStore.loadRejectionCheck();
-      }
-      return null;
-    },
     onTaskEvent(callback) {
       if (!services.taskService) {
         return () => {};

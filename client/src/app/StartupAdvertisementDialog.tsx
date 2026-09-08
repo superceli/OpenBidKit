@@ -30,7 +30,7 @@ function StartupAdvertisementDialog({ onClosed }: StartupAdvertisementDialogProp
   const canClose = remainingSeconds === 0;
 
   const openAdvertisement = () => {
-    void window.yibiao?.openExternal(advertisementTargetUrl);
+    void window.lvcert?.openExternal(advertisementTargetUrl);
   };
 
   const finishClosing = () => {

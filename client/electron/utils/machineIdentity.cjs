@@ -5,7 +5,7 @@ const { execFileSync } = require('node:child_process');
 
 const packageJson = require('../../package.json');
 
-const PROJECT_NAME = packageJson.name || 'yibiao-client';
+const PROJECT_NAME = packageJson.name || 'lvcert-client';
 const APP_ID = packageJson.build?.appId || 'com.yibiao.openbidkit';
 const CLIENT_ID_VERSION = 'machine-v1';
 

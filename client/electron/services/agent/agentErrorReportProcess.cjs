@@ -192,7 +192,7 @@ async function runReport(job) {
       headers: {
         'Content-Type': 'application/gzip',
         'Content-Length': String(compressed.length),
-        'X-Yibiao-Report-Meta': base64UrlJson(meta),
+        'X-Lvcert-Report-Meta': base64UrlJson(meta),
         'X-Yibiao-License': base64UrlJson(job.license),
       },
       body: compressed,

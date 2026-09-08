@@ -310,7 +310,7 @@ class PluginService {
    * 下载插件
    */
   async downloadPlugin(releaseUrl) {
-    const tempDir = path.join(this.app.getPath('temp'), 'yibiao-plugins');
+    const tempDir = path.join(this.app.getPath('temp'), 'lvcert-plugins');
     fs.mkdirSync(tempDir, { recursive: true });
     
     const fileName = path.basename(new URL(releaseUrl).pathname);
@@ -446,7 +446,7 @@ class PluginService {
       throw new Error('请选择 ZIP 格式的插件安装包');
     }
 
-    const tempRoot = path.join(this.app.getPath('temp'), 'yibiao-plugins');
+    const tempRoot = path.join(this.app.getPath('temp'), 'lvcert-plugins');
     fs.mkdirSync(tempRoot, { recursive: true });
     let stagingDir = fs.mkdtempSync(path.join(tempRoot, 'offline-'));
 

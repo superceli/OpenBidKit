@@ -79,10 +79,6 @@ function registerDeveloperIpc({ configStore, aiService, agentService, openDevelo
     return { success: true, path: workspaceDir };
   });
 
-  ipcMain.handle('developer-expansion-replace-test:run', (_event, payload) => {
-    requireDeveloperMode(configStore);
-    return developerExpansionReplaceTestService.run(payload);
-  });
 }
 
 module.exports = {

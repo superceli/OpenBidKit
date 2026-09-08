@@ -25,7 +25,7 @@ export function DocumentParseNoticeProvider({ children }: { children: ReactNode 
   }, []);
 
   const openDownload = useCallback(() => {
-    void window.yibiao?.openExternal(LIBREOFFICE_DOWNLOAD_URL);
+    void window.lvcert?.openExternal(LIBREOFFICE_DOWNLOAD_URL);
   }, []);
 
   const value = useMemo(() => ({ showDocumentParseNotice }), [showDocumentParseNotice]);

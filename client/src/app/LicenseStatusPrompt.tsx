@@ -30,7 +30,7 @@ function LicenseStatusPrompt() {
 
     const checkLicense = async () => {
       try {
-        const initialStatus = await window.yibiao?.license?.getStatus();
+        const initialStatus = await window.lvcert?.license?.getStatus();
         if (disposed || !initialStatus) return;
 
         if (!shouldShowPrompt(initialStatus)) {
@@ -38,7 +38,7 @@ function LicenseStatusPrompt() {
           return;
         }
 
-        const refreshedStatus = await window.yibiao?.license?.refresh?.().catch(() => null);
+        const refreshedStatus = await window.lvcert?.license?.refresh?.().catch(() => null);
         const finalStatus = refreshedStatus || initialStatus;
         if (!disposed) {
           setLicenseStatus(shouldShowPrompt(finalStatus) ? finalStatus : null);

@@ -22,14 +22,14 @@ function WorkspaceDatabaseGate({ children }: WorkspaceDatabaseGateProps) {
   const [showGate, setShowGate] = useState(false);
 
   const openReleasePage = async () => {
-    const url = await window.yibiao?.getUpdateDownloadUrl();
+    const url = await window.lvcert?.getUpdateDownloadUrl();
     if (url) {
-      await window.yibiao?.openExternal(url);
+      await window.lvcert?.openExternal(url);
     }
   };
 
   useEffect(() => {
-    const database = window.yibiao?.database;
+    const database = window.lvcert?.database;
     if (!database) {
       setStatus({ phase: 'ready', ready: true, message: '本地数据库已就绪' });
       return;

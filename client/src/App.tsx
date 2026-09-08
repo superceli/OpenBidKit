@@ -12,18 +12,18 @@ function isDeveloperSection(section: SectionId) {
 }
 
 function isManagedWorkbenchSection(section: SectionId) {
-  return section === 'technical-plan' || section === 'existing-plan-expansion' || section === 'feasibility-report';
+  return section === 'green-report';
 }
 
 function App() {
-  const [activeSection, setActiveSection] = useState<SectionId>('bid-generation');
+  const [activeSection, setActiveSection] = useState<SectionId>('green-report');
   const [developerMode, setDeveloperMode] = useState(false);
   const leaveGuardRef = useRef<((nextSection?: string) => Promise<boolean>) | null>(null);
 
   useEffect(() => {
     trackAppOpen();
 
-    void window.yibiao?.config.load()
+    void window.lvcert?.config.load()
       .then((config) => {
         setDeveloperMode(Boolean(config?.developer_mode));
         trackConfigUsage({}, config);
@@ -34,12 +34,12 @@ function App() {
   useEffect(() => {
     trackPageView(activeSection);
     if (isManagedWorkbenchSection(activeSection)) return;
-    void window.yibiao?.ui?.setCurrentView({ section: activeSection });
+    void window.lvcert?.ui?.setCurrentView({ section: activeSection });
   }, [activeSection]);
 
   useEffect(() => {
     if (!developerMode && isDeveloperSection(activeSection)) {
-      setActiveSection('bid-generation');
+      setActiveSection('green-report');
     }
   }, [activeSection, developerMode]);
 

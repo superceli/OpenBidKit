@@ -30,7 +30,7 @@ function clearManualUpdateDownloads(app) {
     if (!fs.existsSync(updatesDir)) return;
     for (const entry of fs.readdirSync(updatesDir, { withFileTypes: true })) {
       if (!entry.isFile()) continue;
-      const match = /^Yibiao-(.+?)-(?:win-x64\.exe|mac-(?:x64|arm64)\.dmg)$/i.exec(entry.name);
+      const match = /^Lvcert-(.+?)-(?:win-x64\.exe|mac-(?:x64|arm64)\.dmg)$/i.exec(entry.name);
       if (!match || compareVersions(match[1], app.getVersion()) > 0) continue;
       fs.rmSync(path.join(updatesDir, entry.name), { force: true });
     }
@@ -104,7 +104,7 @@ function getUpdateChannel(configStore) {
 
 function requestJson(url, label, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = https.get(url, { headers: { 'User-Agent': 'yibiao-client', ...headers } }, (response) => {
+    const request = https.get(url, { headers: { 'User-Agent': 'lvcert-client', ...headers } }, (response) => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
         requestJson(new URL(response.headers.location, url).toString(), label, headers).then(resolve, reject);
@@ -323,7 +323,7 @@ function sanitizeDownloadFileName(fileName, fallback) {
 
 function getManualUpdateDownloadPath(app, release, file) {
   const platformSuffix = process.platform === 'win32' ? 'win-x64.exe' : `mac-${getMacUpdateArch()}.dmg`;
-  const fallbackName = `Yibiao-${release.version || 'update'}-${platformSuffix}`;
+  const fallbackName = `Lvcert-${release.version || 'update'}-${platformSuffix}`;
   const fileName = sanitizeDownloadFileName(file?.name, fallbackName);
   return path.join(app.getPath('userData'), 'updates', fileName);
 }
@@ -370,7 +370,7 @@ function downloadFile(url, destinationPath, options = {}, redirectCount = 0) {
 
     let request;
     try {
-      request = requestModuleForUrl(parsedUrl).get(parsedUrl, { headers: { 'User-Agent': 'yibiao-client' } }, (response) => {
+      request = requestModuleForUrl(parsedUrl).get(parsedUrl, { headers: { 'User-Agent': 'lvcert-client' } }, (response) => {
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
           response.resume();
           if (redirectCount >= 5) {

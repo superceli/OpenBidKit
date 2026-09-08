@@ -454,7 +454,7 @@ function PiAgentMonitorWindow() {
   useEffect(() => {
     document.documentElement.classList.add('agent-monitor-root');
     document.body.classList.add('agent-monitor-root');
-    const bridge = window.yibiao?.developerAgentMonitor;
+    const bridge = window.lvcert?.developerAgentMonitor;
     if (!bridge) {
       setError('Pi Agent 执行监视器接口不可用');
       return () => {
@@ -523,7 +523,7 @@ function PiAgentMonitorWindow() {
     try {
       setWorkspaceOpening(true);
       setWorkspaceOpenError('');
-      await window.yibiao?.developerAgentMonitor.openWorkspace(selectedTask.workspaceDir);
+      await window.lvcert?.developerAgentMonitor.openWorkspace(selectedTask.workspaceDir);
     } catch (caught) {
       setWorkspaceOpenError(caught instanceof Error ? caught.message : '打开当前工作空间失败');
     } finally {

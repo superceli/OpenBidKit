@@ -1,0 +1,894 @@
+/* 绿色报告工具箱样式
+ * 主色与系统一致使用 --yb-primary（#2174fd），与其他 feature 页面风格对齐。
+ * 复用 tokens.css 中的圆角、阴影、过渡等设计 token，卡片容器参考 settings-page-section。
+ */
+
+.green-report {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============ 顶部步骤导航 ============ */
+.green-report-stepper {
+  display: flex;
+  gap: 4px;
+  padding: 12px 24px 0;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+.green-report-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--yb-text-muted);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(228, 233, 240, 0.8);
+  border-radius: var(--yb-radius-pill);
+  cursor: not-allowed;
+  transition: background var(--yb-duration-fast) var(--yb-ease),
+              color var(--yb-duration-fast) var(--yb-ease),
+              border-color var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-step.is-clickable {
+  cursor: pointer;
+}
+
+.green-report-step.is-clickable:hover {
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.06);
+  border-color: rgba(33, 116, 253, 0.18);
+}
+
+.green-report-step.is-current {
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--yb-primary) 0%, var(--yb-violet) 100%);
+  border-color: rgba(33, 116, 253, 0.2);
+  box-shadow: var(--yb-shadow-sm);
+}
+
+.green-report-step.is-done {
+  color: var(--yb-primary-deep);
+  cursor: pointer;
+  background: rgba(33, 116, 253, 0.08);
+  border-color: rgba(33, 116, 253, 0.22);
+}
+
+.green-report-step.is-done:hover {
+  background: rgba(33, 116, 253, 0.14);
+}
+
+.green-report-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.green-report-step.is-current .green-report-step-number {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.green-report-step.is-done .green-report-step-number {
+  background: var(--yb-primary);
+  color: #fff;
+}
+
+/* ============ 主内容区 ============ */
+.green-report-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 24px 96px;
+}
+
+.green-report-section {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* ============ 卡片容器（对齐 settings-page-section） ============ */
+.green-report-card-panel {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(228, 233, 240, 0.88);
+  border-radius: var(--yb-radius-xl);
+  box-shadow: var(--yb-shadow);
+  padding: 20px 24px;
+}
+
+.green-report-block {
+  margin-bottom: 0;
+}
+
+.green-report-block + .green-report-block {
+  border-top: 1px solid var(--yb-border-soft);
+  padding-top: 20px;
+}
+
+.green-report-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: var(--yb-text);
+  letter-spacing: 0.02em;
+}
+
+.green-report-subtitle {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin: 0 0 16px;
+  line-height: 1.55;
+}
+
+/* ============ 报告类型卡片网格 ============ */
+.green-report-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  max-width: 900px;
+}
+
+/* ============ 报告类型搜索 + 可滚动列表 ============ */
+.green-report-type-search {
+  margin-bottom: 12px;
+}
+
+.green-report-type-list {
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.green-report-type-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.green-report-type-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--yb-primary-deep);
+  background: rgba(33, 116, 253, 0.06);
+  padding: 4px 10px;
+  border-radius: var(--yb-radius-sm);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.green-report-type-group-count {
+  color: var(--yb-text-muted);
+  font-weight: 400;
+}
+
+.green-report-type-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.green-report-type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-md);
+  background: var(--yb-surface);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--yb-text-soft);
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-type-item:hover {
+  border-color: rgba(33, 116, 253, 0.22);
+  background: rgba(33, 116, 253, 0.04);
+  color: var(--yb-text);
+}
+
+.green-report-type-item.is-selected {
+  border-color: rgba(33, 116, 253, 0.45);
+  background: rgba(33, 116, 253, 0.08);
+  color: var(--yb-primary-deep);
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(33, 116, 253, 0.12);
+}
+
+.green-report-type-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.green-report-type-item-check {
+  flex-shrink: 0;
+  margin-left: 8px;
+  color: var(--yb-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.green-report-type-empty {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--yb-text-muted);
+  font-size: 13px;
+}
+
+.green-report-card {
+  position: relative;
+  padding: 14px 16px;
+  border-radius: var(--yb-radius-md);
+  border: 1px solid var(--yb-border);
+  background: var(--yb-surface);
+  cursor: pointer;
+  transition: border-color var(--yb-duration-fast) var(--yb-ease),
+              box-shadow var(--yb-duration-fast) var(--yb-ease),
+              background var(--yb-duration-fast) var(--yb-ease),
+              transform var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-card:hover {
+  border-color: rgba(33, 116, 253, 0.22);
+  box-shadow: var(--yb-shadow-sm);
+  transform: translateY(-1px);
+}
+
+.green-report-card.is-selected {
+  border-color: rgba(33, 116, 253, 0.45);
+  background: rgba(33, 116, 253, 0.08);
+  box-shadow: 0 0 0 3px rgba(33, 116, 253, 0.12);
+}
+
+.green-report-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: var(--yb-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.green-report-card-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--yb-text-soft);
+}
+
+.green-report-card-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--yb-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ============ 表单（对齐 settings-row 风格） ============ */
+.green-report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.green-report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.green-report-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--yb-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.green-report-field-optional {
+  font-size: 11px;
+  color: var(--yb-text-muted);
+  font-weight: 400;
+}
+
+.green-report-input,
+.green-report-textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  color: var(--yb-text);
+  font-size: 13px;
+  font-family: inherit;
+  background-color: #eef3fa;
+  border: 1px solid #ccd6e3;
+  border-radius: var(--yb-radius-md);
+  outline: none;
+  transition: border-color var(--yb-duration-fast) var(--yb-ease),
+              box-shadow var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-input:hover,
+.green-report-textarea:hover {
+  border-color: rgba(33, 116, 253, 0.35);
+}
+
+.green-report-input:focus,
+.green-report-textarea:focus {
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-focus-ring);
+}
+
+.green-report-textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+}
+
+.green-report-field-hint {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin-top: 2px;
+  line-height: 1.55;
+}
+
+.green-report-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--yb-text);
+  margin-bottom: 6px;
+}
+
+.green-report-help-text {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+/* ============ 操作按钮 ============ */
+.green-report-btn {
+  padding: 9px 22px;
+  border-radius: var(--yb-radius-md);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--yb-duration-fast) var(--yb-ease),
+              opacity var(--yb-duration-fast) var(--yb-ease),
+              transform var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-btn-primary {
+  background: linear-gradient(135deg, var(--yb-primary) 0%, var(--yb-violet) 100%);
+  color: #fff;
+  box-shadow: var(--yb-shadow-sm);
+}
+
+.green-report-btn-primary:hover {
+  background: linear-gradient(135deg, var(--yb-primary-hover) 0%, var(--yb-violet) 100%);
+  transform: translateY(-1px);
+}
+
+.green-report-btn-primary:active {
+  opacity: 0.9;
+  transform: translateY(0);
+}
+
+.green-report-btn-primary:disabled {
+  background: var(--yb-text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+  transform: none;
+}
+
+.green-report-btn-secondary {
+  padding: 6px 14px;
+  border-radius: var(--yb-radius-md);
+  border: 1px solid var(--yb-border);
+  background: var(--yb-surface);
+  color: var(--yb-text-soft);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-btn-secondary:hover {
+  border-color: rgba(33, 116, 253, 0.35);
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.06);
+}
+
+.green-report-btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.green-report-btn-row {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* ============ 知识库检索结果 ============ */
+.green-report-knowledge {
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-md);
+  overflow: hidden;
+  background: var(--yb-surface);
+}
+
+.green-report-knowledge-head {
+  padding: 10px 14px;
+  background: rgba(33, 116, 253, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--yb-primary-deep);
+  border-bottom: 1px solid rgba(33, 116, 253, 0.18);
+}
+
+.green-report-knowledge-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.green-report-knowledge-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--yb-border-soft);
+  font-size: 12px;
+}
+
+.green-report-knowledge-item:last-child {
+  border-bottom: none;
+}
+
+.green-report-knowledge-item-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: var(--yb-text);
+  font-size: 13px;
+}
+
+.green-report-knowledge-item-resume {
+  color: var(--yb-text-soft);
+  margin-bottom: 4px;
+  line-height: 1.55;
+}
+
+.green-report-knowledge-item-content {
+  color: var(--yb-text-muted);
+  font-size: 11px;
+  max-height: 60px;
+  overflow: hidden;
+  line-height: 1.5;
+}
+
+.green-report-knowledge-item-source {
+  color: var(--yb-text-muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* ============ Outline / Content 页面共用 ============ */
+.green-report-outline-empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--yb-text-muted);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px dashed var(--yb-border);
+  border-radius: var(--yb-radius-md);
+}
+
+.green-report-outline-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--yb-text-soft);
+  margin: 0 0 6px;
+}
+
+.green-report-outline-empty-hint {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin: 0;
+  line-height: 1.55;
+}
+
+.green-report-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.green-report-toolbar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--yb-text);
+  margin: 0;
+}
+
+.green-report-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.green-report-number-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--yb-text-soft);
+}
+
+.green-report-number-inline input {
+  width: 80px;
+  padding: 4px 8px;
+  border-radius: var(--yb-radius-md);
+  border: 1px solid var(--yb-border);
+  background: var(--yb-surface);
+  font-size: 13px;
+  color: var(--yb-text);
+  font-family: inherit;
+}
+
+.green-report-number-inline input:focus {
+  outline: none;
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-focus-ring);
+}
+
+.green-report-outline-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.green-report-outline-item {
+  padding: 10px 14px;
+  border-radius: var(--yb-radius-md);
+  background: var(--yb-surface);
+  border: 1px solid var(--yb-border);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-outline-item:hover {
+  border-color: rgba(33, 116, 253, 0.22);
+  background: rgba(33, 116, 253, 0.04);
+}
+
+.green-report-outline-item.is-selected {
+  border-color: rgba(33, 116, 253, 0.45);
+  background: rgba(33, 116, 253, 0.08);
+  box-shadow: 0 0 0 2px rgba(33, 116, 253, 0.12);
+}
+
+.green-report-outline-item.is-leaf {
+  position: relative;
+  padding-left: 28px;
+}
+
+.green-report-outline-item.is-leaf::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--yb-text-muted);
+  transform: translateY(-50%);
+}
+
+.green-report-outline-item.is-leaf.has-content::before {
+  background: var(--yb-primary);
+}
+
+.green-report-outline-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--yb-text);
+}
+
+.green-report-outline-item-title.is-root {
+  font-weight: 700;
+}
+
+.green-report-outline-item-desc {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin-top: 2px;
+  line-height: 1.55;
+}
+
+.green-report-outline-item-meta {
+  font-size: 11px;
+  color: var(--yb-primary);
+  margin-top: 2px;
+}
+
+.green-report-outline-item-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.green-report-outline-stats {
+  padding: 8px 14px;
+  background: rgba(33, 116, 253, 0.06);
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  border-radius: 0 0 var(--yb-radius-md) var(--yb-radius-md);
+}
+
+.green-report-error-text {
+  font-size: 12px;
+  color: var(--yb-danger, #e5484d);
+  margin-top: 4px;
+}
+
+/* ============ Content 页面：双栏布局 ============ */
+.green-report-content-split {
+  height: 100%;
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+}
+
+.green-report-chapter-panel {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(228, 233, 240, 0.88);
+  border-radius: var(--yb-radius-xl);
+  box-shadow: var(--yb-shadow);
+  overflow: hidden;
+}
+
+.green-report-chapter-head {
+  padding: 12px 14px;
+  background: rgba(33, 116, 253, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--yb-border-soft);
+}
+
+.green-report-chapter-head-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--yb-text);
+}
+
+.green-report-chapter-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.green-report-chapter-item {
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--yb-border-soft);
+  font-size: 13px;
+  color: var(--yb-text-soft);
+  transition: background var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-chapter-item:hover {
+  background: rgba(33, 116, 253, 0.04);
+}
+
+.green-report-chapter-item.is-selected {
+  background: rgba(33, 116, 253, 0.1);
+  color: var(--yb-primary-deep);
+  font-weight: 600;
+}
+
+.green-report-chapter-item-id {
+  opacity: 0.6;
+  margin-right: 4px;
+}
+
+.green-report-chapter-item-check {
+  margin-left: 4px;
+  color: var(--yb-primary);
+  font-size: 11px;
+}
+
+.green-report-chapter-foot {
+  padding: 6px 14px;
+  background: rgba(33, 116, 253, 0.06);
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  border-top: 1px solid var(--yb-border-soft);
+}
+
+.green-report-editor-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(228, 233, 240, 0.88);
+  border-radius: var(--yb-radius-xl);
+  box-shadow: var(--yb-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.green-report-editor-head {
+  padding: 12px 16px;
+  background: rgba(33, 116, 253, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--yb-border-soft);
+}
+
+.green-report-editor-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--yb-text);
+}
+
+.green-report-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.green-report-editor-body {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+  min-height: 0;
+}
+
+.green-report-editor-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-md);
+  padding: 12px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--yb-text);
+  background: var(--yb-surface);
+  outline: none;
+  transition: border-color var(--yb-duration-fast) var(--yb-ease),
+              box-shadow var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-editor-textarea:focus {
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-focus-ring);
+}
+
+.green-report-editor-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--yb-text-muted);
+  font-size: 14px;
+}
+
+.green-report-editor-placeholder-text {
+  font-size: 14px;
+  color: var(--yb-text-soft);
+}
+
+.green-report-editor-placeholder-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.green-report-progress-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* ============ 配置页：样式选择小卡片 ============ */
+.green-report-style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.green-report-style-card {
+  padding: 12px 16px;
+  border-radius: var(--yb-radius-md);
+  border: 1px solid var(--yb-border);
+  background: var(--yb-surface);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-style-card:hover {
+  border-color: rgba(33, 116, 253, 0.22);
+  box-shadow: var(--yb-shadow-xs);
+}
+
+.green-report-style-card.is-selected {
+  border-color: rgba(33, 116, 253, 0.45);
+  background: rgba(33, 116, 253, 0.08);
+  box-shadow: 0 0 0 3px rgba(33, 116, 253, 0.12);
+}
+
+.green-report-style-card-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--yb-text);
+}
+
+.green-report-style-card-desc {
+  font-size: 11px;
+  color: var(--yb-text-soft);
+  line-height: 1.55;
+}
+
+/* ============ 数字输入组合 ============ */
+.green-report-number-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.green-report-number-input {
+  width: 120px;
+}
+
+.green-report-number-suffix {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+}

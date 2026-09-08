@@ -3,8 +3,8 @@ const crypto = require('node:crypto');
 const { utilityProcess } = require('electron');
 const { isExpectedAgentInterruption } = require('./agentInterruption.cjs');
 
-const ANALYTICS_ENDPOINT = process.env.YIBIAO_AGENT_ERROR_ENDPOINT || 'https://analytics.agnet.top/agent-errors';
-const PROJECT_NAME = 'yibiao-client';
+const ANALYTICS_ENDPOINT = process.env.LVCERT_AGENT_ERROR_ENDPOINT || 'https://analytics.agnet.top/agent-errors';
+const PROJECT_NAME = 'lvcert-client';
 const REPORT_SCHEMA_VERSION = 1;
 const MAX_COMPRESSED_BYTES = 95 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 30 * 1000;

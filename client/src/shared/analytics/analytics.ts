@@ -1,7 +1,7 @@
 import type { ClientConfig } from '../types/config';
 
 const ANALYTICS_ENDPOINT = 'https://analytics.agnet.top/track';
-const PROJECT_NAME = 'yibiao-client';
+const PROJECT_NAME = 'lvcert-client';
 const LEGACY_CLIENT_ID_KEY = 'analytics_client_id';
 
 type AnalyticsEvent = 'app_open' | 'page_view' | 'config_usage' | 'resource_click';
@@ -102,7 +102,7 @@ async function migrateLegacyClientId(config: ClientConfig) {
   };
 
   try {
-    const result = await window.yibiao?.config.save(migratedConfig);
+    const result = await window.lvcert?.config.save(migratedConfig);
     if (result?.success) {
       removeLegacyClientId();
       return migratedConfig;
@@ -116,7 +116,7 @@ async function migrateLegacyClientId(config: ClientConfig) {
 
 function getAnalyticsIdentity() {
   if (!identityPromise) {
-    identityPromise = window.yibiao?.config.load()
+    identityPromise = window.lvcert?.config.load()
       .then((config) => migrateLegacyClientId(config))
       .then((config) => ({
         clientId: config?.analytics_client_id || '',
@@ -129,12 +129,12 @@ function getAnalyticsIdentity() {
 }
 
 function getPlatform() {
-  return window.yibiao?.platform || window.yibiaoClient?.platform || '';
+  return window.lvcert?.platform || '';
 }
 
 function getVersion() {
   if (!versionPromise) {
-    versionPromise = window.yibiao?.getVersion?.().catch(() => '') || Promise.resolve('');
+    versionPromise = window.lvcert?.getVersion?.().catch(() => '') || Promise.resolve('');
   }
 
   return versionPromise;
@@ -155,7 +155,7 @@ async function getAnalyticsLicenseSnapshot(): Promise<AnalyticsLicenseSnapshot> 
   };
 
   try {
-    const status = await window.yibiao?.license?.getStatus();
+    const status = await window.lvcert?.license?.getStatus();
     const value = status ? {
       licenseStatus: String(status.licenseStatus || status.status || ''),
       licensePlan: String(status.plan || ''),
@@ -262,7 +262,7 @@ export function trackConfigUsage(payload: ConfigUsagePayload = {}, config?: Clie
     return;
   }
 
-  void window.yibiao?.config.load()
+  void window.lvcert?.config.load()
     .then((loadedConfig) => send(loadedConfig))
     .catch(() => send(null));
 }

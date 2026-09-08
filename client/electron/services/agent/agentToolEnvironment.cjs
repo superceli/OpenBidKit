@@ -109,9 +109,9 @@ function writeNodeShim(binDir) {
     writeFileIfChanged(path.join(binDir, 'node.cmd'), [
       '@echo off',
       'setlocal',
-      'if "%YIBIAO_ELECTRON_NODE%"=="" set "YIBIAO_ELECTRON_NODE=node"',
+      'if "%LVCERT_ELECTRON_NODE%"=="" set "LVCERT_ELECTRON_NODE=node"',
       'set "ELECTRON_RUN_AS_NODE=1"',
-      '"%YIBIAO_ELECTRON_NODE%" %*',
+      '"%LVCERT_ELECTRON_NODE%" %*',
       'exit /b %ERRORLEVEL%',
       '',
     ].join('\r\n'));
@@ -120,8 +120,8 @@ function writeNodeShim(binDir) {
 
   writeFileIfChanged(path.join(binDir, 'node'), [
     '#!/bin/sh',
-    ': "${YIBIAO_ELECTRON_NODE:=node}"',
-    'ELECTRON_RUN_AS_NODE=1 exec "$YIBIAO_ELECTRON_NODE" "$@"',
+    ': "${LVCERT_ELECTRON_NODE:=node}"',
+    'ELECTRON_RUN_AS_NODE=1 exec "$LVCERT_ELECTRON_NODE" "$@"',
     '',
   ].join('\n'), 0o755);
 }
@@ -131,9 +131,9 @@ function writeCommandShim(binDir, command, runnerPath) {
     writeFileIfChanged(path.join(binDir, `${command}.cmd`), [
       '@echo off',
       'setlocal',
-      'if "%YIBIAO_ELECTRON_NODE%"=="" set "YIBIAO_ELECTRON_NODE=node"',
+      'if "%LVCERT_ELECTRON_NODE%"=="" set "LVCERT_ELECTRON_NODE=node"',
       'set "ELECTRON_RUN_AS_NODE=1"',
-      `"%YIBIAO_ELECTRON_NODE%" "%~dp0yibiao-tool-runner.cjs" "${command}" %*`,
+      `"%LVCERT_ELECTRON_NODE%" "%~dp0yibiao-tool-runner.cjs" "${command}" %*`,
       'exit /b %ERRORLEVEL%',
       '',
     ].join('\r\n'));
@@ -142,8 +142,8 @@ function writeCommandShim(binDir, command, runnerPath) {
 
   writeFileIfChanged(path.join(binDir, command), [
     '#!/bin/sh',
-    ': "${YIBIAO_ELECTRON_NODE:=node}"',
-    `ELECTRON_RUN_AS_NODE=1 exec "$YIBIAO_ELECTRON_NODE" ${quoteSh(runnerPath)} ${quoteSh(command)} "$@"`,
+    ': "${LVCERT_ELECTRON_NODE:=node}"',
+    `ELECTRON_RUN_AS_NODE=1 exec "$LVCERT_ELECTRON_NODE" ${quoteSh(runnerPath)} ${quoteSh(command)} "$@"`,
     '',
   ].join('\n'), 0o755);
 }
@@ -953,7 +953,7 @@ function prependPathEntries(env, entries) {
   const nextPath = [...entries, existingPath].filter(Boolean).join(path.delimiter);
   env.PATH = nextPath;
   if (process.platform === 'win32') env.Path = nextPath;
-  env.YIBIAO_ELECTRON_NODE = process.execPath;
+  env.LVCERT_ELECTRON_NODE = process.execPath;
   return env;
 }
 

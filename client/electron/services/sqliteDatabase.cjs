@@ -3,7 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 23;
+const schemaVersion = 25;
 
 function createInitialSchema(db) {
   db.exec(`
@@ -1035,54 +1035,124 @@ function createFeasibilityReportSchema(db) {
   `);
 }
 
+function createGreenReportSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS green_report_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      step TEXT NOT NULL DEFAULT 'company-info',
+      report_type TEXT NOT NULL DEFAULT 'esg',
+      project_info_json TEXT,
+      target_words INTEGER NOT NULL DEFAULT 20000,
+      page_count INTEGER NOT NULL DEFAULT 30,
+      document_style TEXT NOT NULL DEFAULT 'standard',
+      knowledge_context_json TEXT,
+      outline_project_name TEXT,
+      outline_project_overview TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS green_report_tasks (
+      type TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress INTEGER NOT NULL DEFAULT 0,
+      stats_json TEXT,
+      error TEXT,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS green_report_outline_nodes (
+      node_id TEXT PRIMARY KEY,
+      parent_node_id TEXT,
+      sort_order INTEGER NOT NULL,
+      level INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (parent_node_id) REFERENCES green_report_outline_nodes(node_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_green_report_outline_parent_order
+    ON green_report_outline_nodes(parent_node_id, sort_order);
+
+    CREATE INDEX IF NOT EXISTS idx_green_report_outline_level
+    ON green_report_outline_nodes(level);
+  `);
+}
+
+// 绿色报告工具箱：清理所有投标相关表结构。
+function createTaskLogsSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_domain TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_logs_task
+    ON task_logs(task_domain, task_type, task_id, id DESC);
+  `);
+}
+
+function dropBiddingTables(db) {
+  const biddingTables = [
+    'technical_plan_meta',
+    'technical_plan_tasks',
+    'technical_plan_bid_items',
+    'technical_plan_reference_docs',
+    'technical_plan_outline_nodes',
+    'technical_plan_content_sections',
+    'technical_plan_content_plans',
+    'technical_plan_global_fact_groups',
+    'technical_plan_illustration_plans',
+    'technical_plan_illustration_items',
+    'duplicate_check_meta',
+    'duplicate_check_files',
+    'duplicate_check_tasks',
+    'duplicate_check_analysis_sections',
+    'duplicate_check_content_files',
+    'duplicate_check_metadata_items',
+    'duplicate_check_outline_items',
+    'duplicate_check_outline_groups',
+    'duplicate_check_outline_pairwise',
+    'duplicate_check_content_duplicates',
+    'duplicate_check_content_occurrences',
+    'duplicate_check_image_files',
+    'duplicate_check_duplicate_images',
+    'duplicate_check_image_occurrences',
+    'rejection_check_meta',
+    'rejection_check_documents',
+    'rejection_check_tasks',
+    'rejection_check_extraction',
+    'rejection_check_results',
+    'rejection_check_risk_findings',
+    'rejection_check_typo_findings',
+    'rejection_check_logic_findings',
+    'feasibility_report_meta',
+    'feasibility_report_tasks',
+    'feasibility_report_outline_nodes',
+    'rejection_check_documents_legacy_v12',
+  ];
+  // 投标表之间存在外键引用关系，删除前临时关闭 foreign_keys，避免外键约束校验阻断清理。
+  const previousForeignKeys = db.pragma('foreign_keys', { simple: true });
+  db.pragma('foreign_keys = OFF');
+  try {
+    for (const tableName of biddingTables) {
+      db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)};`);
+    }
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+  }
+}
+
 const schemaHealthTableGroups = [
-  {
-    version: 1,
-    tables: [
-      'technical_plan_meta',
-      'technical_plan_tasks',
-      'technical_plan_bid_items',
-      'technical_plan_reference_docs',
-      'technical_plan_outline_nodes',
-      'technical_plan_content_sections',
-      'technical_plan_content_plans',
-    ],
-    repair: createInitialSchema,
-  },
-  {
-    version: 2,
-    tables: [
-      'duplicate_check_meta',
-      'duplicate_check_files',
-      'duplicate_check_tasks',
-      'duplicate_check_analysis_sections',
-      'duplicate_check_content_files',
-      'duplicate_check_metadata_items',
-      'duplicate_check_outline_items',
-      'duplicate_check_outline_groups',
-      'duplicate_check_outline_pairwise',
-      'duplicate_check_content_duplicates',
-      'duplicate_check_content_occurrences',
-      'duplicate_check_image_files',
-      'duplicate_check_duplicate_images',
-      'duplicate_check_image_occurrences',
-    ],
-    repair: createDuplicateCheckSchema,
-  },
-  {
-    version: 2,
-    tables: [
-      'rejection_check_meta',
-      'rejection_check_documents',
-      'rejection_check_tasks',
-      'rejection_check_extraction',
-      'rejection_check_results',
-      'rejection_check_risk_findings',
-      'rejection_check_typo_findings',
-      'rejection_check_logic_findings',
-    ],
-    repair: createRejectionCheckSchema,
-  },
   {
     version: 3,
     tables: [
@@ -1100,24 +1170,19 @@ const schemaHealthTableGroups = [
     repair: createKnowledgeBaseSchema,
   },
   {
-    version: 4,
-    tables: ['technical_plan_global_fact_groups'],
-    repair: createTechnicalPlanGlobalFactsSchema,
-  },
-  {
     version: 15,
     tables: ['export_templates'],
     repair: createExportTemplatesSchema,
   },
   {
     version: 20,
-    tables: ['task_logs', 'technical_plan_illustration_plans', 'technical_plan_illustration_items'],
-    repair: createTaskLogsAndIllustrationItemsSchema,
+    tables: ['task_logs'],
+    repair: createTaskLogsSchema,
   },
   {
-    version: 23,
-    tables: ['feasibility_report_meta', 'feasibility_report_tasks', 'feasibility_report_outline_nodes'],
-    repair: createFeasibilityReportSchema,
+    version: 24,
+    tables: ['green_report_meta', 'green_report_tasks', 'green_report_outline_nodes'],
+    repair: createGreenReportSchema,
   },
 ];
 
@@ -1127,158 +1192,10 @@ function removeKnowledgeMigrationMeta(db) {
 
 const schemaHealthColumnGroups = [
   {
-    version: 1,
-    table: 'technical_plan_meta',
-    columns: {
-      step: 'TEXT',
-      tender_file_name: 'TEXT',
-      tender_markdown_path: 'TEXT',
-      tender_markdown_hash: 'TEXT',
-      tender_markdown_chars: 'INTEGER',
-      tender_parser_label: 'TEXT',
-      tender_imported_at: 'TEXT',
-      bid_analysis_mode: 'TEXT',
-      outline_mode: 'TEXT',
-      outline_project_name: 'TEXT',
-      outline_project_overview: 'TEXT',
-      content_generation_options_json: 'TEXT',
-      content_generation_runtime_json: 'TEXT',
-      created_at: 'TEXT',
-      updated_at: 'TEXT',
-    },
-  },
-  {
-    version: 5,
-    table: 'technical_plan_meta',
-    columns: {
-      current_bid_section_id: 'TEXT',
-      bid_sections_extracted: 'INTEGER',
-    },
-  },
-  {
-    version: 7,
-    table: 'technical_plan_meta',
-    columns: {
-      selected_section_id: 'TEXT',
-      selected_section_title: 'TEXT',
-      selected_section_head_line: 'TEXT',
-    },
-  },
-  {
-    version: 8,
-    table: 'technical_plan_meta',
-    columns: {
-      pending_tender_markdown_path: 'TEXT',
-      pending_tender_file_name: 'TEXT',
-      pending_tender_parser_label: 'TEXT',
-      pending_tender_sections_json: 'TEXT',
-      pending_tender_total_declared: 'INTEGER',
-      pending_tender_created_at: 'TEXT',
-    },
-  },
-  {
-    version: 9,
-    table: 'technical_plan_meta',
-    columns: {
-      workflow_kind: "TEXT NOT NULL DEFAULT 'technical-plan'",
-      original_plan_file_name: 'TEXT',
-      original_plan_markdown_path: 'TEXT',
-      original_plan_markdown_hash: 'TEXT',
-      original_plan_markdown_chars: 'INTEGER NOT NULL DEFAULT 0',
-      original_plan_parser_label: 'TEXT',
-      original_plan_imported_at: 'TEXT',
-    },
-  },
-  {
-    version: 10,
-    table: 'technical_plan_meta',
-    columns: {
-      bid_analysis_selected_task_ids_json: 'TEXT',
-    },
-  },
-  {
     version: 11,
     table: 'knowledge_documents',
     columns: {
       sort_order: 'INTEGER NOT NULL DEFAULT 0',
-    },
-  },
-  {
-    version: 12,
-    table: 'rejection_check_documents',
-    columns: {
-      sort_order: 'INTEGER NOT NULL DEFAULT 0',
-    },
-  },
-  {
-    version: 12,
-    table: 'rejection_check_risk_findings',
-    columns: {
-      bid_document_id: 'TEXT',
-    },
-  },
-  {
-    version: 12,
-    table: 'rejection_check_typo_findings',
-    columns: {
-      bid_document_id: 'TEXT',
-    },
-  },
-  {
-    version: 12,
-    table: 'rejection_check_logic_findings',
-    columns: {
-      bid_document_id: 'TEXT',
-    },
-  },
-  {
-    version: 13,
-    table: 'technical_plan_meta',
-    columns: {
-      outline_expansion_mode: "TEXT NOT NULL DEFAULT 'ai-complement'",
-    },
-  },
-  {
-    version: 22,
-    table: 'technical_plan_meta',
-    columns: {
-      global_facts_mode: "TEXT NOT NULL DEFAULT 'fabricate'",
-    },
-  },
-  {
-    version: 14,
-    table: 'technical_plan_meta',
-    columns: {
-      tender_original_markdown_path: 'TEXT',
-      tender_original_markdown_hash: 'TEXT',
-      tender_original_markdown_chars: 'INTEGER NOT NULL DEFAULT 0',
-      bid_section_mode: "TEXT NOT NULL DEFAULT 'single'",
-      bid_sections_json: 'TEXT',
-      bid_section_extraction_status: "TEXT NOT NULL DEFAULT 'idle'",
-      bid_section_extraction_error: 'TEXT',
-    },
-  },
-  {
-    version: 16,
-    table: 'technical_plan_meta',
-    columns: {
-      tender_files_json: 'TEXT',
-    },
-  },
-  {
-    version: 18,
-    table: 'technical_plan_meta',
-    columns: {
-      outline_word_control_options_json: 'TEXT',
-      outline_word_control_snapshot_json: 'TEXT',
-    },
-  },
-  {
-    version: 19,
-    table: 'technical_plan_outline_nodes',
-    columns: {
-      content_mode: 'TEXT',
-      content_mode_note: 'TEXT',
     },
   },
 ];
@@ -1338,9 +1255,6 @@ function ensureWorkspaceSchemaHealth(db, targetVersion = schemaVersion, onStatus
       db.exec(`ALTER TABLE ${quoteIdentifier(group.table)} ADD COLUMN ${quoteIdentifier(columnName)} ${columnType}`);
       existingColumns.add(columnName);
     }
-  }
-  if (targetVersion >= 17 && existingTables.has('technical_plan_content_plans')) {
-    removeLegacyTechnicalPlanIllustrationType(db);
   }
 }
 
@@ -1460,6 +1374,16 @@ const migrations = [
     description: '新增可行性研究报告工作区表结构',
     up: createFeasibilityReportSchema,
   },
+  {
+    version: 24,
+    description: '新增绿色报告配置字段（页数、文档样式、知识库上下文）',
+    up: createGreenReportSchema,
+  },
+  {
+    version: 25,
+    description: '绿色报告工具箱：清理投标相关表结构',
+    up: dropBiddingTables,
+  },
 ];
 
 function timestampForFileName() {
@@ -1522,6 +1446,10 @@ function applyMigrations(db, databasePath, onStatus) {
     backupDatabaseFiles(db, databasePath, onStatus);
   }
 
+  // Migration 包含 DDL 和 DROP TABLE，外键约束会在事务中产生副作用（事务内 PRAGMA foreign_keys 无效）。
+  // 在 migration 期间统一关闭，结束后由调用方恢复（createSqliteDatabase 会重新设置）。
+  db.pragma('foreign_keys = OFF');
+
   const runMigration = db.transaction((migration) => {
     migration.up(db);
     db.pragma(`user_version = ${migration.version}`);
@@ -1545,6 +1473,9 @@ function applyMigrations(db, databasePath, onStatus) {
     }
   }
 
+  // Migration 结束后恢复外键约束（与 createSqliteDatabase 初始设置一致）
+  db.pragma('foreign_keys = ON');
+
   ensureWorkspaceSchemaHealth(db, schemaVersion, onStatus);
   clearDatabaseBackupFiles(databasePath);
 }
@@ -1552,11 +1483,76 @@ function applyMigrations(db, databasePath, onStatus) {
 function createSqliteDatabase(app, options = {}) {
   const databasePath = getWorkspaceDatabasePath(app);
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  const db = new Database(databasePath);
+  let db;
+  try {
+    db = new Database(databasePath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    db.pragma('busy_timeout = 5000');
+  } catch (error) {
+    if (db) {
+      try { db.close(); } catch (_) { /* 忽略关闭错误 */ }
+    }
+    if (error && (error.code === 'SQLITE_IOERR_TRUNCATE' || error.code === 'SQLITE_CORRUPT' || error.code === 'SQLITE_NOTADB')) {
+      options.onStatus?.({ phase: 'repair', message: `数据库文件损坏（${error.code}），正在重建` });
+      const stamp = Date.now();
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
+      // 策略1：rename 隔离损坏文件
+      const quarantineDir = path.join(path.dirname(databasePath), '.db-quarantine');
+      try { fs.mkdirSync(quarantineDir, { recursive: true }); } catch (_) { /* 忽略 */ }
+      let isolated = false;
+      for (const suffix of ['', '-wal', '-shm']) {
+        const file = `${databasePath}${suffix}`;
+        if (!fs.existsSync(file)) continue;
+        const dest = path.join(quarantineDir, `${path.basename(file)}${suffix}.corrupted-${stamp}`);
+        try {
+          fs.renameSync(file, dest);
+          isolated = true;
+          console.warn(`[sqlite] 损坏文件已隔离：${file} -> ${dest}`);
+        } catch (e) {
+          console.warn(`[sqlite] 损坏文件隔离失败：${file} -> ${e.code || e.message}`);
+        }
+      }
+
+      // 策略2：如果 rename 失败（文件被锁定），尝试截断文件内容
+      if (!isolated) {
+        for (const suffix of ['', '-wal', '-shm']) {
+          const file = `${databasePath}${suffix}`;
+          if (!fs.existsSync(file)) continue;
+          try {
+            // 用 'w' 模式打开会截断文件为 0 字节
+            const fd = fs.openSync(file, 'w');
+            fs.closeSync(fd);
+            console.warn(`[sqlite] 损坏文件已截断：${file}`);
+            isolated = true;
+          } catch (e) {
+            console.warn(`[sqlite] 损坏文件截断失败：${file} -> ${e.code || e.message}`);
+          }
+        }
+      }
+
+      // 策略3：如果以上都失败，使用备用文件名
+      let repairPath = databasePath;
+      if (!isolated) {
+        repairPath = path.join(path.dirname(databasePath), `yibiao-rebuilt-${stamp}.sqlite`);
+        console.warn(`[sqlite] 原文件无法处理，使用备用路径：${repairPath}`);
+      }
+
+      try {
+        db = new Database(repairPath);
+        db.pragma('journal_mode = WAL');
+        db.pragma('foreign_keys = ON');
+        db.pragma('busy_timeout = 5000');
+        console.warn(`[sqlite] 重建数据库成功：${repairPath}`);
+      } catch (retryError) {
+        if (db) { try { db.close(); } catch (_) { /* 忽略 */ } }
+        console.error('[sqlite] 重建数据库失败：', retryError);
+        throw retryError;
+      }
+    } else {
+      throw error;
+    }
+  }
   try {
     applyMigrations(db, databasePath, options.onStatus);
   } catch (error) {

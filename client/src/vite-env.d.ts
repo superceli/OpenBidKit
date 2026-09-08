@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { YibiaoBridge } from './shared/types';
+import type { LvcertBridge } from './shared/types';
 
 declare global {
   interface Window {
-    yibiao: YibiaoBridge;
+    lvcert: LvcertBridge;
     yibiaoClient?: {
       appName: string;
       platform: string;

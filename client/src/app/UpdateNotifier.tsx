@@ -88,7 +88,7 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
                 persistent: true,
               });
               try {
-                const result = await window.yibiao?.plugins.updateAll();
+                const result = await window.lvcert?.plugins.updateAll();
                 dismissToast(progressToastId);
                 window.dispatchEvent(new Event('yibiao:plugins-changed'));
                 if (!result || result.results.length === 0) {
@@ -121,7 +121,7 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
       });
     };
 
-    const unsubscribePluginUpdates = window.yibiao?.onPluginUpdatesAvailable(promptPluginUpdates);
+    const unsubscribePluginUpdates = window.lvcert?.onPluginUpdatesAvailable(promptPluginUpdates);
 
     const checkUpdate = async () => {
       if (updateCheckingRef.current) {
@@ -129,7 +129,7 @@ function UpdateNotifier({ noticeEnabled }: UpdateNotifierProps) {
       }
       updateCheckingRef.current = true;
       try {
-        const result = await window.yibiao?.checkUpdate();
+        const result = await window.lvcert?.checkUpdate();
         if (!result?.enabled) {
           return;
         }

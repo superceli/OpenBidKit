@@ -10,34 +10,6 @@ export type {
   JsonCompletionRequest,
 } from './ai';
 export type {
-  DuplicateAnalysisTabId,
-  DuplicateAnalysisStatus,
-  DuplicateCheckStep,
-  DuplicateCheckTaskState,
-  DuplicateCheckWorkspacePatch,
-  DuplicateCheckWorkspaceState,
-  DuplicateContentAnalysisState,
-  DuplicateContentExtractionItem,
-  DuplicateContentSentenceItem,
-  DuplicateImageAnalysisState,
-  DuplicateImageFileResult,
-  DuplicateImageItem,
-  DuplicateMetadataAnalysisState,
-  DuplicateMetadataComparisonRow,
-  DuplicateMetadataFileResult,
-  DuplicateMetadataItem,
-  DuplicateOutlineAnalysisState,
-  DuplicateOutlineFileResult,
-  DuplicateOutlineGroup,
-  DuplicateOutlineItem,
-  DuplicateOutlineItemSource,
-  DuplicateOutlineMatchType,
-  DuplicateOutlinePairwiseSimilarity,
-  DuplicateSubTaskProgress,
-  FileSelectionResult,
-  LocalFileSelection,
-} from './bid';
-export type {
   AiConfig,
   AiRequestMode,
   AgentModeScenariosConfig,
@@ -64,6 +36,7 @@ export type {
   UpdateChannel,
 } from './config';
 export type { AppMenuItem, SectionId } from './navigation';
+export type { OutlineData, OutlineItem } from './outline';
 export type {
   ExportFormatConfig,
   ExportTemplateRecord,
@@ -92,25 +65,4 @@ export {
   DEFAULT_EXPORT_FORMAT,
   HEADING_LEVEL_LABELS,
 } from './exportFormat';
-export type { OutlineContentMode, OutlineData, OutlineExpansionMode, OutlineItem, OutlineMode, OutlineWordControlOptions } from './outline';
-export { DEFAULT_OUTLINE_WORD_CONTROL_OPTIONS, OUTLINE_CONTENT_MODE_LABELS } from './outline';
-export type { AgentDiagnosticSection, AgentMonitorEvent, AgentMonitorEventType, AgentMonitorSnapshot, AgentQuestion, AgentQuestionAnswerPayload, AgentQuestionAnswerResult, AgentQuestionOption, AgentRetryAttempt, AgentRunFile, AgentRunPayload, AgentRunResult, AgentRuntimeActiveTask, AgentRuntimePhase, AgentRuntimeStatus, AgentSelfCheckReportExportResult, AgentSelfCheckResult, AgentSelfCheckStatus, AgentSelfCheckStep, AgentSelfCheckStepStatus, AutoConfirmationState, DonationCreateRequest, DonationIntent, DonationOrderStatus, DonationPaymentConfig, DonationPromptPayload, GpuHardwareAccelerationStatus, LatestReleaseInfo, LicenseOfflineActivationResult, LicenseRuntimeStatus, UpdateCheckResult, WordExportProgressEvent, WordExportResult, WorkspaceDatabasePhase, WorkspaceDatabaseStatus, YibiaoBridge } from './ipc';
-export type {
-  RejectionCheckFinding,
-  RejectionCheckResultState,
-  RejectionCheckRunStatus,
-  RejectionCheckStep,
-  RejectionCheckOptions,
-  RejectionCheckResultTab,
-  RejectionCheckWorkspaceState,
-  RejectionDocumentContent,
-  RejectionDocumentRole,
-  RejectionDocumentTabId,
-  RejectionDocumentSource,
-  RejectionExtractionSource,
-  RejectionExtractionState,
-  RejectionExtractionStatus,
-  RejectionFindingSeverity,
-  RejectionFindingType,
-  RejectionResultTab,
-} from '../../features/rejection-check/types';
+export type { AgentDiagnosticSection, AgentMonitorEvent, AgentMonitorEventType, AgentMonitorSnapshot, AgentQuestion, AgentQuestionAnswerPayload, AgentQuestionAnswerResult, AgentQuestionOption, AgentRetryAttempt, AgentRunFile, AgentRunPayload, AgentRunResult, AgentRuntimeActiveTask, AgentRuntimePhase, AgentRuntimeStatus, AgentSelfCheckReportExportResult, AgentSelfCheckResult, AgentSelfCheckStatus, AgentSelfCheckStep, AgentSelfCheckStepStatus, AutoConfirmationState, DonationCreateRequest, DonationIntent, DonationOrderStatus, DonationPaymentConfig, DonationPromptPayload, GpuHardwareAccelerationStatus, KnowledgeSearchResult, KnowledgeSearchResultItem, LatestReleaseInfo, LicenseOfflineActivationResult, LicenseRuntimeStatus, LvcertBridge, PdfExportProgressEvent, PdfExportResult, UpdateCheckResult, WordExportProgressEvent, WordExportResult, WorkspaceDatabasePhase, WorkspaceDatabaseStatus } from './ipc';

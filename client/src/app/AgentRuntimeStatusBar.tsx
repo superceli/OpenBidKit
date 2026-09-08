@@ -39,13 +39,15 @@ function AgentRuntimeStatusBar() {
 
   useEffect(() => {
     let disposed = false;
-    void window.yibiao?.agent.getStatus()
+    const agent = window.lvcert?.agent;
+    if (!agent) return undefined;
+    void agent.getStatus()
       .then((nextStatus) => {
         if (!disposed) setStatus(nextStatus);
       })
       .catch(() => undefined);
 
-    const unsubscribe = window.yibiao?.agent.onStatus((nextStatus) => {
+    const unsubscribe = agent.onStatus((nextStatus) => {
       setStatus(nextStatus);
     });
 

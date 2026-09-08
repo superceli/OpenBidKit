@@ -34,11 +34,13 @@ export function AgentQuestionDialogProvider({ children }: { children: ReactNode 
   useEffect(() => {
     let active = true;
     let receivedEvent = false;
-    const unsubscribe = window.yibiao.agent.onQuestion((nextQuestion) => {
+    const agent = window.lvcert?.agent;
+    if (!agent) return undefined;
+    const unsubscribe = agent.onQuestion((nextQuestion) => {
       receivedEvent = true;
       if (active) setQuestion(nextQuestion);
     });
-    void window.yibiao.agent.getPendingQuestion()
+    void agent.getPendingQuestion()
       .then((pendingQuestion) => {
         if (active && !receivedEvent) setQuestion(pendingQuestion);
       })
@@ -52,11 +54,13 @@ export function AgentQuestionDialogProvider({ children }: { children: ReactNode 
   useEffect(() => {
     let active = true;
     let receivedEvent = false;
-    const unsubscribe = window.yibiao.autoConfirmation.onChanged((state) => {
+    const autoConfirmation = window.lvcert?.autoConfirmation;
+    if (!autoConfirmation) return undefined;
+    const unsubscribe = autoConfirmation.onChanged((state) => {
       receivedEvent = true;
       if (active) setAutoAnswerEnabledState(state.enabled);
     });
-    void window.yibiao.autoConfirmation.getState()
+    void autoConfirmation.getState()
       .then((state) => {
         if (active && !receivedEvent) setAutoAnswerEnabledState(state.enabled);
       })
@@ -100,7 +104,7 @@ export function AgentQuestionDialogProvider({ children }: { children: ReactNode 
     if (autoAnswerSaving) return;
     setAutoAnswerSaving(true);
     try {
-      const result = await window.yibiao.autoConfirmation.setEnabled(enabled);
+      const result = await window.lvcert.autoConfirmation.setEnabled(enabled);
       setAutoAnswerEnabledState(result.enabled);
     } catch (error) {
       showToast(error instanceof Error ? error.message : '自动回答设置保存失败', 'error');
@@ -121,7 +125,7 @@ export function AgentQuestionDialogProvider({ children }: { children: ReactNode 
     const questionId = question.question_id;
     setSubmitting(true);
     try {
-      await window.yibiao.agent.answerQuestion({
+      await window.lvcert.agent.answerQuestion({
         question_id: questionId,
         option_id: selectedOption.id,
         custom_answer: selectedOption.custom ? customAnswer.trim() : undefined,
@@ -137,7 +141,7 @@ export function AgentQuestionDialogProvider({ children }: { children: ReactNode 
   const selectOption = (optionId: string) => {
     setSelectedOptionId(optionId);
     if (question) {
-      void window.yibiao.agent.suppressQuestionAutoAnswer({ question_id: question.question_id }).catch(() => undefined);
+      void window.lvcert.agent.suppressQuestionAutoAnswer({ question_id: question.question_id }).catch(() => undefined);
     }
   };
 

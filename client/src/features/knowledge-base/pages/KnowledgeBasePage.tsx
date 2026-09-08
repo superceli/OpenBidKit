@@ -93,7 +93,7 @@ function collectContentMetrics(content: string) {
     htmlCells: countMatches(text, /<(?:td|th)\b/gi),
     markdownImages: countMatches(text, /!\[[^\]]*\]\([^)]*\)/g),
     htmlImages: countMatches(text, /<img\b/gi),
-    importedAssets: countMatches(text, /yibiao-asset:\/\/imported-images/gi),
+    importedAssets: countMatches(text, /lvcert-asset:\/\/imported-images/gi),
     bareUrls: countMatches(text, /\b(?:https?:\/\/|www\.)[^\s)）]+/gi),
     markdownLinks: countMatches(text, /\[[^\]]{0,200}\]\([^)]{1,500}\)/g),
   };
@@ -354,7 +354,7 @@ function KnowledgeBasePage() {
     void loadInitialData();
     window.addEventListener('focus', loadDeveloperMode);
     document.addEventListener('visibilitychange', loadDeveloperMode);
-    const unsubscribe = window.yibiao?.knowledgeBase.onEvent(({ document }) => {
+    const unsubscribe = window.lvcert?.knowledgeBase.onEvent(({ document }) => {
       const parseMessage = document.error || document.message;
       if (document.status === 'error'
         && isLibreOfficeRequiredMessage(parseMessage)
@@ -425,9 +425,9 @@ function KnowledgeBasePage() {
   const loadInitialData = async () => {
     try {
       setListLoading(true);
-      const config = await window.yibiao?.config.load();
+      const config = await window.lvcert?.config.load();
       setDeveloperMode(Boolean(config?.developer_mode));
-      const data = await window.yibiao?.knowledgeBase.list();
+      const data = await window.lvcert?.knowledgeBase.list();
       if (data) {
         setIndex(data);
         setActiveFolderId((currentId) => (
@@ -500,12 +500,12 @@ function KnowledgeBasePage() {
     setDragSaving(true);
     try {
       const result = payload.kind === 'folder'
-        ? await window.yibiao?.knowledgeBase.reorderFolder(payload.folderId, folderId, position)
-        : await window.yibiao?.knowledgeBase.moveDocument(payload.documentId, folderId, null, 'after');
+        ? await window.lvcert?.knowledgeBase.reorderFolder(payload.folderId, folderId, position)
+        : await window.lvcert?.knowledgeBase.moveDocument(payload.documentId, folderId, null, 'after');
       if (!result?.success) {
         throw new Error(result?.message || '拖拽操作失败');
       }
-      const data = await window.yibiao?.knowledgeBase.list();
+      const data = await window.lvcert?.knowledgeBase.list();
       if (!data) throw new Error('拖拽操作已保存，但读取知识库列表失败');
       applyKnowledgeIndex(data);
       showToast(result.message, 'success');
@@ -531,11 +531,11 @@ function KnowledgeBasePage() {
     const position = getDropPosition(event);
     setDragSaving(true);
     try {
-      const result = await window.yibiao?.knowledgeBase.moveDocument(dragPayload.documentId, document.folder_id, document.id, position);
+      const result = await window.lvcert?.knowledgeBase.moveDocument(dragPayload.documentId, document.folder_id, document.id, position);
       if (!result?.success) {
         throw new Error(result?.message || '文档排序失败');
       }
-      const data = await window.yibiao?.knowledgeBase.list();
+      const data = await window.lvcert?.knowledgeBase.list();
       if (!data) throw new Error('文档排序已保存，但读取知识库列表失败');
       applyKnowledgeIndex(data);
       setActiveFolderId(document.folder_id);
@@ -550,7 +550,7 @@ function KnowledgeBasePage() {
 
   const loadDeveloperMode = async () => {
     try {
-      const config = await window.yibiao?.config.load();
+      const config = await window.lvcert?.config.load();
       setDeveloperMode(Boolean(config?.developer_mode));
     } catch (error) {
       console.warn('读取开发者模式失败', error);
@@ -560,7 +560,7 @@ function KnowledgeBasePage() {
 
   const loadAnalysis = async (documentId: string, options?: { silent?: boolean }) => {
     try {
-      const data = await window.yibiao?.knowledgeBase.readAnalysis(documentId);
+      const data = await window.lvcert?.knowledgeBase.readAnalysis(documentId);
       if (data) setAnalysisSnapshot(data);
     } catch (error) {
       if (!options?.silent) {
@@ -578,7 +578,7 @@ function KnowledgeBasePage() {
 
     try {
       setCreatingFolder(true);
-      const folder = await window.yibiao?.knowledgeBase.createFolder(name.trim());
+      const folder = await window.lvcert?.knowledgeBase.createFolder(name.trim());
       if (!folder) return;
       setIndex((prev) => ({ ...prev, folders: [...prev.folders, folder] }));
       setActiveFolderId(folder.id);
@@ -600,7 +600,7 @@ function KnowledgeBasePage() {
 
     try {
       setLoading(true);
-      const result = await window.yibiao?.knowledgeBase.uploadDocuments(activeFolder.id);
+      const result = await window.lvcert?.knowledgeBase.uploadDocuments(activeFolder.id);
       if (!result?.success) {
         const message = result?.message || '未选择文档';
         if (isLibreOfficeRequiredMessage(message)) {
@@ -631,7 +631,7 @@ function KnowledgeBasePage() {
     if (!name || name === currentName) return;
 
     try {
-      const folder = await window.yibiao?.knowledgeBase.renameFolder(folderId, name);
+      const folder = await window.lvcert?.knowledgeBase.renameFolder(folderId, name);
       if (!folder) return;
       setIndex((prev) => ({
         ...prev,
@@ -658,7 +658,7 @@ function KnowledgeBasePage() {
     try {
       if (deleteConfirm.type === 'folder') {
         const { folderId } = deleteConfirm;
-        const result = await window.yibiao?.knowledgeBase.deleteFolder(folderId);
+        const result = await window.lvcert?.knowledgeBase.deleteFolder(folderId);
         const folders = index.folders.filter((item) => item.id !== folderId);
         const documents = index.documents.filter((document) => document.folder_id !== folderId);
         setIndex({ folders, documents });
@@ -669,7 +669,7 @@ function KnowledgeBasePage() {
         showToast(result?.message || '文件夹已删除', 'success');
       } else {
         const { document } = deleteConfirm;
-        const result = await window.yibiao?.knowledgeBase.deleteDocument(document.id);
+        const result = await window.lvcert?.knowledgeBase.deleteDocument(document.id);
         setIndex((prev) => ({ ...prev, documents: prev.documents.filter((item) => item.id !== document.id) }));
         setViewer((prev) => (prev?.document.id === document.id ? null : prev));
         showToast(result?.message || '文档已删除', 'success');
@@ -685,7 +685,7 @@ function KnowledgeBasePage() {
   const retryDocument = async (document: KnowledgeDocument) => {
     setRetryingDocumentIds((prev) => new Set(prev).add(document.id));
     try {
-      const result = await window.yibiao?.knowledgeBase.retryDocument(document.id);
+      const result = await window.lvcert?.knowledgeBase.retryDocument(document.id);
       if (result?.document) {
         const updatedDocument = result.document;
         setIndex((prev) => ({ ...prev, documents: mergeDocuments(prev.documents, [updatedDocument]) }));
@@ -773,7 +773,7 @@ function KnowledgeBasePage() {
       if (mode === 'markdown') {
         const readStartedAt = nowMs();
         logRenderDebug(trace, 'ipc:read:start', { api: 'knowledgeBase.readMarkdown', requestId });
-        const markdown = await window.yibiao?.knowledgeBase.readMarkdown(document.id);
+        const markdown = await window.lvcert?.knowledgeBase.readMarkdown(document.id);
         const content = markdown || '';
         logRenderDebug(trace, 'ipc:read:end', {
           api: 'knowledgeBase.readMarkdown',
@@ -793,7 +793,7 @@ function KnowledgeBasePage() {
       } else {
         const readStartedAt = nowMs();
         logRenderDebug(trace, 'ipc:read:start', { api: 'knowledgeBase.readItems', requestId });
-        const items = await window.yibiao?.knowledgeBase.readItems(document.id);
+        const items = await window.lvcert?.knowledgeBase.readItems(document.id);
         const nextItems = items || [];
         logRenderDebug(trace, 'ipc:read:end', {
           api: 'knowledgeBase.readItems',
@@ -842,7 +842,7 @@ function KnowledgeBasePage() {
     if (!targetDocument) return;
     try {
       setStartingMatching(true);
-      const result = await window.yibiao?.knowledgeBase.startMatching(targetDocument.id);
+      const result = await window.lvcert?.knowledgeBase.startMatching(targetDocument.id);
       if (!options?.silent) {
         showToast(result?.message || '已提交匹配任务', result?.success ? 'success' : 'info');
       }

@@ -35,7 +35,7 @@ function MyTemplatesPage({ onCreateTemplate, onEditTemplate }: MyTemplatesPagePr
   const loadTemplates = useCallback(async () => {
     setLoading(true);
     try {
-      const items = await window.yibiao?.templates.list();
+      const items = await window.lvcert?.templates.list();
       const nextTemplates = items || [];
       setTemplates(nextTemplates);
       setSelectedId((prev) => nextTemplates.some((template) => template.template_id === prev) ? prev : nextTemplates[0]?.template_id || '');
@@ -58,7 +58,7 @@ function MyTemplatesPage({ onCreateTemplate, onEditTemplate }: MyTemplatesPagePr
 
     setDeleting(true);
     try {
-      const result = await window.yibiao?.templates.delete(deleteTarget.template_id);
+      const result = await window.lvcert?.templates.delete(deleteTarget.template_id);
       const nextTemplates = templates.filter((template) => template.template_id !== deleteTarget.template_id);
       setTemplates(nextTemplates);
       setSelectedId((prev) => prev === deleteTarget.template_id ? nextTemplates[0]?.template_id || '' : prev);

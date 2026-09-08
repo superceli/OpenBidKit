@@ -1,19 +1,15 @@
 import type { AiHttpErrorPayload, ChatCompletionRequest, JsonCompletionRequest } from './ai';
-import type { DuplicateCheckWorkspacePatch, DuplicateCheckWorkspaceState, FileSelectionResult } from './bid';
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelInfoResult, ModelListResult, UpdateChannel } from './config';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
-import type { RejectionCheckWorkspacePatch, RejectionCheckWorkspaceState, RejectionDocumentRole } from '../../features/rejection-check/types';
-import type { BidAnalysisMode, BidAnalysisTaskState, BidSectionMode, ContentGenerationOptions, ContentGenerationPlanState, ContentGenerationProgressDetail, ContentGenerationRuntimeState, ContentGenerationSectionState, DetectedBidSection, GlobalFactGroupState, GlobalFactsMode, SaveOutlineRequest, SaveOutlineSelectionRequest, TechnicalPlanState, TechnicalPlanStep, TechnicalPlanWorkflowKind } from '../../features/technical-plan/types';
-import type { FeasibilityProjectInfo, FeasibilityReportState, FeasibilityReportStep, FeasibilitySaveOutlineRequest, FeasibilitySourceFile } from '../../features/feasibility-report/types';
+import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
 import type { ExportFormatConfig, ExportTemplateRecord } from './exportFormat';
-import type { OutlineData, OutlineExpansionMode, OutlineMode, OutlineWordControlOptions } from './outline';
 
 export interface TaskEventTask {
   task_id: string;
   type: string;
   status: string;
   progress: number;
-  progress_detail?: ContentGenerationProgressDetail;
+  progress_detail?: unknown;
   logs: string[];
   started_at: string;
   updated_at: string;
@@ -21,20 +17,9 @@ export interface TaskEventTask {
   stats?: unknown;
 }
 
-export interface TaskEvent<TState = unknown, TRejectionCheckState = unknown, TDuplicateCheckState = unknown> {
+export interface TaskEvent<TState = unknown> {
   task: TaskEventTask;
-  technicalPlan?: TState;
-  technicalPlanPatch?: Partial<TechnicalPlanState>;
-  bidItem?: BidAnalysisTaskState;
-  outlineData?: OutlineData | null;
-  contentSection?: ContentGenerationSectionState;
-  contentPlan?: { nodeId: string; value: ContentGenerationPlanState | null };
-  contentRuntime?: ContentGenerationRuntimeState;
-  rejectionCheck?: TRejectionCheckState;
-  rejectionCheckPatch?: RejectionCheckWorkspacePatch;
-  duplicateCheck?: TDuplicateCheckState;
-  duplicateCheckPatch?: DuplicateCheckWorkspacePatch;
-  feasibilityReportPatch?: Partial<FeasibilityReportState>;
+  greenReportPatch?: Partial<GreenReportState>;
 }
 
 export interface WordExportProgressEvent {
@@ -43,6 +28,24 @@ export interface WordExportProgressEvent {
   progress: number;
   message: string;
   warnings?: string[];
+}
+
+export interface PdfExportProgressEvent extends WordExportProgressEvent {}
+
+export interface PdfExportResult extends WordExportResult {}
+
+export interface KnowledgeSearchResultItem {
+  documentId: string;
+  documentName: string;
+  itemId: string;
+  title: string;
+  resume: string;
+  content: string;
+}
+
+export interface KnowledgeSearchResult {
+  keyword: string;
+  items: KnowledgeSearchResultItem[];
 }
 
 export interface WordExportResult {
@@ -81,54 +84,6 @@ export interface DeveloperTextTokenStats {
   total_tokens: number;
   cached_tokens: number;
   cache_ratio: number;
-}
-
-export interface DeveloperExpansionReplaceTestPayload {
-  sectionId: string;
-  sectionTitle: string;
-  sectionDescription?: string;
-  content: string;
-  selectedText: string;
-}
-
-export interface DeveloperExpansionReplacePatch {
-  operation: string;
-  anchor?: string;
-  target_text?: string;
-  content: string;
-}
-
-export type DeveloperExpansionReplaceTestStatus = 'replace-success' | 'blocked';
-
-export interface DeveloperExpansionReplaceTestDiagnostics {
-  status: DeveloperExpansionReplaceTestStatus;
-  matchStrategy: string;
-  matchStart: number;
-  matchEnd: number;
-  matchedText: string;
-  targetTextMatched: boolean;
-  targetTextKey: string;
-  candidateCount: number;
-  contentOccurrencesBefore: number;
-  contentOccurrencesAfter: number;
-  charsBefore: number;
-  charsAfter: number;
-  deltaChars: number;
-  error: string;
-}
-
-export interface DeveloperExpansionReplaceTestResult {
-  success: boolean;
-  status: DeveloperExpansionReplaceTestStatus;
-  sectionId: string;
-  sectionTitle: string;
-  rawPatch: DeveloperExpansionReplacePatch;
-  appliedPatch: DeveloperExpansionReplacePatch;
-  diagnostics: DeveloperExpansionReplaceTestDiagnostics;
-  applyError?: string;
-  originalContent: string;
-  selectedText: string;
-  nextContent: string;
 }
 
 export interface LatestReleaseInfo {
@@ -534,7 +489,7 @@ export interface DonationPromptPayload {
   wordExportClicks: number;
 }
 
-export interface YibiaoBridge {
+export interface LvcertBridge {
   appName: string;
   platform: string;
   getVersion: () => Promise<string>;
@@ -619,11 +574,7 @@ export interface YibiaoBridge {
     detach: () => Promise<{ success: boolean }>;
     onEvent: (callback: (event: AgentMonitorEvent) => void) => () => void;
   };
-  developerExpansionReplaceTest: {
-    run: (payload: DeveloperExpansionReplaceTestPayload) => Promise<DeveloperExpansionReplaceTestResult>;
-  };
   file: {
-    selectDuplicateCheckFiles: (options?: { multiple?: boolean; filePaths?: string[] }) => Promise<FileSelectionResult>;
     /** 把拖拽进来的 File 对象换成本地绝对路径，供各上传区拖拽导入使用 */
     getPathForFile: (file: File) => string;
   };
@@ -641,77 +592,19 @@ export interface YibiaoBridge {
     readMarkdown: (documentId: string) => Promise<string>;
     readItems: (documentId: string) => Promise<KnowledgeItem[]>;
     readAnalysis: (documentId: string) => Promise<KnowledgeAnalysisSnapshot>;
+    searchItems: (keyword: string, options?: { limit?: number; contentExcerptChars?: number }) => Promise<KnowledgeSearchResult>;
     onEvent: (callback: (event: KnowledgeBaseEvent) => void) => () => void;
   };
-  technicalPlan: {
-    loadState: () => Promise<TechnicalPlanState>;
-    importTenderDocument: (filePaths?: string[]) => Promise<{
-      success: boolean;
-      message?: string;
-      markdown?: string;
-      fileName?: string;
-      parserLabel?: string | null;
-    }>;
-    removeTenderDocument: (sourceId: string) => Promise<{
-      success: boolean;
-      message?: string;
-      markdown?: string;
-    }>;
-    importOriginalPlanDocument: (filePaths?: string[]) => Promise<{
-      success: boolean;
-      message?: string;
-      markdown?: string;
-    }>;
-    checkBidSections: () => Promise<{ hasMultiple: boolean; totalDeclared?: number | null }>;
-    selectBidSection: (selectedSection: DetectedBidSection) => Promise<{ success: boolean; message?: string; markdown: string }>;
-    readTenderMarkdown: () => Promise<string>;
-    readTenderSourceMarkdown: (sourceId: string) => Promise<string>;
-    readOriginalPlanMarkdown: () => Promise<string>;
-    updateStep: (step: TechnicalPlanStep) => Promise<void>;
-    setWorkflowKind: (workflowKind: TechnicalPlanWorkflowKind) => Promise<void>;
-    switchWorkflowKind: (workflowKind: TechnicalPlanWorkflowKind) => Promise<void>;
-    saveBidAnalysisConfig: (payload: { mode: BidAnalysisMode; selectedTaskIds: string[]; bidSectionMode?: BidSectionMode }) => Promise<void>;
-    saveOutlineConfig: (payload: { referenceKnowledgeDocumentIds: string[]; outlineMode?: OutlineMode; outlineExpansionMode?: OutlineExpansionMode; wordControlOptions: OutlineWordControlOptions }) => Promise<void>;
-    saveOutlineSelection: (payload: SaveOutlineSelectionRequest) => Promise<{ success: boolean }>;
-    saveOutline: (payload: SaveOutlineRequest) => Promise<Partial<TechnicalPlanState>>;
-    saveGlobalFactsConfig: (payload: { globalFactsMode: GlobalFactsMode }) => Promise<Partial<TechnicalPlanState>>;
-    saveGlobalFacts: (globalFacts: GlobalFactGroupState[]) => Promise<Partial<TechnicalPlanState>>;
-    saveContentGenerationOptions: (options: ContentGenerationOptions) => Promise<Partial<TechnicalPlanState>>;
-    saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<TechnicalPlanState>>;
-    clear: () => Promise<{ success: boolean; message?: string }>;
-    openBidTemplate: () => Promise<{ success: boolean; message?: string }>;
-  };
-  feasibilityReport: {
-    loadState: () => Promise<FeasibilityReportState>;
-    importSourceDocuments: (filePaths?: string[]) => Promise<{ success: boolean; message?: string; sourceFiles?: FeasibilitySourceFile[] }>;
-    removeSourceDocument: (sourceId: string) => Promise<{ success: boolean; message?: string; sourceFiles?: FeasibilitySourceFile[] }>;
-    readSourceMarkdown: (sourceId: string) => Promise<string>;
-    readCombinedSourceMarkdown: () => Promise<string>;
-    updateStep: (step: FeasibilityReportStep) => Promise<void>;
-    saveProjectInfo: (projectInfo: FeasibilityProjectInfo) => Promise<FeasibilityReportState>;
-    saveAnalysis: (markdown: string) => Promise<FeasibilityReportState>;
-    saveOutlineConfig: (payload: { outlineTemplate?: string; targetWords?: number; referenceDocumentIds?: string[] }) => Promise<FeasibilityReportState>;
-    saveOutline: (payload: FeasibilitySaveOutlineRequest) => Promise<Partial<FeasibilityReportState>>;
-    saveKeyParameters: (markdown: string) => Promise<FeasibilityReportState>;
-    saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<FeasibilityReportState>>;
-    clear: () => Promise<{ success: boolean; message?: string }>;
-  };
-  duplicateCheck: {
-    loadState: () => Promise<DuplicateCheckWorkspaceState>;
-    saveFiles: (payload: Pick<DuplicateCheckWorkspaceState, 'tenderFile' | 'tenderFiles' | 'bidFiles'> & Partial<Pick<DuplicateCheckWorkspaceState, 'step' | 'activeAnalysisTab'>>) => Promise<void>;
-    saveUiState: (payload: Partial<Pick<DuplicateCheckWorkspaceState, 'step' | 'activeAnalysisTab'>>) => Promise<void>;
-    updateState: (partial: DuplicateCheckWorkspacePatch) => Promise<void>;
-    clear: () => Promise<{ success: boolean; message?: string }>;
-    exportExcel: (request: { signature: string }) => Promise<CheckResultExportResult>;
-  };
-  rejectionCheck: {
-    loadState: () => Promise<RejectionCheckWorkspaceState>;
-    importDocument: (role: RejectionDocumentRole, filePaths?: string[]) => Promise<{ success: boolean; message?: string }>;
-    importTenderFromTechnicalPlan: () => Promise<{ success: boolean; message?: string }>;
-    removeDocument: (role: RejectionDocumentRole, documentId?: string) => Promise<void>;
-    saveUiState: (payload: Partial<Pick<RejectionCheckWorkspaceState, 'step' | 'activeDocumentTab' | 'activeResultTab' | 'activeCheckResultTab' | 'customCheckItems' | 'checkOptions'>>) => Promise<void>;
-    updateState: (partial: RejectionCheckWorkspacePatch) => Promise<void>;
-    exportExcel: (request: { rejectionInputSignature: string; bidSignature: string }) => Promise<CheckResultExportResult>;
+  greenReport: {
+    loadState: () => Promise<GreenReportState>;
+    updateStep: (step: GreenReportStep) => Promise<void>;
+    saveReportType: (reportType: GreenReportType) => Promise<void>;
+    saveProjectInfo: (projectInfo: GreenProjectInfo) => Promise<GreenReportState>;
+    saveOutlineConfig: (payload: { targetWords?: number }) => Promise<GreenReportState>;
+    saveReportConfig: (payload: { targetWords?: number; pageCount?: number; documentStyle?: GreenDocumentStyle }) => Promise<GreenReportState>;
+    saveKnowledgeContext: (context: GreenKnowledgeContext | null) => Promise<GreenReportState>;
+    saveOutline: (payload: GreenSaveOutlineRequest) => Promise<Partial<GreenReportState>>;
+    saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;
     clear: () => Promise<{ success: boolean; message?: string }>;
   };
   templates: {
@@ -722,29 +615,17 @@ export interface YibiaoBridge {
     delete: (templateId: string) => Promise<{ success: boolean; message: string }>;
   };
   tasks: {
-    startBidSectionExtraction: (payload?: unknown) => Promise<unknown>;
-    startBidAnalysis: (payload: unknown) => Promise<unknown>;
-    startOutlineGeneration: (payload: unknown) => Promise<unknown>;
-    suppressOutlineSelectionAutoConfirmation: (payload: { taskId: string }) => Promise<{ success: boolean }>;
-    startGlobalFactsGeneration: (payload: unknown) => Promise<unknown>;
-    startContentGeneration: (payload: unknown) => Promise<unknown>;
-    pauseContentGeneration: () => Promise<unknown>;
-    startRejectionItemsExtraction: (payload: unknown) => Promise<unknown>;
-    startRejectionCheck: (payload: unknown) => Promise<unknown>;
-    startDuplicateAnalysis: (payload: unknown) => Promise<unknown>;
-    startFeasibilityAnalysis: (payload?: unknown) => Promise<unknown>;
-    startFeasibilityOutline: (payload?: unknown) => Promise<unknown>;
-    startFeasibilityParameters: (payload?: unknown) => Promise<unknown>;
-    startFeasibilityContent: (payload?: unknown) => Promise<unknown>;
-    pauseFeasibilityContent: () => Promise<unknown>;
-    startFeasibilityHumanWriting: (payload?: unknown) => Promise<unknown>;
+    startGreenReportOutline: (payload?: unknown) => Promise<unknown>;
+    startGreenReportContent: (payload?: unknown) => Promise<unknown>;
     getActiveTasks: () => Promise<TaskEventTask[]>;
-    onTaskEvent: <TState = unknown, TRejectionCheckState = unknown, TDuplicateCheckState = unknown>(callback: (event: TaskEvent<TState, TRejectionCheckState, TDuplicateCheckState>) => void) => () => void;
+    onTaskEvent: <TState = unknown>(callback: (event: TaskEvent<TState>) => void) => () => void;
   };
   export: {
     exportWord: (payload: unknown) => Promise<WordExportResult>;
+    exportPdf: (payload: unknown) => Promise<PdfExportResult>;
     openFile: (filePath: string) => Promise<{ success: boolean }>;
     onWordExportProgress: (callback: (event: WordExportProgressEvent) => void) => () => void;
+    onPdfExportProgress: (callback: (event: PdfExportProgressEvent) => void) => () => void;
   };
   systemFonts: {
     list: () => Promise<string[]>;

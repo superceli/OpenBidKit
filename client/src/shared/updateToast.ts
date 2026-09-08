@@ -14,7 +14,7 @@ export function showUpdateReadyToast(showToast: ShowToast, version: string) {
   }
 
   const installUpdate = async () => {
-    const result = await window.yibiao?.quitAndInstall();
+    const result = await window.lvcert?.quitAndInstall();
     if (result && !result.success) {
       showToast(result.message || '安装更新失败', 'error');
     }

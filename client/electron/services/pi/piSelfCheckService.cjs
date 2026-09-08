@@ -472,7 +472,7 @@ async function runTextModelProbe(config, options) {
     }
     if (options.requireToolCall && (
       !responseSummary.tool_names.includes('diagnostic_echo')
-      || !responseSummary.tool_arguments_preview.some((item) => item.includes('YIBIAO_PI_TOOL_OK'))
+      || !responseSummary.tool_arguments_preview.some((item) => item.includes('LVCERT_PI_TOOL_OK'))
     )) {
       result.message = '模型未返回符合要求的 diagnostic_echo 工具调用';
       result.error = { message: result.message, response_excerpt: clipText(rawText, 3000) };
@@ -519,7 +519,7 @@ async function runPiTextModelSelfCheck(config, onProbe) {
     label: toolsLabel,
     stream: configuredStream,
     requireToolCall: true,
-    prompt: '必须调用 diagnostic_echo 工具，参数 value 必须为 YIBIAO_PI_TOOL_OK，不要直接回答。',
+    prompt: '必须调用 diagnostic_echo 工具，参数 value 必须为 LVCERT_PI_TOOL_OK，不要直接回答。',
   });
   reportProbe(tools, tools.success ? 'success' : 'error');
   const configuredMode = configuredStream ? stream : normal;

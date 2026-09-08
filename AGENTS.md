@@ -1,6 +1,7 @@
 # AGENTS.md
 
 ## 范围
+- 本项目是「绿证报告工具箱」（lvcert-client），用于生成 ESG、可持续发展、社会责任等绿色报告。
 - 当前有效产品代码在 `client/`。
 - `analytics/` 是独立 Cloudflare Worker API 与 Dashboard：除埋点采集、聚合和查看外，也承载客户端公告、资源、插件、模型信息、许可证和 Agent 失败诊断等在线服务；修改上述在线服务协议时同步检查两端。
 
@@ -11,7 +12,7 @@
 - 开发启动：`npm run dev`，固定 Vite `127.0.0.1:5173 --strictPort` 后再启动 Electron。
 - 打包：`npm run dist:win` / `npm run dist:mac`，配置在 `client/package.json` 的 `build` 字段，产物在 `client/release/`。
 - Electron Main 和 preload 是 CommonJS：`client/electron/**/*.cjs`；Renderer 是 ESM TypeScript：`client/src/**/*.ts(x)`。
-- Renderer 不直接访问 Node、`fs`、`path`、`ipcRenderer`，只通过 `window.yibiao`；改 preload API 时同步 `client/src/shared/types/ipc.ts`。
+- Renderer 不直接访问 Node、`fs`、`path`、`ipcRenderer`，只通过 `window.lvcert`；改 preload API 时同步 `client/src/shared/types/ipc.ts`。
 - 新业务 IPC 默认只注册/转发，业务逻辑放 `electron/services/*.cjs`；数据库生命周期装配和现有插件编排是例外，不作为普通功能模板。
 - Main 侧文件读写显式使用 UTF-8，并把 Windows 中文路径当默认场景处理。
 
@@ -25,11 +26,11 @@
 - 页面根容器保持 `height: 100%`/`min-height: 0`，长内容在页面内部滚动；不要依赖 `body` 全局滚动或为 `FloatingToolbar` 额外留大空白。
 
 ## 数据与流程
-- 配置存到 Electron `userData/user_config.json`；业务工作区存到 `userData/workspace/`；结构化业务状态的权威存储是 `userData/workspace/yibiao.sqlite`。运行时 schema/migration 以 `electron/services/sqliteDatabase.cjs` 为准，改表时同步根目录 `sql/workspace_schema.sql`；技术方案旧 `technical_plan.json` 仅是启动清理对象，不得继续读写。
+- 配置存到 Electron `userData/user_config.json`；业务工作区存到 `userData/workspace/`；结构化业务状态的权威存储是 `userData/workspace/yibiao.sqlite`。运行时 schema/migration 以 `electron/services/sqliteDatabase.cjs` 为准，改表时同步根目录 `sql/workspace_schema.sql`。
 - Renderer 只用 `localStorage` 存轻量 UI 偏好；草稿、API Key、流程状态以及业务正文都走 Main 侧存储/IPC。
-- 技术方案除文件导入/展示外，标书分析、目录、全局事实和正文等耗时流程都在 Electron Main 后台任务中运行，并持续写入对应 SQLite Store；页面卸载不应取消任务。
-- 技术方案目录与正文以 `technical_plan_outline_nodes`（Renderer 对应 `outlineData.outline[*].content`）为权威。`saveOutline()` 的 `reason` 是持久化协议：`replace` 清空全部旧正文，`edit` / `delete` / `add-*` 只使受影响节点失效，`sort` 重映射并保留正文和相关状态；不要在 Renderer 复制清理规则。
-- Mermaid 图以 Markdown `mermaid` 代码块保存；Renderer 本地渲染预览，Word 导出由 Main 本地转图片（不依赖外网）并通过 `window.yibiao.export.onWordExportProgress()` 报进度。
+- 绿色报告的目录和正文生成等耗时流程在 Electron Main 后台任务中运行，并持续写入对应 SQLite Store；页面卸载不应取消任务。
+- 绿色报告目录与正文以 `green_report_outline_nodes`（Renderer 对应 `outlineData.outline[*].content`）为权威。
+- Mermaid 图以 Markdown `mermaid` 代码块保存；Renderer 本地渲染预览，Word 导出由 Main 本地转图片（不依赖外网）并通过 `window.lvcert.export.onWordExportProgress()` 报进度。
 - `MarkdownRenderer` 当前默认允许原始 HTML；AI、Agent、远程公告等非本地可信内容必须显式传 `allowRawHtml={false}`，只有明确需要保留本地解析 HTML 时才开启。
 
 ## 聚焦验证

@@ -1,25 +1,24 @@
 import { useState } from 'react';
 import { aiClient } from '../../../shared/ai/aiClient';
-import { getBidAnalysisTasks } from '../../technical-plan/services/bidAnalysisWorkflow';
 
 type RunningMode = 'text' | 'json' | null;
 
-const sampleTenderContent = `# 创合测试项目招标文件
+const sampleContent = `# 测试项目报告
 
-项目名称：创合测试项目。
-项目编号：YB-TEST-001。
-项目类型：软件服务。
+项目名称：测试项目。
+项目编号：LV-TEST-001。
+项目类型：绿色报告。
 项目预算：100 万元。
 项目地址：北京市海淀区。
 
-技术评分要求：
-1. 技术方案完整性，满分 30 分，要求章节完整、实施路径清晰。
-2. 项目实施计划，满分 20 分，要求进度安排合理、风险控制明确。
-3. 运维服务能力，满分 15 分，要求说明响应时效和服务保障。`;
+报告评分要求：
+1. 报告完整性，满分 30 分，要求章节完整、实施路径清晰。
+2. 数据准确性，满分 20 分，要求进度安排合理、风险控制明确。
+3. 内容可读性，满分 15 分，要求说明响应时效和服务保障。`;
 
 const sampleJsonInput = {
-  project_name: '创合测试项目',
-  requirements: '技术方案完整性 30 分；项目实施计划 20 分；运维服务能力 15 分。',
+  project_name: '测试项目',
+  requirements: '报告完整性 30 分；数据准确性 20 分；内容可读性 15 分。',
 };
 
 interface JsonTestResult {
@@ -27,15 +26,15 @@ interface JsonTestResult {
   requirements: Array<{ title: string; score: number }>;
 }
 
-const textTask = getBidAnalysisTasks('full').find((task) => task.id === 'projectInfo');
-
-const textSystemPrompt = `你是专业的招标文件分析助手。请严格基于用户提供的招标文件原文完成提取和总结。
+const textSystemPrompt = `你是专业的报告内容分析助手。请严格基于用户提供的报告原文完成提取和总结。
 
 通用要求：
 1. 保持信息全面、准确，尽量使用原文内容，不要自行编造。
-2. 如果原文没有提及，明确写“没有提及”或“原文未提及”。
+2. 如果原文没有提及，明确写"没有提及"或"原文未提及"。
 3. 只输出最终结果，不输出过程、提示语或客套话。
 4. 始终使用简体中文。`;
+
+const textUserPrompt = `请基于以下报告原文提取项目名称和评分要求，并以 Markdown 列表输出：`;
 
 function DeveloperTestPage() {
   const [runningMode, setRunningMode] = useState<RunningMode>(null);
@@ -54,24 +53,17 @@ function DeveloperTestPage() {
   };
 
   const runTextTest = async () => {
-    if (!textTask) {
-      appendEvent('未找到项目中的 JSON 招标文件解析任务。');
-      return;
-    }
-
     resetOutput();
     setRunningMode('text');
-    appendEvent(`调用通用 AI 文本请求：aiClient.chat(${textTask.label})。`);
+    appendEvent('调用通用 AI 文本请求：aiClient.chat。');
 
     try {
       const nextContent = await aiClient.chat({
         messages: [
           { role: 'system', content: textSystemPrompt },
-          { role: 'user', content: `以下是完整招标文件 Markdown 原文。后续任务必须仅基于这份原文完成：\n\n${sampleTenderContent}` },
-          { role: 'user', content: textTask.buildTaskPrompt() },
+          { role: 'user', content: `${textUserPrompt}\n\n${sampleContent}` },
         ],
-        response_format: textTask.output === 'json' ? { type: 'json_object' } : undefined,
-        logTitle: `开发者测试-${textTask.label}`,
+        logTitle: '开发者测试-文本请求',
       });
       setContent(nextContent);
       appendEvent('文本请求完成。');
@@ -119,7 +111,7 @@ function DeveloperTestPage() {
             这里通过通用 AI 请求复现不同响应模式的兼容问题：文本按钮验证普通响应，JSON 按钮验证结构化响应。
           </p>
           <div className="developer-test-actions">
-            <button type="button" className="primary-action" onClick={runTextTest} disabled={running || !textTask}>
+            <button type="button" className="primary-action" onClick={runTextTest} disabled={running}>
               {runningMode === 'text' ? '文本请求中...' : '测试文本请求'}
             </button>
             <button type="button" className="primary-action" onClick={runJsonTest} disabled={running}>
@@ -135,7 +127,7 @@ function DeveloperTestPage() {
             <span />
             <strong>文本复用入口</strong>
           </div>
-          <pre>{JSON.stringify({ service: 'aiClient.chat', task: textTask?.id, sample: sampleTenderContent }, null, 2)}</pre>
+          <pre>{JSON.stringify({ service: 'aiClient.chat', sample: sampleContent }, null, 2)}</pre>
         </section>
 
         <section className="panel developer-test-panel">

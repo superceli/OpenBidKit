@@ -32,12 +32,12 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
   const submitRequestId = useRef(0);
 
   useEffect(() => {
-    const unsubscribePrompt = window.yibiao.donation.onPrompt((payload) => {
+    const unsubscribePrompt = window.lvcert.donation.onPrompt((payload) => {
       setPrompt(payload);
       setOpen(true);
       setError('');
     });
-    const unsubscribePaid = window.yibiao.donation.onPaid(() => {
+    const unsubscribePaid = window.lvcert.donation.onPaid(() => {
       submitRequestId.current += 1;
       setOpen(false);
       setIntent(null);
@@ -65,7 +65,7 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
     const pollOrder = async () => {
       setPolling(true);
       try {
-        const order = await window.yibiao.donation.getOrderStatus(merchantOrderNo);
+        const order = await window.lvcert.donation.getOrderStatus(merchantOrderNo);
         if (stopped) return;
         setIntent((current) => current ? { ...current, status: order.status } : current);
         if (order.status === 'failed' || order.status === 'closed') {
@@ -99,7 +99,7 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
     let stopped = false;
     const expireOrder = async () => {
       try {
-        const order = await window.yibiao.donation.finalizeOrderStatus(merchantOrderNo);
+        const order = await window.lvcert.donation.finalizeOrderStatus(merchantOrderNo);
         if (stopped || order.status === 'paid') return;
       } catch {
         // Main 会继续后台确认；前台按渠道有效期停止展示二维码。
@@ -137,7 +137,7 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
     setSubmitting(true);
     setError('');
     try {
-      const result = await window.yibiao.donation.createTip({
+      const result = await window.lvcert.donation.createTip({
         amount,
         ...(nickname.trim() ? { nickname: nickname.trim() } : {}),
         ...(email.trim() ? { email: email.trim() } : {}),
@@ -175,7 +175,7 @@ export function DonationPromptProvider({ children }: { children: ReactNode }) {
         kicker="支持开源"
         title="请作者吃顿饭吧"
         description={prompt ? (
-          <>您已累计使用创合 <strong>{formatHours(prompt.accumulatedRuntimeMs)} 小时</strong>，累计下载 <strong>{prompt.wordExportClicks} 次</strong>标书。开发不易，在线乞讨，请作者吃顿饭吧。</>
+          <>您已累计使用哲元 <strong>{formatHours(prompt.accumulatedRuntimeMs)} 小时</strong>，累计下载 <strong>{prompt.wordExportClicks} 次</strong>标书。开发不易，在线乞讨，请作者吃顿饭吧。</>
         ) : undefined}
         cardClassName="donation-dialog-card"
       >

@@ -1,54 +1,33 @@
 import type { AppMenuItem, SectionId } from '../shared/types/navigation';
 
-const githubStarNotice = {
-  message: '正在开发中，在github给作者点个star，可以加速开发。',
-  actionLabel: '点此直达',
-  externalUrl: 'https://github.com/superceli/OpenBidKit',
-};
-
 export const appMenuItems: AppMenuItem[] = [
   {
-    id: 'bid-generation',
-    label: '标书生成',
-    description: '技术方案、可研报告与商务标编制',
+    id: 'green-report',
+    label: '绿色报告生成',
+    description: 'ESG报告、可持续发展报告、社会责任报告等绿色报告智能生成',
+  },
+  {
+    id: 'knowledge-base',
+    label: '知识库',
+    description: '企业资料、行业素材和可复用知识条目',
     children: [
       {
-        id: 'technical-plan',
-        label: '生成技术方案',
-        description: '根据招标文件重头编写一份标书',
+        id: 'document-knowledge-base',
+        label: '文档知识库',
+        description: '管理企业文档、ESG数据和可复用知识条目',
         icon: 'document',
-      },
-      {
-        id: 'existing-plan-expansion',
-        label: '已有方案扩写',
-        description: '解决人写技术方案太薄的问题，上传写好的方案，进行优化和扩充，遵从原方案真实可落地，又能扩写出厚厚的标书',
-        icon: 'expand',
-      },
-      {
-        id: 'feasibility-report',
-        label: '可行性研究报告',
-        description: '根据项目资料编制可行性研究报告',
-        icon: 'document',
-        badge: 'Beta',
-      },
-      {
-        id: 'business-bid',
-        label: '商务标',
-        description: '整理商务响应、报价口径和合同偏离材料。',
-        icon: 'briefcase',
-        notice: githubStarNotice,
       },
     ],
   },
   {
     id: 'template-settings',
-    label: '模版设置',
-    description: '标书导出模板与排版配置',
+    label: '报告模板',
+    description: '报告导出模板与排版配置',
     children: [
       {
         id: 'my-templates',
         label: '我的模板',
-        description: '管理已保存的标书导出模板',
+        description: '管理已保存的报告导出模板',
         icon: 'document',
       },
       {
@@ -60,56 +39,9 @@ export const appMenuItems: AppMenuItem[] = [
     ],
   },
   {
-    id: 'knowledge-base',
-    label: '知识库',
-    description: '素材、模板和案例资产',
-    children: [
-      {
-        id: 'document-knowledge-base',
-        label: '文档知识库',
-        description: '管理文档资料、案例素材和可复用知识条目',
-        icon: 'document',
-      },
-      {
-        id: 'image-knowledge-base',
-        label: '图片知识库',
-        description: '管理图片素材、图示和视觉参考资料',
-        icon: 'file',
-        notice: githubStarNotice,
-      },
-    ],
-  },
-  {
-    id: 'bid-check',
-    label: '标书检查',
-    description: '查重、废标项与合规检查',
-    children: [
-      {
-        id: 'duplicate-check',
-        label: '标书查重',
-        description: '相似度与重复表达检测',
-        icon: 'compare',
-      },
-      {
-        id: 'rejection-check',
-        label: '废标项检查',
-        description: '硬性条款与响应完整性',
-        icon: 'shield',
-      },
-      {
-        id: 'ai-evaluation',
-        label: 'AI评标',
-        description: '模拟AI评标，对标书进行打分，出具评标报告',
-        icon: 'tool',
-        notice: githubStarNotice,
-      },
-    ],
-  },
-  {
-    id: 'bid-opportunity',
-    label: '投标机会',
-    description: '机会发现与线索跟踪',
-    notice: githubStarNotice,
+    id: 'resources',
+    label: '资源下载',
+    description: '报告相关资料、工具下载',
   },
   {
     id: 'plugin-manager',
@@ -117,9 +49,9 @@ export const appMenuItems: AppMenuItem[] = [
     description: '安装和管理插件，扩展软件功能',
   },
   {
-    id: 'resources',
-    label: '资源下载',
-    description: '投标相关资料、工具下载',
+    id: 'settings',
+    label: '设置',
+    description: 'AI 配置、关于与系统偏好',
   },
 ];
 
@@ -158,12 +90,6 @@ const developerMenuItems: AppMenuItem[] = [
         label: '导出链路预演',
         description: '预览 Word、Markdown、Mermaid 图片转换的导出检查路径。',
         icon: 'export',
-      },
-      {
-        id: 'developer-expansion-replace-test',
-        label: '扩写替换测试',
-        description: '使用真实扩写 patch 应用逻辑，复现 replace 锚点未命中后的追加问题。',
-        icon: 'tool',
       },
       {
         id: 'developer-agent-test',

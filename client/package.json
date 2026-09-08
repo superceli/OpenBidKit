@@ -1,8 +1,8 @@
 {
-  "name": "yibiao-client",
-  "version": "0.2.0",
+  "name": "lvcert-client",
+  "version": "1.0.0",
   "private": true,
-  "description": "创合投标工具箱独立桌面客户端",
+  "description": "绿证报告工具箱独立桌面客户端",
   "author": "mark",
   "main": "electron/main.cjs",
   "type": "module",
@@ -22,8 +22,8 @@
     "start": "electron ."
   },
   "build": {
-    "appId": "com.yibiao.openbidkit",
-    "productName": "创合投标工具箱",
+    "appId": "com.lvcert.report",
+    "productName": "绿证报告工具箱",
     "copyright": "Copyright © 2026 mark",
     "asar": true,
     "directories": {
@@ -149,7 +149,7 @@
         }
       ]
     },
-    "artifactName": "Yibiao-${version}-${os}-${arch}.${ext}"
+    "artifactName": "Lvcert-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.10",

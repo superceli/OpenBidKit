@@ -79,7 +79,7 @@ function getGitCommitSha() {
 }
 
 function getBuildId() {
-  const explicit = String(process.env.YIBIAO_BUILD_ID || '').trim();
+  const explicit = String(process.env.LVCERT_BUILD_ID || '').trim();
   if (explicit) return explicit;
   const runId = String(process.env.GITHUB_RUN_ID || '').trim();
   const attempt = String(process.env.GITHUB_RUN_ATTEMPT || '').trim();

@@ -1,4 +1,4 @@
-﻿import * as Dialog from '@radix-ui/react-dialog';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { trackPageView } from '../../../shared/analytics/analytics';
 import { AppSwitch, FloatingToolbar, ProgressBar, useToast } from '../../../shared/ui';
@@ -327,7 +327,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     let cancelled = false;
     (async () => {
       try {
-        const fonts = await window.yibiao?.systemFonts?.list?.();
+        const fonts = await window.lvcert?.systemFonts?.list?.();
         if (!cancelled && Array.isArray(fonts)) {
           setSystemFonts(fonts);
         }
@@ -349,7 +349,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           if (!templateId) {
             throw new Error('缺少要编辑的模板');
           }
-          const template = await window.yibiao?.templates.get(templateId);
+          const template = await window.lvcert?.templates.get(templateId);
           if (!template) {
             throw new Error('模板不存在或已被删除');
           }
@@ -472,8 +472,8 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     try {
       const nextConfig = templateName === config.template_name ? config : { ...config, template_name: templateName };
       const template = currentTemplateId
-        ? await window.yibiao?.templates.update(currentTemplateId, nextConfig)
-        : await window.yibiao?.templates.create(nextConfig);
+        ? await window.lvcert?.templates.update(currentTemplateId, nextConfig)
+        : await window.lvcert?.templates.create(nextConfig);
       if (!template) {
         throw new Error('模板保存失败');
       }
@@ -529,11 +529,11 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     let unsubscribe: (() => void) | undefined;
 
     try {
-      const technicalPlan = await window.yibiao?.technicalPlan.loadState();
-      const outlineData = technicalPlan?.outlineData;
+      const greenReport = await window.lvcert?.greenReport.loadState();
+      const outlineData = greenReport?.outlineData;
       const outline = outlineData?.outline || [];
       if (!hasGeneratedContent(outline)) {
-        showToast('无已完成标书', 'info');
+        showToast('无已完成报告', 'info');
         return;
       }
 
@@ -550,7 +550,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         mermaidCount,
       });
 
-      unsubscribe = window.yibiao?.export.onWordExportProgress((event: WordExportProgressEvent) => {
+      unsubscribe = window.lvcert?.export.onWordExportProgress((event: WordExportProgressEvent) => {
         if (event.requestId && event.requestId !== requestId) {
           return;
         }
@@ -566,7 +566,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         }));
       });
 
-      const result = await window.yibiao?.export.exportWord({
+      const result = await window.lvcert?.export.exportWord({
         requestId,
         project_name: outlineData?.project_name,
         outline,
@@ -608,7 +608,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     if (!exportProgress.filePath) return;
 
     try {
-      await window.yibiao?.export.openFile(exportProgress.filePath);
+      await window.lvcert?.export.openFile(exportProgress.filePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : '打开文件失败';
       showToast(message, 'error');

@@ -185,7 +185,7 @@ function createAgentProxyModelInfo() {
     id: 'default',
     object: 'model',
     created: 0,
-    owned_by: 'yibiao',
+    owned_by: 'lvcert',
   };
 }
 

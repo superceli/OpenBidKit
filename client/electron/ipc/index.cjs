@@ -5,15 +5,12 @@ const { registerAutoConfirmationIpc } = require('./autoConfirmationIpc.cjs');
 const { registerConfigIpc } = require('./configIpc.cjs');
 const { registerDeveloperIpc } = require('./developerIpc.cjs');
 const { registerDonationIpc } = require('./donationIpc.cjs');
-const { registerDuplicateCheckIpc } = require('./duplicateCheckIpc.cjs');
 const { registerExportIpc } = require('./exportIpc.cjs');
 const { registerFileIpc } = require('./fileIpc.cjs');
 const { registerKnowledgeBaseIpc } = require('./knowledgeBaseIpc.cjs');
 const { registerLicenseIpc } = require('./licenseIpc.cjs');
-const { registerRejectionCheckIpc } = require('./rejectionCheckIpc.cjs');
 const { registerTaskIpc } = require('./taskIpc.cjs');
-const { registerTechnicalPlanIpc } = require('./technicalPlanIpc.cjs');
-const { registerFeasibilityReportIpc } = require('./feasibilityReportIpc.cjs');
+const { registerGreenReportIpc } = require('./greenReportIpc.cjs');
 const { registerTemplateIpc } = require('./templateIpc.cjs');
 const { registerSystemFontIpc } = require('./systemFontIpc.cjs');
 const { registerPluginIpc } = require('./pluginIpc.cjs');
@@ -22,25 +19,18 @@ const { createAgentService } = require('../services/agentService.cjs');
 const { createAiService } = require('../services/aiService.cjs');
 const { createAutoConfirmationService } = require('../services/autoConfirmationService.cjs');
 const { createConfigStore } = require('../services/configStore.cjs');
-const { createDeveloperExpansionReplaceTestService } = require('../services/developerExpansionReplaceTest.cjs');
 const { createDonationService } = require('../services/donationService.cjs');
-const { createDuplicateCheckService } = require('../services/duplicateCheckService.cjs');
-const { createDuplicateCheckStore } = require('../services/duplicateCheckStore.cjs');
-const { createCheckResultExportService } = require('../services/checkResultExportService.cjs');
 const { createExportService } = require('../services/exportService.cjs');
 const { createFileService } = require('../services/fileService.cjs');
 const { createKnowledgeBaseService } = require('../services/knowledgeBaseService.cjs');
 const { createKnowledgeBaseStore } = require('../services/knowledgeBaseStore.cjs');
 const { createLicenseService } = require('../services/licenseService.cjs');
-const { createRejectionCheckStore } = require('../services/rejectionCheckStore.cjs');
 const { createSqliteDatabase } = require('../services/sqliteDatabase.cjs');
 const { createSystemFontService } = require('../services/systemFontService.cjs');
 const { clearOrphanedGeneratedImages, clearStalePiTaskArchives, runHistoricalStorageCleanup } = require('../services/storageCleanupService.cjs');
 const { createTaskService } = require('../services/taskService.cjs');
-const { createAgentWorkspaceService } = require('../services/agentWorkspaceService.cjs');
 const { createTaskLogStore } = require('../services/taskLogStore.cjs');
-const { createTechnicalPlanStore } = require('../services/technicalPlanStore.cjs');
-const { createFeasibilityReportStore } = require('../services/feasibilityReportStore.cjs');
+const { createGreenReportStore } = require('../services/greenReportStore.cjs');
 const { createTemplateStore } = require('../services/templateStore.cjs');
 const { checkRequiredOnlineServices, getRequiredOnlineServiceStatus } = require('../services/requiredOnlineServices.cjs');
 const { initLocalImageRenderService } = require('../services/localImageRenderService.cjs');
@@ -49,16 +39,12 @@ const { cleanupTrashDirSync } = require('../utils/forceRemove.cjs');
 const { getWorkspaceTrashDir } = require('../utils/paths.cjs');
 
 let pendingUiCurrentView = null;
-let agentWorkspaceServiceRef = null;
 let currentViewWebContentsId = null;
 const currentViewLifetimeBound = new WeakSet();
 
 function clearUiCurrentView() {
   pendingUiCurrentView = null;
   currentViewWebContentsId = null;
-  if (agentWorkspaceServiceRef?.setCurrentView) {
-    agentWorkspaceServiceRef.setCurrentView({});
-  }
 }
 
 function bindCurrentViewLifetime(webContents) {
@@ -82,9 +68,6 @@ function applyUiCurrentView(view, senderWebContents) {
   pendingUiCurrentView = view && typeof view === 'object' ? view : {};
   currentViewWebContentsId = senderWebContents?.id ?? null;
   bindCurrentViewLifetime(senderWebContents);
-  if (agentWorkspaceServiceRef?.setCurrentView) {
-    agentWorkspaceServiceRef.setCurrentView(pendingUiCurrentView);
-  }
 }
 
 function normalizeExternalUrl(value) {
@@ -115,51 +98,16 @@ function sendToWebContents(webContents, channel, payload) {
 }
 
 const workspaceDatabaseChannels = [
-  'technical-plan:load-state',
-  'technical-plan:import-tender-document',
-  'technical-plan:remove-tender-document',
-  'technical-plan:import-original-plan-document',
-  'technical-plan:check-bid-sections',
-  'technical-plan:select-bid-section',
-  'technical-plan:read-tender-markdown',
-  'technical-plan:read-original-plan-markdown',
-  'technical-plan:update-step',
-  'technical-plan:set-workflow-kind',
-  'technical-plan:save-outline-config',
-  'technical-plan:save-outline',
-  'technical-plan:save-global-facts-config',
-  'technical-plan:save-global-facts',
-  'technical-plan:save-content-generation-options',
-  'technical-plan:save-chapter-content',
-  'technical-plan:clear',
-  'technical-plan:open-bid-template',
-  'feasibility-report:load-state',
-  'feasibility-report:import-source-documents',
-  'feasibility-report:remove-source-document',
-  'feasibility-report:read-source-markdown',
-  'feasibility-report:read-combined-source-markdown',
-  'feasibility-report:update-step',
-  'feasibility-report:save-project-info',
-  'feasibility-report:save-analysis',
-  'feasibility-report:save-outline-config',
-  'feasibility-report:save-outline',
-  'feasibility-report:save-key-parameters',
-  'feasibility-report:save-chapter-content',
-  'feasibility-report:clear',
-  'duplicate-check:load-state',
-  'duplicate-check:save-files',
-  'duplicate-check:save-ui-state',
-  'duplicate-check:export-excel',
-  'duplicate-check:update-state',
-  'duplicate-check:clear',
-  'rejection-check:load-state',
-  'rejection-check:import-document',
-  'rejection-check:import-tender-from-technical-plan',
-  'rejection-check:remove-document',
-  'rejection-check:save-ui-state',
-  'rejection-check:update-state',
-  'rejection-check:export-excel',
-  'rejection-check:clear',
+  'green-report:load-state',
+  'green-report:update-step',
+  'green-report:save-report-type',
+  'green-report:save-project-info',
+  'green-report:save-outline-config',
+  'green-report:save-report-config',
+  'green-report:save-knowledge-context',
+  'green-report:save-outline',
+  'green-report:save-chapter-content',
+  'green-report:clear',
   'knowledge-base:list',
   'knowledge-base:create-folder',
   'knowledge-base:rename-folder',
@@ -170,23 +118,9 @@ const workspaceDatabaseChannels = [
   'knowledge-base:read-markdown',
   'knowledge-base:read-items',
   'knowledge-base:read-analysis',
-  'tasks:start-bid-section-extraction',
-  'tasks:start-bid-analysis',
-  'tasks:start-outline-generation',
-  'tasks:confirm-outline-selection',
-  'tasks:suppress-outline-selection-auto-confirmation',
-  'tasks:start-global-facts-generation',
-  'tasks:start-content-generation',
-  'tasks:pause-content-generation',
-  'tasks:start-rejection-items-extraction',
-  'tasks:start-rejection-check',
-  'tasks:start-duplicate-analysis',
-  'tasks:start-feasibility-analysis',
-  'tasks:start-feasibility-outline',
-  'tasks:start-feasibility-parameters',
-  'tasks:start-feasibility-content',
-  'tasks:pause-feasibility-content',
-  'tasks:start-feasibility-human-writing',
+  'knowledge-base:search-items',
+  'tasks:start-green-report-outline',
+  'tasks:start-green-report-content',
   'tasks:get-active',
   'templates:list',
   'templates:get',
@@ -261,62 +195,37 @@ function registerWorkspaceDatabaseServices({ app, configStore, aiService, agentS
   const taskLogStore = createTaskLogStore({ db: sqliteDatabase.db });
   const knowledgeBaseStore = createKnowledgeBaseStore({ app, db: sqliteDatabase.db });
   const knowledgeBaseService = createKnowledgeBaseService({ app, aiService, configStore, knowledgeBaseStore });
-  const technicalPlanStore = createTechnicalPlanStore({ app, db: sqliteDatabase.db, fileService, agentService, taskLogStore, configStore });
-  const feasibilityReportStore = createFeasibilityReportStore({ app, db: sqliteDatabase.db, fileService, taskLogStore, agentService });
-  const duplicateCheckStore = createDuplicateCheckStore({ app, db: sqliteDatabase.db, taskLogStore });
-  const rejectionCheckStore = createRejectionCheckStore({ app, db: sqliteDatabase.db, fileService, technicalPlanStore, taskLogStore });
+  const greenReportStore = createGreenReportStore({ app, db: sqliteDatabase.db, taskLogStore });
   const templateStore = createTemplateStore({ db: sqliteDatabase.db });
-  const duplicateCheckService = createDuplicateCheckService({ app, configStore, workspaceStore: duplicateCheckStore });
-  const checkResultExportService = createCheckResultExportService({
-    app,
-    dialog,
-    rejectionCheckStore,
-    duplicateCheckStore,
-  });
-  const taskService = createTaskService({ aiService, agentService, autoConfirmationService, technicalPlanStore, rejectionCheckStore, duplicateCheckStore, feasibilityReportStore, knowledgeBaseService, duplicateCheckService, openXmlHelperService });
-  const agentWorkspaceService = createAgentWorkspaceService({ agentService, taskService, technicalPlanStore, feasibilityReportStore });
-  agentWorkspaceServiceRef = agentWorkspaceService;
-  technicalPlanStore.setAgentWorkspaceChangeListener(() => agentWorkspaceService.emitWorkspacesChanged());
-  feasibilityReportStore.setAgentWorkspaceChangeListener(() => agentWorkspaceService.emitWorkspacesChanged());
-  if (pendingUiCurrentView) {
-    agentWorkspaceService.setCurrentView(pendingUiCurrentView);
-  }
+  const taskService = createTaskService({ aiService, agentService, autoConfirmationService, knowledgeBaseService, openXmlHelperService, greenReportStore });
 
   clearWorkspaceDatabaseIpc();
   registerKnowledgeBaseIpc({ knowledgeBaseService });
-  registerTechnicalPlanIpc({ technicalPlanStore, taskService });
-  registerFeasibilityReportIpc({ feasibilityReportStore, taskService });
-  registerDuplicateCheckIpc({ duplicateCheckStore, checkResultExportService });
-  registerRejectionCheckIpc({ rejectionCheckStore, taskService, checkResultExportService });
+  registerGreenReportIpc({ greenReportStore, taskService });
   registerTemplateIpc({ templateStore });
   registerTaskIpc({ taskService });
   updateStatus({ phase: 'ready', ready: true, message: '本地数据库已就绪' });
-  
+
   // 更新 pluginService 的服务引用
   pluginService.updateServices({
     agentService,
     taskService,
-    agentWorkspaceService,
-    technicalPlanStore,
-    duplicateCheckStore,
-    rejectionCheckStore,
   });
-  
+
   // 在服务就绪后启用已启用的插件
   pluginService.activateEnabledPlugins().catch((error) => {
     console.error('[plugin-service] 启用插件失败:', error);
   });
-  
+
   return { sqliteDatabase };
 }
 
-function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall, getLatestVersion, getUpdateDownloadUrl, gpuStartupState = {}, gpuTrialArg = '--yibiao-trial-hardware-acceleration', forceDisableGpuArgs = [], openDeveloperTokenStatsWindow, closeDeveloperTokenStatsWindow, openDeveloperAgentMonitorWindow, closeDeveloperAgentMonitorWindow }) {
+function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall, getLatestVersion, getUpdateDownloadUrl, gpuStartupState = {}, gpuTrialArg = '--lvcert-trial-hardware-acceleration', forceDisableGpuArgs = [], openDeveloperTokenStatsWindow, closeDeveloperTokenStatsWindow, openDeveloperAgentMonitorWindow, closeDeveloperAgentMonitorWindow }) {
   void checkRequiredOnlineServices();
   const configStore = createConfigStore(app);
   initLocalImageRenderService({ configStore });
   const licenseService = createLicenseService({ app, configStore });
   const aiService = createAiService({ app, configStore });
-  const developerExpansionReplaceTestService = createDeveloperExpansionReplaceTestService({ aiService });
   const donationService = createDonationService({
     app,
     onPrompt: (payload) => sendToWebContents(mainWindow.webContents, 'donation:prompt', payload),
@@ -414,7 +323,6 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
     agentService,
     openDeveloperTokenStatsWindow,
     openDeveloperAgentMonitorWindow,
-    developerExpansionReplaceTestService,
   });
   registerDonationIpc({ donationService });
   registerLicenseIpc({ licenseService });
@@ -427,9 +335,6 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
   registerPluginIpc(ipcMain, app, {
     agentService,
     taskService: null,
-    technicalPlanStore: null,
-    duplicateCheckStore: null,
-    rejectionCheckStore: null,
   });
   ipcMain.handle('ui:set-current-view', (event, view) => {
     applyUiCurrentView(view, event.sender);

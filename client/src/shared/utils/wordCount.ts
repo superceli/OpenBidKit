@@ -14,7 +14,7 @@ function keepMarkdownLinkText(content: string) {
 }
 
 function stripUrls(content: string) {
-  return content.replace(/\b(?:https?|file|yibiao-asset):\/\/\S+/gi, ' ');
+  return content.replace(/\b(?:https?|file|lvcert-asset):\/\/\S+/gi, ' ');
 }
 
 function stripHtml(content: string) {

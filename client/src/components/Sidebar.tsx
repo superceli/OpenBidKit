@@ -13,31 +13,20 @@ interface SidebarProps {
 }
 
 const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>> = {
-  'bid-generation': BidGenerationIcon,
-  'technical-plan': DocumentIcon,
-  'existing-plan-expansion': DocumentIcon,
-  'feasibility-report': DocumentIcon,
-  'business-bid': BriefcaseIcon,
+  'green-report': DocumentIcon,
   'knowledge-base': ArchiveIcon,
   'document-knowledge-base': ArchiveIcon,
-  'image-knowledge-base': ArchiveIcon,
   resources: ResourcesIcon,
-  'bid-check': BidCheckIcon,
-  'duplicate-check': CompareIcon,
-  'rejection-check': ShieldIcon,
-  'ai-evaluation': BidCheckIcon,
   'template-settings': DocumentIcon,
   'my-templates': DocumentIcon,
   'new-template': DocumentIcon,
   'export-format': DocumentIcon,
-  'bid-opportunity': RadarIcon,
   'developer-test': FlaskIcon,
   'developer-json-test': FlaskIcon,
   'developer-multimodal-test': FlaskIcon,
   'developer-prompt-lab': FlaskIcon,
   'developer-parser-sandbox': FlaskIcon,
   'developer-export-preview': FlaskIcon,
-  'developer-expansion-replace-test': FlaskIcon,
   'developer-agent-test': FlaskIcon,
   'plugin-manager': PluginIcon,
   settings: GearIcon,
@@ -79,8 +68,8 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
           <img src={logoUrl} alt="" />
         </div>
         <div className="brand-copy">
-          <span>创合</span>
-          <strong>投标工具箱</strong>
+          <span>绿证</span>
+          <strong>报告工具箱</strong>
         </div>
       </div>
 
@@ -137,7 +126,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
         cardClassName="group-chat-dialog"
         actions={<button type="button" className="secondary-action" onClick={() => setGroupChatOpen(false)}>关闭</button>}
       >
-        <img className="group-chat-qr" src={groupChatQrUrl} alt="创合用户交流群二维码" />
+        <img className="group-chat-qr" src={groupChatQrUrl} alt="绿证用户交流群二维码" />
       </AppDialog>
     </aside>
   );
@@ -146,8 +135,8 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
 async function openExternalUrl(url: string) {
   if (!url) return;
 
-  if (window.yibiao?.openExternal) {
-    await window.yibiao.openExternal(url);
+  if (window.lvcert?.openExternal) {
+    await window.lvcert.openExternal(url);
     return;
   }
 

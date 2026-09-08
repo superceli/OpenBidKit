@@ -42,7 +42,7 @@ function DeveloperMultimodalTestPage() {
     event.target.value = '';
     if (!file) return;
 
-    const filePath = window.yibiao?.file.getPathForFile(file) || '';
+    const filePath = window.lvcert?.file.getPathForFile(file) || '';
     if (!filePath) {
       showToast('无法读取图片本地路径，请重新选择', 'error');
       return;

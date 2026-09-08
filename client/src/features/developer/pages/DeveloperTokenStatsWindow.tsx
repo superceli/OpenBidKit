@@ -27,7 +27,7 @@ function DeveloperTokenStatsWindow() {
     document.body.classList.add('token-stats-transparent-root');
 
     let mounted = true;
-    void window.yibiao?.developerTokenStats.get()
+    void window.lvcert?.developerTokenStats.get()
       .then((nextStats) => {
         if (mounted && nextStats) {
           setStats(nextStats);
@@ -39,7 +39,7 @@ function DeveloperTokenStatsWindow() {
         }
       });
 
-    const unsubscribe = window.yibiao?.developerTokenStats.onChanged((nextStats) => {
+    const unsubscribe = window.lvcert?.developerTokenStats.onChanged((nextStats) => {
       setStats(nextStats);
     }) ?? (() => undefined);
 
@@ -53,7 +53,7 @@ function DeveloperTokenStatsWindow() {
 
   const resetStats = async () => {
     try {
-      const nextStats = await window.yibiao?.developerTokenStats.reset();
+      const nextStats = await window.lvcert?.developerTokenStats.reset();
       setStats(nextStats || emptyStats);
     } catch (error) {
       console.warn(error instanceof Error ? error.message : '重置 Token 统计失败');

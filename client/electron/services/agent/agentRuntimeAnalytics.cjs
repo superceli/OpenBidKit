@@ -1,5 +1,5 @@
 const ANALYTICS_ENDPOINT = 'https://analytics.agnet.top/track';
-const ANALYTICS_PROJECT_NAME = 'yibiao-client';
+const ANALYTICS_PROJECT_NAME = 'lvcert-client';
 const PI_RUNTIME_ID = 'pi';
 
 function normalizeEndpointHost(value) {

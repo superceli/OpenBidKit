@@ -51,7 +51,7 @@ async function createPiSession({ workspaceDir, sessionsDir, sessionFile, environ
     modelsPath: null,
     allowModelNetwork: false,
   });
-  modelRuntime.registerProvider('yibiao', {
+  modelRuntime.registerProvider('lvcert', {
     name: 'Yibiao AI',
     baseUrl: `${proxyInfo.baseUrl}/v1`,
     api: 'openai-completions',

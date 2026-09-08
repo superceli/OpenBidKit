@@ -90,6 +90,32 @@ function isResponseFormatUnsupported(message) {
   ].some((marker) => normalized.includes(marker));
 }
 
+// 识别上游因不支持 web_search / tools / enable_search 等参数而返回的错误
+function isWebSearchUnsupported(message) {
+  const normalized = String(message || '').toLowerCase();
+  const hasToken = [
+    'web_search',
+    'enable_search',
+    'web search',
+    'tool',
+    'function',
+    'tools',
+  ].some((token) => normalized.includes(token));
+  const hasMarker = [
+    'not supported',
+    'does not support',
+    'not support',
+    'unsupported',
+    'unknown parameter',
+    'invalid parameter',
+    'unrecognized',
+    'unknown argument',
+    'must be',
+    'no such',
+  ].some((marker) => normalized.includes(marker));
+  return hasToken && hasMarker;
+}
+
 function createModuleDeveloperLogger(app, config, moduleName, request = {}) {
   return createDeveloperLogger({
     app,
@@ -890,6 +916,12 @@ function createChatRequestBody(config, request, options = {}) {
     body.response_format = request.response_format;
   }
 
+  // 联网搜索：智谱/方舟等识别 tools，通义识别 enable_search；不兼容上游会 400 由降级重试兜底
+  if (config.web_search_enabled && !options.omitWebSearch) {
+    body.tools = [{ type: 'web_search' }];
+    body.enable_search = true;
+  }
+
   return body;
 }
 
@@ -954,6 +986,7 @@ async function ensureTextAiResponseOk(response, fallbackMessage) {
   throw await createAiHttpErrorFromResponse(response, fallbackMessage, {
     source: 'text-model',
     responseFormatUnsupportedChecker: isResponseFormatUnsupported,
+    webSearchUnsupportedChecker: isWebSearchUnsupported,
   });
 }
 
@@ -1367,6 +1400,10 @@ async function chatWithConfig(app, config, request) {
   const logTitle = resolveAiLogTitle(request, '文本请求');
   const requestMode = normalizeTextRequestMode(config);
   let requestBody = createChatRequestBody(config, preparedRequest, { stream: requestMode === 'stream' });
+  // 降级持久化标志：避免「先剥 web_search 后剥 response_format」时把已剥字段加回
+  let webSearchOmitted = false;
+  let responseFormatOmitted = false;
+  let webSearchDowngraded = false;
   let responseData = null;
   let errorMessage = '';
   let analyticsTracked = false;
@@ -1388,14 +1425,33 @@ async function chatWithConfig(app, config, request) {
       try {
         return await requestTextAi(app, config, requestBody, { signal, requestMode });
       } catch (error) {
-        if (!preparedRequest.response_format || !error.responseFormatUnsupported) {
+        const stripWebSearch = !webSearchOmitted && error.webSearchUnsupported;
+        const stripResponseFormat = !responseFormatOmitted
+          && preparedRequest.response_format
+          && error.responseFormatUnsupported;
+        if (!stripWebSearch && !stripResponseFormat) {
           throw error;
         }
-
-        requestBody = createChatRequestBody(config, preparedRequest, { omitResponseFormat: true, stream: requestMode === 'stream' });
+        if (stripWebSearch) {
+          webSearchOmitted = true;
+          webSearchDowngraded = true;
+        }
+        if (stripResponseFormat) {
+          responseFormatOmitted = true;
+        }
+        requestBody = createChatRequestBody(config, preparedRequest, {
+          omitWebSearch: webSearchOmitted,
+          omitResponseFormat: responseFormatOmitted,
+          stream: requestMode === 'stream',
+        });
         return requestTextAi(app, config, requestBody, { signal, requestMode });
       }
     }, timeoutMs, request.signal));
+
+    // 降级后成功时通知调用方（如绿色报告任务用于 publish 进度日志）
+    if (webSearchDowngraded && typeof preparedRequest.onWebSearchDowngrade === 'function') {
+      try { preparedRequest.onWebSearchDowngrade(); } catch {}
+    }
 
     responseData = result.responseData;
     recordTextTokenStats(config, result.usage);
@@ -2436,6 +2492,10 @@ function createAiService({ app, configStore }) {
   const service = {
     getConfig() {
       return configStore.load();
+    },
+
+    isWebSearchEnabled() {
+      return Boolean(configStore.load().web_search_enabled);
     },
 
     async chat(request) {

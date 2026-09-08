@@ -108,6 +108,7 @@ const workspaceDatabaseChannels = [
   'green-report:save-outline',
   'green-report:save-chapter-content',
   'green-report:clear',
+  'green-report:generate-report-code',
   'knowledge-base:list',
   'knowledge-base:create-folder',
   'knowledge-base:rename-folder',
@@ -235,7 +236,7 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
   const agentService = createAgentService({ app, configStore, aiService, licenseService, autoConfirmationService });
   const fileService = createFileService({ app, configStore });
   const openXmlHelperService = createOpenXmlHelperService({ app, configStore });
-  const exportService = createExportService({ configStore });
+  const exportService = createExportService({ configStore, openXmlHelperService, app });
   const systemFontService = createSystemFontService();
   const databaseStatus = registerWorkspaceDatabaseStatusIpc({ mainWindow });
   let workspaceDatabaseStarted = false;

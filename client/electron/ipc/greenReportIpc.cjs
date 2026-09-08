@@ -43,6 +43,10 @@ function registerGreenReportIpc({ greenReportStore, taskService }) {
     return greenReportStore.clear();
   });
 
+  ipcMain.handle('green-report:generate-report-code', () => {
+    return greenReportStore.generateReportCode();
+  });
+
   ipcMain.handle('tasks:start-green-report-outline', async (event, payload) => {
     taskService.subscribe(event.sender);
     return taskService.startGreenReportOutline(payload);

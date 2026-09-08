@@ -4,6 +4,8 @@ import { FloatingToolbar, ToolbarArrowLeftIcon, ToolbarArrowRightIcon, ToolbarDo
 import type { FloatingToolbarGroup } from '../../../shared/ui';
 import type { SectionId } from '../../../shared/types/navigation';
 import type { OutlineItem, WordExportProgressEvent } from '../../../shared/types';
+import type { ExportTemplateRecord } from '../../../shared/types/exportFormat';
+import { DEFAULT_EXPORT_FORMAT } from '../../../shared/types/exportFormat';
 import CompanyInfoPage from './CompanyInfoPage';
 import ReportConfigPage from './ReportConfigPage';
 import OutlinePage from './OutlinePage';
@@ -24,6 +26,7 @@ const emptyState: GreenReportState = {
   targetWords: 20000,
   pageCount: 30,
   documentStyle: 'standard',
+  templateId: null,
   knowledgeContext: null,
   outlineData: null,
 };
@@ -43,6 +46,8 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
   const [draftPageCount, setDraftPageCount] = useState(30);
   const [draftDocumentStyle, setDraftDocumentStyle] = useState<GreenDocumentStyle>('standard');
   const [draftTargetWords, setDraftTargetWords] = useState(20000);
+  const [draftTemplateId, setDraftTemplateId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<ExportTemplateRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [wordExportProgress, setWordExportProgress] = useState(initialExportProgress);
 
@@ -63,8 +68,12 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       setDraftPageCount(s.pageCount ?? 30);
       setDraftDocumentStyle(s.documentStyle ?? 'standard');
       setDraftTargetWords(s.targetWords ?? 20000);
+      setDraftTemplateId(s.templateId ?? null);
       setLoaded(true);
     }).catch(() => setLoaded(true));
+    window.lvcert?.templates?.list().then((items) => {
+      setTemplates(items || []);
+    }).catch(() => undefined);
   }, [loaded]);
 
   useEffect(() => {
@@ -140,6 +149,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       targetWords: draftTargetWords,
       pageCount: draftPageCount,
       documentStyle: draftDocumentStyle,
+      templateId: draftTemplateId,
     };
     setState((prev) => ({ ...prev, ...patch }));
     try {
@@ -148,7 +158,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     } catch (error) {
       showToast(`保存失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
-  }, [draftTargetWords, draftPageCount, draftDocumentStyle, showToast]);
+  }, [draftTargetWords, draftPageCount, draftDocumentStyle, draftTemplateId, showToast]);
 
   const handleExportWord = useCallback(async () => {
     if (!state.outlineData?.outline?.length) {
@@ -157,10 +167,35 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     }
     setWordExportProgress({ ...initialExportProgress, running: true, message: '正在准备导出...' });
     try {
+      // 若选中了模板，从模板库取完整 config；否则用默认导出格式
+      let exportFormat = DEFAULT_EXPORT_FORMAT;
+      if (state.templateId) {
+        const template = await window.lvcert?.templates?.get(state.templateId);
+        if (template?.config) exportFormat = template.config;
+      }
+      // 报告编号为空时自动生成；编制日期为空时默认今天
+      let reportCode = state.projectInfo.reportCode;
+      if (!reportCode) {
+        reportCode = await window.lvcert?.greenReport?.generateReportCode();
+      }
+      const compileDate = state.projectInfo.compileDate || new Date().toISOString().slice(0, 10);
+      // 报告标题用用户勾选的报告类型名称（如"ESG（环境、社会、公司治理）报告"）
+      const reportType = findReportTypeById(state.reportType);
+      const reportTitle = reportType?.name || '绿色报告';
+      // 委托单位优先取 clientUnit，为空时回退到企业/组织名称
+      const clientUnit = state.projectInfo.clientUnit || state.projectInfo.companyName || '';
       const result = await window.lvcert.export.exportWord({
         project_name: state.projectInfo.companyName || '绿色报告',
         outline: state.outlineData.outline,
-        pageSetup: { paperSize: 'a4', orientation: 'portrait' },
+        export_format: exportFormat,
+        cover_template: 'green-report',
+        cover_fields: {
+          clientUnit,
+          reportCode: reportCode || '',
+          compileUnit: state.projectInfo.compileUnit || '',
+          compileDate,
+          reportTitle,
+        },
       });
       if (result.success && result.path) {
         setWordExportProgress((prev) => ({ ...prev, filePath: result.path as string }));
@@ -169,7 +204,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       showToast(`导出 Word 失败：${error instanceof Error ? error.message : String(error)}`, 'error');
       setWordExportProgress(initialExportProgress);
     }
-  }, [state.outlineData, state.projectInfo, showToast]);
+  }, [state.outlineData, state.projectInfo, state.templateId, showToast]);
 
   const toolbarGroups: FloatingToolbarGroup[] = [
     {
@@ -263,9 +298,12 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             draftPageCount={draftPageCount}
             draftDocumentStyle={draftDocumentStyle}
             draftTargetWords={draftTargetWords}
+            draftTemplateId={draftTemplateId}
+            templates={templates}
             onDraftPageCountChange={setDraftPageCount}
             onDraftDocumentStyleChange={setDraftDocumentStyle}
             onDraftTargetWordsChange={setDraftTargetWords}
+            onDraftTemplateIdChange={setDraftTemplateId}
             onSave={handleSaveReportConfig}
           />
         )}

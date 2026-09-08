@@ -22,10 +22,11 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return {
       step: row.step || 'company-info',
       reportType: row.report_type || 'esg',
-      projectInfo: row.project_info_json ? JSON.parse(row.project_info_json) : { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '' },
+      projectInfo: row.project_info_json ? JSON.parse(row.project_info_json) : { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', clientUnit: '', compileUnit: '', compileDate: '', reportCode: '' },
       targetWords: row.target_words || 20000,
       pageCount: row.page_count || 30,
       documentStyle: row.document_style || 'standard',
+      templateId: row.template_id || null,
       knowledgeContext: row.knowledge_context_json ? JSON.parse(row.knowledge_context_json) : null,
       outlineProjectName: row.outline_project_name || '',
       outlineProjectOverview: row.outline_project_overview || '',
@@ -132,10 +133,11 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return {
       step: meta?.step || 'company-info',
       reportType: meta?.reportType || 'esg',
-      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '' },
+      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', clientUnit: '', compileUnit: '', compileDate: '', reportCode: '' },
       targetWords: meta?.targetWords || 20000,
       pageCount: meta?.pageCount || 30,
       documentStyle: meta?.documentStyle || 'standard',
+      templateId: meta?.templateId || null,
       knowledgeContext: meta?.knowledgeContext || null,
       outlineData: meta?.outlineData || null,
       ...tasks,
@@ -156,13 +158,14 @@ function createGreenReportStore({ app, db, taskLogStore }) {
       values.push(ts);
       db.prepare(`UPDATE green_report_meta SET ${sets.join(', ')} WHERE id = 1`).run(...values);
     } else {
-      db.prepare('INSERT INTO green_report_meta (id, step, report_type, project_info_json, target_words, page_count, document_style, knowledge_context_json, outline_project_name, outline_project_overview, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO green_report_meta (id, step, report_type, project_info_json, target_words, page_count, document_style, template_id, knowledge_context_json, outline_project_name, outline_project_overview, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         fields.step || 'company-info',
         fields.report_type || 'esg',
         fields.project_info_json || '{}',
         fields.target_words || 20000,
         fields.page_count ?? 30,
         fields.document_style || 'standard',
+        fields.template_id ?? null,
         fields.knowledge_context_json || null,
         fields.outline_project_name || '',
         fields.outline_project_overview || '',
@@ -192,11 +195,12 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return loadState();
   }
 
-  function saveReportConfig({ targetWords, pageCount, documentStyle }) {
+  function saveReportConfig({ targetWords, pageCount, documentStyle, templateId }) {
     const fields = {};
     if (targetWords !== undefined) fields.target_words = targetWords;
     if (pageCount !== undefined) fields.page_count = pageCount;
     if (documentStyle !== undefined) fields.document_style = documentStyle;
+    if (templateId !== undefined) fields.template_id = templateId;
     if (Object.keys(fields).length) saveMeta(fields);
     return loadState();
   }
@@ -268,6 +272,7 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     if (hasOwn(partial, 'targetWords')) metaPatch.target_words = partial.targetWords;
     if (hasOwn(partial, 'pageCount')) metaPatch.page_count = partial.pageCount;
     if (hasOwn(partial, 'documentStyle')) metaPatch.document_style = partial.documentStyle;
+    if (hasOwn(partial, 'templateId')) metaPatch.template_id = partial.templateId;
     if (hasOwn(partial, 'knowledgeContext')) metaPatch.knowledge_context_json = partial.knowledgeContext ? JSON.stringify(partial.knowledgeContext) : null;
     if (hasOwn(partial, 'outlineData')) {
       if (partial.outlineData) saveOutlineTree(partial.outlineData);
@@ -285,6 +290,23 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return { success: true };
   }
 
+  // 生成唯一报告编号 WTHB-ESG-YYYYMM-NNNN，顺序号在单行 meta 上原子递增。
+  function generateReportCode() {
+    const nowDate = new Date();
+    const yyyy = nowDate.getFullYear();
+    const mm = String(nowDate.getMonth() + 1).padStart(2, '0');
+    const yearMonth = `${yyyy}${mm}`;
+    const ts = nowDate.toISOString();
+    // 不存在则插入 seq=1，存在则递增；RETURNING 返回最新 seq。
+    const info = db.prepare(`INSERT INTO green_report_meta (id, step, report_type, project_info_json, target_words, page_count, document_style, report_seq, created_at, updated_at)
+      VALUES (1, 'company-info', 'esg', '{}', 20000, 30, 'standard', 1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET report_seq = report_seq + 1, updated_at = excluded.updated_at
+      RETURNING report_seq`).get(ts, ts);
+    const seq = info?.report_seq ?? 1;
+    const seqPadded = String(seq).padStart(4, '0');
+    return `WTHB-ESG-${yearMonth}-${seqPadded}`;
+  }
+
   return {
     loadState,
     updateStep,
@@ -298,6 +320,7 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     saveOutlineFromResult,
     saveTaskState,
     updateGreenReportWithoutReload,
+    generateReportCode,
     clear,
   };
 }

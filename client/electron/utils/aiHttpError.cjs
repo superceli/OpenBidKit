@@ -70,6 +70,9 @@ async function createAiHttpErrorFromResponse(response, fallbackMessage = 'AI 请
   if (typeof options.responseFormatUnsupportedChecker === 'function') {
     error.responseFormatUnsupported = options.responseFormatUnsupportedChecker(detail || rawText);
   }
+  if (typeof options.webSearchUnsupportedChecker === 'function') {
+    error.webSearchUnsupported = options.webSearchUnsupportedChecker(detail || rawText);
+  }
 
   return markAiRequestError(error, { retryable: isRetryableHttpStatus(payload.status) });
 }

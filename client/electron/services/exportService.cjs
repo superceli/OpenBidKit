@@ -6,7 +6,7 @@ const cheerio = require('cheerio');
 const { imageSize } = require('image-size');
 const { compactLogError, createDeveloperLogger, textMetrics } = require('../utils/developerLog.cjs');
 const { getMermaidCacheEntry, saveMermaidCacheImage } = require('../utils/mermaidCache.cjs');
-const { getGeneratedImagesDir, getImportedImagesDir } = require('../utils/paths.cjs');
+const { getGeneratedImagesDir, getImportedImagesDir, getGreenReportCoverTemplatePath, getOpenXmlJobsDir } = require('../utils/paths.cjs');
 const { REMOTE_IMAGE_RETRY_ATTEMPTS, REMOTE_IMAGE_RETRY_DELAY_MS } = require('../utils/remoteImageRetry.cjs');
 const { renderMarkdownHtml } = require('../utils/renderMarkdownHtml.cjs');
 const { getLocalImageRenderService } = require('./localImageRenderService.cjs');
@@ -2389,7 +2389,7 @@ async function buildDocxBuffer(payload, options = {}) {
   return result.buffer;
 }
 
-function createExportService({ configStore } = {}) {
+function createExportService({ configStore, openXmlHelperService, app: appRef } = {}) {
   return {
     async exportWord(payload = {}, onProgress) {
       const stats = countOutlineStats(Array.isArray(payload.outline) ? payload.outline : []);
@@ -2435,12 +2435,67 @@ function createExportService({ configStore } = {}) {
       try {
         const warnings = [];
         const buildResult = await buildDocxResult(payload, { onProgress, warnings, developerLogger });
-        reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 96, '正在写入 Word 文件。');
         developerLogger.write('export.word.write.started', {
           output_file_name: path.basename(result.filePath),
           output_extension: path.extname(result.filePath).toLowerCase(),
           buffer_bytes: buildResult.buffer.length,
         });
+
+        // 绿色报告封面合并：把封面 docx 的正封面插到正文开头、尾封面插到末尾，并回显封面字段
+        const coverFields = payload.cover_fields || {};
+        const shouldMergeCover = payload.cover_template === 'green-report'
+          && openXmlHelperService
+          && appRef
+          && (coverFields.clientUnit || coverFields.reportCode || coverFields.compileUnit || coverFields.compileDate);
+
+        if (shouldMergeCover) {
+          try {
+            reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 96, '正在合并封面。');
+            const jobsDir = getOpenXmlJobsDir(appRef);
+            const tempBodyName = `cover-body-${Date.now()}.docx`;
+            const tempBodyPath = path.join(jobsDir, tempBodyName);
+            fs.mkdirSync(jobsDir, { recursive: true });
+            fs.writeFileSync(tempBodyPath, buildResult.buffer);
+            const coverTemplatePath = getGreenReportCoverTemplatePath(appRef);
+            const coverFieldsMap = {
+              '委托单位': coverFields.clientUnit || '',
+              '报告编号': coverFields.reportCode || '',
+              '编制单位': coverFields.compileUnit || '',
+              '编制日期': coverFields.compileDate || '',
+            };
+            await openXmlHelperService.runJob({
+              action: 'merge-documents',
+              request: {
+                coverTemplate: coverTemplatePath,
+                coverFields: coverFieldsMap,
+                bodyDoc: tempBodyPath,
+                output: result.filePath,
+              },
+              timeoutMs: 60000,
+            });
+            try { fs.unlinkSync(tempBodyPath); } catch {}
+            const message = buildResult.warnings.length
+              ? `Word 已导出（含封面），但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`
+              : 'Word 已导出（含封面），请打开文档核对图片、表格和版式。';
+            reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 100, message, { phase: 'success' });
+            developerLogger.write('export.word.completed', {
+              output_file_name: path.basename(result.filePath),
+              output_extension: path.extname(result.filePath).toLowerCase(),
+              buffer_bytes: buildResult.buffer.length,
+              warning_count: buildResult.warnings.length,
+              cover_merged: true,
+              stats: buildResult.stats,
+            });
+            return { success: true, path: result.filePath, message, warnings: buildResult.warnings };
+          } catch (mergeError) {
+            developerLogger.write('export.word.cover.merge.failed', {
+              error: compactLogError(mergeError),
+            });
+            buildResult.warnings.push('封面合并失败，已导出无封面版本');
+          }
+        }
+
+        reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 96, '正在写入 Word 文件。');
         fs.writeFileSync(result.filePath, buildResult.buffer);
         const message = buildResult.warnings.length
           ? `Word 已导出，但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`

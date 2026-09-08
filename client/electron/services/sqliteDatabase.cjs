@@ -3,7 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 25;
+const schemaVersion = 27;
 
 function createInitialSchema(db) {
   db.exec(`
@@ -1045,6 +1045,7 @@ function createGreenReportSchema(db) {
       target_words INTEGER NOT NULL DEFAULT 20000,
       page_count INTEGER NOT NULL DEFAULT 30,
       document_style TEXT NOT NULL DEFAULT 'standard',
+      template_id TEXT,
       knowledge_context_json TEXT,
       outline_project_name TEXT,
       outline_project_overview TEXT,
@@ -1152,6 +1153,22 @@ function dropBiddingTables(db) {
   }
 }
 
+// 绿色报告新增导出模板 ID 字段 template_id，关联 export_templates.template_id。
+function addGreenReportTemplateId(db) {
+  const columns = getExistingColumns(db, 'green_report_meta');
+  if (!columns.has('template_id')) {
+    db.exec(`ALTER TABLE green_report_meta ADD COLUMN template_id TEXT;`);
+  }
+}
+
+// 绿色报告新增报告编号自增顺序号 report_seq，用于生成唯一报告编号。
+function addGreenReportSeq(db) {
+  const columns = getExistingColumns(db, 'green_report_meta');
+  if (!columns.has('report_seq')) {
+    db.exec(`ALTER TABLE green_report_meta ADD COLUMN report_seq INTEGER NOT NULL DEFAULT 0;`);
+  }
+}
+
 const schemaHealthTableGroups = [
   {
     version: 3,
@@ -1196,6 +1213,13 @@ const schemaHealthColumnGroups = [
     table: 'knowledge_documents',
     columns: {
       sort_order: 'INTEGER NOT NULL DEFAULT 0',
+    },
+  },
+  {
+    version: 26,
+    table: 'green_report_meta',
+    columns: {
+      template_id: 'TEXT',
     },
   },
 ];
@@ -1383,6 +1407,16 @@ const migrations = [
     version: 25,
     description: '绿色报告工具箱：清理投标相关表结构',
     up: dropBiddingTables,
+  },
+  {
+    version: 26,
+    description: '绿色报告新增导出模板 ID 字段 template_id',
+    up: addGreenReportTemplateId,
+  },
+  {
+    version: 27,
+    description: '绿色报告新增报告编号自增顺序号 report_seq',
+    up: addGreenReportSeq,
   },
 ];
 

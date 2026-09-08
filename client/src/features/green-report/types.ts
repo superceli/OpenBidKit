@@ -21,6 +21,14 @@ export interface GreenProjectInfo {
   reportingPeriod: string;
   reportScope: string;
   keyTopics: string;
+  /** 封面回显字段：委托单位 */
+  clientUnit: string;
+  /** 封面回显字段：编制单位 */
+  compileUnit: string;
+  /** 封面回显字段：编制日期 YYYY-MM-DD */
+  compileDate: string;
+  /** 封面回显字段：报告编号，空字符串表示自动生成 */
+  reportCode: string;
 }
 
 export interface GreenKnowledgeContextItem {
@@ -64,6 +72,8 @@ export interface GreenReportState {
   targetWords: number;
   pageCount: number;
   documentStyle: GreenDocumentStyle;
+  /** 导出时使用的报告模板 ID；为空表示使用默认导出格式 */
+  templateId: string | null;
   knowledgeContext: GreenKnowledgeContext | null;
   outlineData: OutlineData | null;
   outlineTask?: GreenBackgroundTaskState;
@@ -96,12 +106,17 @@ export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   reportingPeriod: '',
   reportScope: '',
   keyTopics: '',
+  clientUnit: '',
+  compileUnit: '',
+  compileDate: '',
+  reportCode: '',
 };
 
 export const DEFAULT_GREEN_REPORT_CONFIG = {
   targetWords: 20000,
   pageCount: 30,
   documentStyle: 'standard' as GreenDocumentStyle,
+  templateId: null as string | null,
 };
 
 export function collectGreenLeaves(items: OutlineItem[] = [], leaves: OutlineItem[] = []): OutlineItem[] {

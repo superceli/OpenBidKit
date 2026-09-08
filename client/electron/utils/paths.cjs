@@ -84,6 +84,17 @@ function getOpenXmlJobDir(app, jobId) {
   return path.join(getOpenXmlJobsDir(app), String(jobId || ''));
 }
 
+/** 绿色报告封面 docx 模板路径；打包后在 resources/assets，开发时在 client/assets。 */
+function getGreenReportCoverTemplatePath(app) {
+  if (process.env.LVCERT_GREEN_REPORT_COVER_TEMPLATE) {
+    return process.env.LVCERT_GREEN_REPORT_COVER_TEMPLATE;
+  }
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'assets', 'green-report-cover.docx');
+  }
+  return path.join(__dirname, '..', '..', 'assets', 'green-report-cover.docx');
+}
+
 /** 开发时编译用的助手工程路径。 */
 function getOpenXmlHelperProjectPath() {
   return path.join(__dirname, '..', '..', '..', 'openxmlhelper', 'src', 'OpenXmlHelper', 'OpenXmlHelper.csproj');
@@ -125,6 +136,7 @@ module.exports = {
   getConfigFilePath,
   getDonationStateFilePath,
   getGpuStartupProbePath,
+  getGreenReportCoverTemplatePath,
   getGeneratedImagesDir,
   getImportedImagesDir,
   getKnowledgeBaseDir,

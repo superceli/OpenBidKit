@@ -606,6 +606,7 @@ export interface LvcertBridge {
     saveOutline: (payload: GreenSaveOutlineRequest) => Promise<Partial<GreenReportState>>;
     saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;
     clear: () => Promise<{ success: boolean; message?: string }>;
+    generateReportCode: () => Promise<string>;
   };
   templates: {
     list: () => Promise<ExportTemplateRecord[]>;

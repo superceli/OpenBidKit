@@ -486,6 +486,13 @@ function openDeveloperAgentMonitorWindow() {
   return { success: true };
 }
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[main] uncaughtException:', error);
+});
+
 app.whenReady().then(() => {
   nativeTheme.themeSource = 'light';
   registerAssetProtocol();

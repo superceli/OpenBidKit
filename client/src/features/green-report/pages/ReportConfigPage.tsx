@@ -1,4 +1,5 @@
 import type { ChangeEvent } from 'react';
+import type { ExportTemplateRecord } from '../../../shared/types/exportFormat';
 import type { GreenDocumentStyle, GreenReportState } from '../types';
 import { GREEN_DOCUMENT_STYLE_LABELS } from '../types';
 
@@ -7,9 +8,12 @@ interface ReportConfigPageProps {
   draftPageCount: number;
   draftDocumentStyle: GreenDocumentStyle;
   draftTargetWords: number;
+  draftTemplateId: string | null;
+  templates: ExportTemplateRecord[];
   onDraftPageCountChange: (value: number) => void;
   onDraftDocumentStyleChange: (value: GreenDocumentStyle) => void;
   onDraftTargetWordsChange: (value: number) => void;
+  onDraftTemplateIdChange: (value: string | null) => void;
   onSave: () => void;
 }
 
@@ -26,9 +30,12 @@ function ReportConfigPage({
   draftPageCount,
   draftDocumentStyle,
   draftTargetWords,
+  draftTemplateId,
+  templates,
   onDraftPageCountChange,
   onDraftDocumentStyleChange,
   onDraftTargetWordsChange,
+  onDraftTemplateIdChange,
   onSave,
 }: ReportConfigPageProps) {
   const handlePageCountChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -88,6 +95,25 @@ function ReportConfigPage({
                   );
                 })}
               </div>
+            </div>
+
+            <div className="green-report-field">
+              <span className="green-report-field-label">导出模板</span>
+              <select
+                className="green-report-input green-report-select"
+                value={draftTemplateId ?? ''}
+                onChange={(e) => onDraftTemplateIdChange(e.target.value || null)}
+              >
+                <option value="">默认导出格式</option>
+                {templates.map((template) => (
+                  <option key={template.template_id} value={template.template_id}>
+                    {template.template_name}
+                  </option>
+                ))}
+              </select>
+              <span className="green-report-field-hint">
+                选择导出 Word 时使用的版式模板；可在「报告模板」页面新建和管理模板
+              </span>
             </div>
 
             <label className="green-report-field">

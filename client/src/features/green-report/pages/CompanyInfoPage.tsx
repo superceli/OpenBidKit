@@ -25,6 +25,7 @@ function CompanyInfoPage({
   const { showToast } = useToast();
   const [searching, setSearching] = useState(false);
   const [reportTypeSearch, setReportTypeSearch] = useState('');
+  const [generatingCode, setGeneratingCode] = useState(false);
 
   // 搜索并按分类分组
   const filteredGroups = useMemo(() => {
@@ -60,6 +61,19 @@ function CompanyInfoPage({
   const handleClearKnowledge = async () => {
     await onClearKnowledge();
     showToast('已清除知识库上下文', 'info');
+  };
+
+  const handleGenerateReportCode = async () => {
+    setGeneratingCode(true);
+    try {
+      const code = await window.lvcert.greenReport.generateReportCode();
+      onDraftChange({ ...draftProjectInfo, reportCode: code });
+      showToast(`已生成报告编号 ${code}`, 'success');
+    } catch (error) {
+      showToast(`报告编号生成失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGeneratingCode(false);
+    }
   };
 
   const knowledgeItems = state.knowledgeContext?.items ?? [];
@@ -218,6 +232,61 @@ function CompanyInfoPage({
                 onChange={handleFieldChange('keyTopics')}
                 placeholder="例如：碳中和、供应链管理、员工发展、公司治理等"
                 rows={3}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="green-report-block">
+          <h2 className="green-report-title">封面信息</h2>
+          <p className="green-report-subtitle">导出 Word 时回显到封面页，留空则不显示该字段</p>
+          <div className="green-report-form">
+            <div className="green-report-field">
+              <div className="green-report-field-label">
+                <span>报告编号</span>
+                <button
+                  className="green-report-btn-secondary"
+                  onClick={handleGenerateReportCode}
+                  disabled={generatingCode}
+                >
+                  {generatingCode ? '生成中...' : '自动生成'}
+                </button>
+              </div>
+              <input
+                type="text"
+                className="green-report-input"
+                value={draftProjectInfo.reportCode}
+                onChange={handleFieldChange('reportCode')}
+                placeholder="点击「自动生成」或手动输入编号，例如 WTHB-ESG-202609-0001"
+              />
+            </div>
+            <label className="green-report-field">
+              <span className="green-report-field-label">委托单位</span>
+              <input
+                type="text"
+                className="green-report-input"
+                value={draftProjectInfo.clientUnit}
+                onChange={handleFieldChange('clientUnit')}
+                placeholder="例如：XX 集团有限公司"
+              />
+            </label>
+            <label className="green-report-field">
+              <span className="green-report-field-label">编制单位</span>
+              <input
+                type="text"
+                className="green-report-input"
+                value={draftProjectInfo.compileUnit}
+                onChange={handleFieldChange('compileUnit')}
+                placeholder="例如：蔚碳（北京）环保咨询有限公司"
+              />
+            </label>
+            <label className="green-report-field">
+              <span className="green-report-field-label">编制日期</span>
+              <input
+                type="date"
+                className="green-report-input"
+                value={draftProjectInfo.compileDate}
+                onChange={handleFieldChange('compileDate')}
               />
             </label>
           </div>

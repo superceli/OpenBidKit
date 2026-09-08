@@ -5,7 +5,8 @@
 -- 2. 用户运行客户端时不需要手动执行本文件。
 -- 3. 客户端运行时建表和升级以 Electron Main 侧 migration 代码为准。
 -- 4. 当前运行代码已落地 knowledge_* v3、export_templates v15、task_logs v20、green_report_* v24 目标结构；
---    v25 已清理 technical_plan_*、duplicate_check_*、rejection_check_*、feasibility_report_* 等投标相关表。
+--    v25 已清理 technical_plan_*、duplicate_check_*、rejection_check_*、feasibility_report_* 等投标相关表；
+--    v26 绿色报告新增导出模板 ID 字段 template_id，关联 export_templates.template_id。
 -- 5. 每次表结构调整后，需要同步更新本文件和 runtime migration 版本。
 -- 6. 本文件不保存历史版本，每次更新都写入最新目标完整结构。
 
@@ -15,7 +16,7 @@ PRAGMA busy_timeout = 5000;
 
 -- 目标完整结构版本。
 -- 运行时代码应通过 PRAGMA user_version 判断是否需要自动升级。
-PRAGMA user_version = 25;
+PRAGMA user_version = 26;
 
 -- ============================================================================
 -- 任务日志 task_logs（v20 目标设计）
@@ -268,9 +269,12 @@ CREATE TABLE IF NOT EXISTS green_report_meta (
   target_words INTEGER NOT NULL DEFAULT 20000,
   page_count INTEGER NOT NULL DEFAULT 30,
   document_style TEXT NOT NULL DEFAULT 'standard',
+  template_id TEXT,
   knowledge_context_json TEXT,
   outline_project_name TEXT,
   outline_project_overview TEXT,
+  -- 报告编号自增顺序号，0 表示尚未生成；每次生成编号时递增
+  report_seq INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

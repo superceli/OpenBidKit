@@ -143,7 +143,21 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
   if (projectInfo.reportScope) parts.push(`报告范围：${projectInfo.reportScope}`);
   if (projectInfo.keyTopics) parts.push(`重点关注议题：${projectInfo.keyTopics}`);
-  if (options.pageCount) parts.push(`生成页数：${options.pageCount} 页（请据此控制目录章节数量和深度）`);
+  // 目标字数 + 页数：让 AI 据此控制目录章节数量和每章深度，避免章节过多导致内容稀释或过少导致每章过长
+  const estimatedFromPages = options.pageCount ? options.pageCount * 800 : 0;
+  const estimatedTotal = options.targetWords || estimatedFromPages;
+  if (options.pageCount) {
+    parts.push(`目标页数：约 ${options.pageCount} 页（按每页约 800 字估算，全篇约 ${estimatedFromPages} 字）`);
+  }
+  if (options.targetWords) {
+    parts.push(`全篇目标字数：约 ${options.targetWords} 字`);
+  }
+  if (estimatedTotal) {
+    // 按每章约 1000-1500 字估算叶子节点数量范围，给 AI 明确的章节体量指引
+    const minLeaves = Math.max(3, Math.ceil(estimatedTotal / 1500));
+    const maxLeaves = Math.max(minLeaves, Math.ceil(estimatedTotal / 800));
+    parts.push(`篇幅规划：请控制目录叶子节点数量在 ${minLeaves}-${maxLeaves} 个之间，使每章正文字数约 ${Math.floor(estimatedTotal / Math.max(minLeaves, 1))}-${Math.floor(estimatedTotal / Math.max(maxLeaves, 1))} 字，避免章节过碎或过粗`);
+  }
   parts.push(`\n参考大纲模板：\n${buildOutlineTemplateMarkdown(reportType, reportTypeName)}`);
   const standardsBlock = buildReferenceStandardsMarkdown(reportType, projectInfo.industry);
   if (standardsBlock) parts.push(`\n${standardsBlock}`);
@@ -156,23 +170,27 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   return parts.join('\n');
 }
 
-function buildContentSystemPrompt(reportType, documentStyle, reportTypeName) {
+function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, minWords) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
+  const floor = Number.isFinite(minWords) && minWords > 0 ? minWords : 800;
   return `你是一名专业的${label}写作专家。请根据目录节点标题和描述，生成专业、详实的报告正文。
 
 写作规则：
 1. 使用 Markdown 格式
 2. 语言正式、专业，符合报告文体
 3. 信息来源策略（重要）：
-   - 如果下方提供了知识库资料，必须优先使用其中的真实数据、案例和表述，不得编造与资料冲突的内容
+   - 优先级：知识库资料 > 模型联网查询结果 > AI 行业经验预估
+   - 如果下方提供了知识库资料，必须优先引用其中的真实数据、案例和表述，不得编造与资料冲突的内容
    - 对于资料中已有的具体数值（如排放量、营收、人数等），直接引用资料数据
-   - 只有在资料中确实没有相关数据时，才使用占位符（如[XX]吨、[XX]%）供用户后续填入，并在占位符旁标注需要填入的数据类型
-   - 严禁凭空编造企业的具体经营数据、排放数据、人员数据等事实性信息
-4. 每个章节不少于800字
+   - 若知识库无相关数据且已启用联网搜索，调用联网工具核实企业基本信息（工商信息、行业地位、规模量级等），引用查询结果
+   - 若知识库与联网均无该数据，基于行业经验给出合理预估数值写入正文
+   - 严禁使用 [XX]、[待填] 等占位符
+   - 严禁编造精确到个位数的具体数字伪装成真实数据；估算值应给出量级（如「约 5000 吨」）而非虚假精确值
+4. 每个章节正文不少于 ${floor} 字（不含表格、列表中的纯数据），需围绕章节主题充分展开
 5. 适当使用表格、列表增强可读性
 6. 如涉及标准引用，标注标准名称（如GRI 305、ISO 14064等）；如涉及行业议题，结合下方提供的行业议题说明进行展开
-7. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有占位符
+7. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有估算值
 8. 写作风格：${styleGuidance}`;
 }
 
@@ -184,7 +202,15 @@ function buildContentUserInstruction(node, projectInfo, reportType, options = {}
   if (projectInfo.companyName) parts.push(`企业名称：${projectInfo.companyName}`);
   if (projectInfo.industry) parts.push(`所属行业：${projectInfo.industry}`);
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
-  if (options.pageCount) parts.push(`目标生成页数：${options.pageCount} 页`);
+  // 篇幅硬约束：每章目标字数（按全篇目标字数 / 叶子节点数 摊分）+ 页数软指引
+  if (options.chapterTargetWords) {
+    parts.push(`本章目标字数：约 ${options.chapterTargetWords} 字（不少于此字数，请充分展开论述）`);
+  } else if (options.targetWords) {
+    parts.push(`全篇目标字数：约 ${options.targetWords} 字（请保证本章内容充实，按比例完成篇幅）`);
+  }
+  if (options.pageCount) {
+    parts.push(`全篇目标页数：约 ${options.pageCount} 页`);
+  }
   // 注入行业议题，帮助 AI 理解该章节应涵盖的内容
   const industryTopicsBlock = buildIndustryTopicsMarkdown(projectInfo.industry);
   if (industryTopicsBlock) parts.push(`\n${industryTopicsBlock}`);

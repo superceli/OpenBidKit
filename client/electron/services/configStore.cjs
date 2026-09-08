@@ -38,6 +38,7 @@ const defaultTextModelProfiles = {
     base_url: textProviderBaseUrls.jinlong,
     model_name: 'gpt-3.5-turbo',
     multimodal_enabled: false,
+    web_search_enabled: true,
     reasoning_effort: '',
     context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
     concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -50,6 +51,7 @@ const defaultTextModelProfiles = {
     base_url: textProviderBaseUrls.volcengine,
     model_name: '',
     multimodal_enabled: false,
+    web_search_enabled: true,
     reasoning_effort: '',
     context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
     concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -62,6 +64,7 @@ const defaultTextModelProfiles = {
     base_url: textProviderBaseUrls.deepseek,
     model_name: '',
     multimodal_enabled: false,
+    web_search_enabled: true,
     reasoning_effort: '',
     context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
     concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -74,6 +77,7 @@ const defaultTextModelProfiles = {
     base_url: textProviderBaseUrls.agnes,
     model_name: '',
     multimodal_enabled: false,
+    web_search_enabled: true,
     reasoning_effort: '',
     context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
     concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -86,6 +90,7 @@ const defaultTextModelProfiles = {
     base_url: '',
     model_name: '',
     multimodal_enabled: false,
+    web_search_enabled: true,
     reasoning_effort: '',
     context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
     concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -254,6 +259,7 @@ const defaultConfig = {
   base_url: textProviderBaseUrls.jinlong,
   model_name: 'gpt-3.5-turbo',
   multimodal_enabled: false,
+  web_search_enabled: true,
   reasoning_effort: '',
   context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT,
   concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT,
@@ -340,6 +346,11 @@ function normalizeTextMultimodalEnabled(value, fallback = false) {
   return value === undefined ? fallback : Boolean(value);
 }
 
+// 归一化文本模型联网搜索开关，旧配置缺失时默认开启。
+function normalizeWebSearchEnabled(value, fallback = true) {
+  return value === undefined ? fallback : Boolean(value);
+}
+
 // 归一化文本模型思考强度，空字符串表示不发送该参数。
 function normalizeReasoningEffort(value, fallback = '') {
   return value === undefined || value === null ? fallback : String(value).trim();
@@ -390,6 +401,7 @@ function normalizeTextModelProfile(provider, profile) {
     base_url: sourceBaseUrl,
     model_name: source.model_name !== undefined ? source.model_name : defaults.model_name,
     multimodal_enabled: normalizeTextMultimodalEnabled(source.multimodal_enabled, defaults.multimodal_enabled),
+    web_search_enabled: normalizeWebSearchEnabled(source.web_search_enabled, defaults.web_search_enabled),
     reasoning_effort: normalizeReasoningEffort(source.reasoning_effort, defaults.reasoning_effort),
     context_length_limit: normalizeTextContextLengthLimit(source.context_length_limit, defaults.context_length_limit),
     concurrency_limit: normalizeTextConcurrencyLimit(source.concurrency_limit, defaults.concurrency_limit),
@@ -419,6 +431,7 @@ function textProfileFromFlatConfig(source, fallback, provider) {
     base_url: sourceBaseUrl,
     model_name: source.model_name !== undefined ? source.model_name : fallback.model_name,
     multimodal_enabled: normalizeTextMultimodalEnabled(source.multimodal_enabled, fallback.multimodal_enabled),
+    web_search_enabled: normalizeWebSearchEnabled(source.web_search_enabled, fallback.web_search_enabled),
     reasoning_effort: normalizeReasoningEffort(source.reasoning_effort, fallback.reasoning_effort),
     context_length_limit: normalizeTextContextLengthLimit(source.context_length_limit !== undefined ? source.context_length_limit : fallback.context_length_limit, fallback.context_length_limit),
     concurrency_limit: normalizeTextConcurrencyLimit(source.concurrency_limit !== undefined ? source.concurrency_limit : fallback.concurrency_limit, fallback.concurrency_limit),
@@ -454,6 +467,7 @@ function textProfileFromUnknownProvider(source, sourceProvider, fallback) {
     base_url: pickTextProfileField(source.base_url, selectedProfile?.base_url, fallback.base_url),
     model_name: pickTextProfileField(source.model_name, selectedProfile?.model_name, fallback.model_name),
     multimodal_enabled: normalizeTextMultimodalEnabled(source.multimodal_enabled ?? selectedProfile?.multimodal_enabled, fallback.multimodal_enabled),
+    web_search_enabled: normalizeWebSearchEnabled(source.web_search_enabled ?? selectedProfile?.web_search_enabled, fallback.web_search_enabled),
     reasoning_effort: normalizeReasoningEffort(source.reasoning_effort ?? selectedProfile?.reasoning_effort, fallback.reasoning_effort),
     context_length_limit: normalizeTextContextLengthLimit(pickTextProfileField(source.context_length_limit, selectedProfile?.context_length_limit, fallback.context_length_limit), fallback.context_length_limit),
     concurrency_limit: normalizeTextConcurrencyLimit(pickTextProfileField(source.concurrency_limit, selectedProfile?.concurrency_limit, fallback.concurrency_limit), fallback.concurrency_limit),
@@ -720,6 +734,7 @@ function normalizeConfig(config) {
     base_url: activeTextProfile.base_url,
     model_name: activeTextProfile.model_name,
     multimodal_enabled: activeTextProfile.multimodal_enabled,
+    web_search_enabled: activeTextProfile.web_search_enabled,
     reasoning_effort: activeTextProfile.reasoning_effort,
     context_length_limit: activeTextProfile.context_length_limit,
     concurrency_limit: activeTextProfile.concurrency_limit,
@@ -791,7 +806,8 @@ function createConfigStore(app) {
       }
 
       try {
-        const raw = fs.readFileSync(configFile, 'utf-8');
+        // 兼容外部编辑器写入的 UTF-8 BOM，避免 JSON.parse 失败导致数据库初始化中断
+        const raw = fs.readFileSync(configFile, 'utf-8').replace(/^\uFEFF/, '');
         const parsedConfig = JSON.parse(raw);
         const config = normalizeConfig(parsedConfig);
         const nextConfig = withAnalyticsIdentity(config);
@@ -807,7 +823,7 @@ function createConfigStore(app) {
     save(config) {
       try {
         const currentConfig = fs.existsSync(configFile)
-          ? normalizeConfig(JSON.parse(fs.readFileSync(configFile, 'utf-8')))
+          ? normalizeConfig(JSON.parse(fs.readFileSync(configFile, 'utf-8').replace(/^\uFEFF/, '')))
           : normalizeConfig();
         const nextConfig = withAnalyticsIdentity(normalizeConfig({
           ...currentConfig,

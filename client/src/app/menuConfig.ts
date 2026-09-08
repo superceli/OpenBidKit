@@ -48,11 +48,6 @@ export const appMenuItems: AppMenuItem[] = [
     label: '插件管理',
     description: '安装和管理插件，扩展软件功能',
   },
-  {
-    id: 'settings',
-    label: '设置',
-    description: 'AI 配置、关于与系统偏好',
-  },
 ];
 
 const developerMenuItems: AppMenuItem[] = [

@@ -7,6 +7,7 @@ export interface TextModelConfig {
   base_url: string;
   model_name: string;
   multimodal_enabled: boolean;
+  web_search_enabled: boolean;
   reasoning_effort: string;
   context_length_limit: number;
   concurrency_limit: number;

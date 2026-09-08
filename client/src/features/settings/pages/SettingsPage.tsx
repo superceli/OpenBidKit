@@ -84,11 +84,11 @@ const DEFAULT_TEXT_CONCURRENCY_LIMIT = 10;
 const DEFAULT_TEXT_TEMPERATURE = 0.7;
 
 const textProviderDefaults: Record<TextModelProvider, TextModelConfig> = {
-  jinlong: { api_key: '', base_url: 'https://jlaudeapi.com/v1', model_name: 'gpt-3.5-turbo', multimodal_enabled: false, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
-  volcengine: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model_name: '', multimodal_enabled: false, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
-  deepseek: { api_key: '', base_url: 'https://api.deepseek.com', model_name: '', multimodal_enabled: false, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
-  agnes: { api_key: '', base_url: 'https://apihub.agnes-ai.com/v1', model_name: '', multimodal_enabled: false, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
-  custom: { api_key: '', base_url: '', model_name: '', multimodal_enabled: false, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
+  jinlong: { api_key: '', base_url: 'https://jlaudeapi.com/v1', model_name: 'gpt-3.5-turbo', multimodal_enabled: false, web_search_enabled: true, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
+  volcengine: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model_name: '', multimodal_enabled: false, web_search_enabled: true, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
+  deepseek: { api_key: '', base_url: 'https://api.deepseek.com', model_name: '', multimodal_enabled: false, web_search_enabled: true, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
+  agnes: { api_key: '', base_url: 'https://apihub.agnes-ai.com/v1', model_name: '', multimodal_enabled: false, web_search_enabled: true, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
+  custom: { api_key: '', base_url: '', model_name: '', multimodal_enabled: false, web_search_enabled: true, reasoning_effort: '', context_length_limit: DEFAULT_TEXT_CONTEXT_LENGTH_LIMIT, concurrency_limit: DEFAULT_TEXT_CONCURRENCY_LIMIT, temperature_enabled: false, temperature: DEFAULT_TEXT_TEMPERATURE, request_mode: 'stream' },
 };
 
 const textProviderApiKeyUrls: Partial<Record<TextModelProvider, string>> = {
@@ -151,6 +151,7 @@ function normalizeTextModelProfile(provider: TextModelProvider, profile?: Partia
     base_url: baseUrl,
     model_name: profile?.model_name ?? defaults.model_name,
     multimodal_enabled: profile?.multimodal_enabled ?? defaults.multimodal_enabled,
+    web_search_enabled: profile?.web_search_enabled ?? defaults.web_search_enabled,
     reasoning_effort: profile?.reasoning_effort?.trim() ?? defaults.reasoning_effort,
     context_length_limit: normalizeTextContextLengthLimit(profile?.context_length_limit ?? defaults.context_length_limit),
     concurrency_limit: normalizeTextConcurrencyLimit(profile?.concurrency_limit ?? defaults.concurrency_limit),
@@ -175,6 +176,7 @@ function textProfileFromState(textModel: SettingsPageState['textModel']): TextMo
     base_url: textModel.provider === 'custom' ? textModel.base_url : textProviderDefaults[textModel.provider].base_url,
     model_name: textModel.model_name,
     multimodal_enabled: textModel.multimodal_enabled,
+    web_search_enabled: textModel.web_search_enabled,
     reasoning_effort: textModel.reasoning_effort.trim(),
     context_length_limit: normalizeTextContextLengthLimit(textModel.context_length_limit),
     concurrency_limit: normalizeTextConcurrencyLimit(textModel.concurrency_limit),
@@ -747,6 +749,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       base_url: activeTextProfile.base_url,
       model_name: activeTextProfile.model_name,
       multimodal_enabled: activeTextProfile.multimodal_enabled,
+      web_search_enabled: activeTextProfile.web_search_enabled,
       reasoning_effort: activeTextProfile.reasoning_effort,
       context_length_limit: activeTextProfile.context_length_limit,
       concurrency_limit: activeTextProfile.concurrency_limit,
@@ -1820,6 +1823,15 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 <AppSwitch aria-label="支持多模态" checked={state.textModel.multimodal_enabled} onCheckedChange={(checked) => updateTextModelConfig({ multimodal_enabled: checked })} />
               </div>
             </div>
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <strong>启用联网搜索</strong>
+                <span>开启后 AI 在生成正文时会尝试联网查询企业资料；模型不支持时自动降级为行业经验预估</span>
+              </div>
+              <div className="settings-action-cell">
+                <AppSwitch aria-label="启用联网搜索" checked={state.textModel.web_search_enabled} onCheckedChange={(checked) => updateTextModelConfig({ web_search_enabled: checked })} />
+              </div>
+            </div>
             <label className="settings-row">
               <div className="settings-row-copy">
                 <strong>模型思考强度</strong>
@@ -2407,17 +2419,6 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
             <article className="about-info-card about-links-card">
               <span>信息与授权</span>
               <ul className="about-links-list">
-                <li className="about-links-item">
-                  <span className="about-links-label">GitHub 仓库</span>
-                  <a
-                    className="about-links-value is-link"
-                    href="https://github.com/superceli/OpenBidKit"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    superceli/OpenBidKit
-                  </a>
-                </li>
                 <li className="about-links-item">
                   <span className="about-links-label">使用文档</span>
                   <a

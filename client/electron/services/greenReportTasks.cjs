@@ -58,7 +58,7 @@ async function runGreenReportOutlineTask({
   checkpointTask,
   taskControl,
 }) {
-  const { reportType, reportTypeName, projectInfo, pageCount, documentStyle, userRequirements } = payload;
+  const { reportType, reportTypeName, projectInfo, pageCount, documentStyle, targetWords, userRequirements } = payload;
 
   let logs = ['正在生成目录...'];
   let task = checkpointTask({ status: 'running', progress: 5, logs }).task;
@@ -74,6 +74,8 @@ async function runGreenReportOutlineTask({
   const knowledgeContext = await resolveKnowledgeContext({ payload, knowledgeBaseService, publish });
   if (knowledgeContext?.items?.length) {
     publish(`已从知识库匹配 ${knowledgeContext.items.length} 条资料`, 15);
+  } else if (aiService.isWebSearchEnabled?.()) {
+    publish('未检索到知识库资料，AI 将联网查询企业资料', 15);
   } else {
     publish('未检索到知识库资料，将基于通用模板生成', 15);
   }
@@ -84,6 +86,7 @@ async function runGreenReportOutlineTask({
   const userPrompt = buildOutlineUserInstruction(reportType, projectInfo, {
     pageCount,
     documentStyle,
+    targetWords,
     knowledgeContext,
     userRequirements,
   }, reportTypeName);
@@ -122,7 +125,7 @@ async function runGreenReportContentTask({
   checkpointTask,
   taskControl,
 }) {
-  const { reportType, reportTypeName, projectInfo, pageCount, documentStyle, userRequirements } = payload;
+  const { reportType, reportTypeName, projectInfo, pageCount, documentStyle, targetWords, userRequirements } = payload;
   const state = workspaceStore.loadState();
   const leaves = collectLeaves(state.outlineData?.outline || []);
 
@@ -144,13 +147,25 @@ async function runGreenReportContentTask({
   const knowledgeContext = await resolveKnowledgeContext({ payload, knowledgeBaseService, publish });
   if (knowledgeContext?.items?.length) {
     publish(`已从知识库匹配 ${knowledgeContext.items.length} 条资料`, 5);
+  } else if (aiService.isWebSearchEnabled?.()) {
+    publish('未检索到知识库资料，AI 将联网查询企业资料', 5);
   } else {
-    publish('未检索到知识库资料，生成内容将使用占位符供后续填写', 5);
+    publish('未检索到知识库资料，将基于行业经验预估生成内容', 5);
   }
 
-  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName);
+  // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，作为每章字数下限
+  const numericTargetWords = Number(targetWords);
+  const perChapterTarget = Number.isFinite(numericTargetWords) && numericTargetWords > 0 && leaves.length > 0
+    ? Math.max(800, Math.floor(numericTargetWords / leaves.length))
+    : 0;
+  if (perChapterTarget) {
+    publish(`全篇目标 ${numericTargetWords} 字，共 ${leaves.length} 章，每章目标约 ${perChapterTarget} 字`, 6);
+  }
+
+  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName, perChapterTarget);
   const total = leaves.length;
   let completed = 0;
+  let webSearchDowngradePublished = false;
 
   for (const leaf of leaves) {
     if (taskControl.signal.aborted) {
@@ -163,6 +178,8 @@ async function runGreenReportContentTask({
       documentStyle,
       knowledgeContext,
       pageCount,
+      targetWords,
+      chapterTargetWords: perChapterTarget,
       userRequirements,
     }, reportTypeName);
     const result = await aiService.chat({
@@ -170,6 +187,12 @@ async function runGreenReportContentTask({
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
+      onWebSearchDowngrade: () => {
+        if (!webSearchDowngradePublished) {
+          webSearchDowngradePublished = true;
+          publish('联网查询失败，将基于行业经验预估生成内容', Math.round((completed / total) * 100));
+        }
+      },
     });
 
     const content = typeof result === 'string'

@@ -176,6 +176,7 @@ const bridge = {
     saveOutline: (payload) => ipcRenderer.invoke('green-report:save-outline', payload),
     saveChapterContent: (payload) => ipcRenderer.invoke('green-report:save-chapter-content', payload),
     clear: () => ipcRenderer.invoke('green-report:clear'),
+    generateReportCode: () => ipcRenderer.invoke('green-report:generate-report-code'),
   },
   templates: {
     list: () => ipcRenderer.invoke('templates:list'),

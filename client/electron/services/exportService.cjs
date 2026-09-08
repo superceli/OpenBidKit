@@ -2353,6 +2353,7 @@ async function buildDocxResult(payload, options = {}) {
   };
   const doc = new Document({
     ...(numbering ? { numbering } : {}),
+    updateFields: true,
     styles: {
       default: {
         document: {
@@ -2389,7 +2390,7 @@ async function buildDocxBuffer(payload, options = {}) {
   return result.buffer;
 }
 
-function createExportService({ configStore, openXmlHelperService, app: appRef } = {}) {
+function createExportService({ configStore, openXmlHelperService, aiService, app: appRef } = {}) {
   return {
     async exportWord(payload = {}, onProgress) {
       const stats = countOutlineStats(Array.isArray(payload.outline) ? payload.outline : []);
@@ -2463,6 +2464,15 @@ function createExportService({ configStore, openXmlHelperService, app: appRef } 
               '编制单位': coverFields.compileUnit || '',
               '编制日期': coverFields.compileDate || '',
             };
+            let frontMatter = null;
+            try {
+              frontMatter = aiService
+                ? await generateFrontMatterByAi(aiService, payload)
+                : buildGreenReportFrontMatter(payload);
+            } catch (err) {
+              compactLogError('[export] AI 生成前置页失败，回退默认', err);
+              frontMatter = buildGreenReportFrontMatter(payload);
+            }
             await openXmlHelperService.runJob({
               action: 'merge-documents',
               request: {
@@ -2470,6 +2480,7 @@ function createExportService({ configStore, openXmlHelperService, app: appRef } 
                 coverFields: coverFieldsMap,
                 bodyDoc: tempBodyPath,
                 output: result.filePath,
+                frontMatter,
               },
               timeoutMs: 60000,
             });
@@ -2617,8 +2628,248 @@ function createExportService({ configStore, openXmlHelperService, app: appRef } 
   };
 }
 
+/** 中文数字 1-99（用于"第X章"）。 */
+const CN_NUMS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+function toChineseNum(n) {
+  if (n <= 10) return CN_NUMS[n - 1];
+  if (n < 20) return '十' + CN_NUMS[n - 11];
+  const tens = Math.floor(n / 10);
+  const ones = n % 10;
+  return CN_NUMS[tens - 1] + '十' + (ones ? CN_NUMS[ones - 1] : '');
+}
+
+/**
+ * 给目录条目加书籍式序号：
+ * - 一级：第X章（中文数字，如"第一章"）
+ * - 二级：章号.节号（如"1.1"、"1.2"）
+ * - 三级：章号.节号.小节号（如"1.1.1"）
+ * 若标题已带对应序号则不重复添加。
+ */
+function addTocNumbering(entries) {
+  let chapterIdx = 0;
+  let sectionIdx = 0;
+  let subsectionIdx = 0;
+  return entries.map((e) => {
+    const level = e.level || 1;
+    let title = e.title || '';
+    if (level === 1) {
+      chapterIdx++;
+      sectionIdx = 0;
+      subsectionIdx = 0;
+      if (!/^第[一二三四五六七八九十百千]+章/.test(title.trim())) {
+        title = `第${toChineseNum(chapterIdx)}章 ${title}`;
+      }
+    } else if (level === 2) {
+      sectionIdx++;
+      subsectionIdx = 0;
+      const prefix = `${chapterIdx}.${sectionIdx}`;
+      if (!new RegExp(`^${prefix.replace(/\./g, '\\.')}\\s`).test(title.trim())) {
+        title = `${prefix} ${title}`;
+      }
+    } else if (level >= 3) {
+      subsectionIdx++;
+      const prefix = `${chapterIdx}.${sectionIdx}.${subsectionIdx}`;
+      if (!new RegExp(`^${prefix.replace(/\./g, '\\.')}\\s`).test(title.trim())) {
+        title = `${prefix} ${title}`;
+      }
+    }
+    return { ...e, title };
+  });
+}
+
+/**
+ * 兜底版前置页数据（不调用 AI，用于 AI 失败或未注入时）。
+ */
+function buildGreenReportFrontMatter(payload) {
+  const coverFields = payload.cover_fields || {};
+  const reportTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
+  const reportScope = payload.report_scope || '';
+  const reportingPeriod = payload.reporting_period || '';
+  const companyName = payload.company_name || '';
+  const compileUnit = coverFields.compileUnit || '';
+  const clientUnit = coverFields.clientUnit || companyName;
+  const reportCode = coverFields.reportCode || '';
+  const compileDate = coverFields.compileDate || '';
+  const outline = Array.isArray(payload.outline) ? payload.outline : [];
+
+  const flatTitles = [];
+  const walk = (items, depth = 1) => {
+    items.forEach((it) => {
+      flatTitles.push({ level: depth, title: it.title || '', page: '' });
+      if (it.children?.length) walk(it.children, depth + 1);
+    });
+  };
+  walk(outline);
+
+  return {
+    compilationNotes: {
+      title: '编制说明',
+      paragraphs: [
+        { label: '报告范围', value: reportScope || '本报告覆盖企业年度运营活动及相关可持续发展议题。' },
+        { label: '编制依据', value: 'GRI 标准（2021）、SASB 标准、TCFD 气候相关财务信息披露建议、ISO 26000 社会责任指南' },
+        { label: '编制方法', value: '本报告依据上述标准编制，数据来源包括企业内部统计记录、第三方核查报告及公开披露信息。' },
+        { label: '报告期', value: reportingPeriod || '见封面标注' },
+      ],
+    },
+    toc: { title: '目录', entries: [{ level: 1, title: '编制说明', page: '' }, ...addTocNumbering(flatTitles.map((t) => ({ level: t.depth, title: t.title, page: '' })))] },
+    signingPage: {
+      title: '第三方编制信息及签章页',
+      preamble: `本报告由 ${compileUnit || '编制单位'} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`,
+      infoRows: [
+        { label: '报告名称', value: reportTitle },
+        { label: '委托单位', value: clientUnit },
+        { label: '编制单位', value: compileUnit },
+        { label: '报告编号', value: reportCode },
+        { label: '编制日期', value: compileDate },
+        { label: '报告有效期', value: '自签发之日起一年' },
+      ],
+      clientParty: {
+        header: '委托单位（盖章）',
+        unitName: clientUnit,
+        sealHint: '（此处加盖单位公章）',
+        signatureLabel: '法定代表人/授权代表（签字）：',
+        dateLabel: '日期：',
+      },
+      prepareParty: {
+        header: '编制单位（盖章）',
+        unitName: compileUnit,
+        sealHint: '（此处加盖单位公章）',
+        signatureLabel: '法定代表人/授权代表（签字）：',
+        dateLabel: '日期：',
+      },
+    },
+  };
+}
+
+/**
+ * 调用 AI 生成绿色报告前置页内容（编制说明、目录、签章页描述）。
+ */
+async function generateFrontMatterByAi(aiService, payload) {
+  const coverFields = payload.cover_fields || {};
+  const reportTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
+  const reportScope = payload.report_scope || '';
+  const reportingPeriod = payload.reporting_period || '';
+  const companyName = payload.company_name || '';
+  const compileUnit = coverFields.compileUnit || '';
+  const clientUnit = coverFields.clientUnit || companyName;
+  const reportCode = coverFields.reportCode || '';
+  const compileDate = coverFields.compileDate || '';
+  const outline = Array.isArray(payload.outline) ? payload.outline : [];
+
+  // 扁平化 outline 为标题层级列表（供 AI 生成目录）
+  const flatTitles = [];
+  const walk = (items, depth = 1) => {
+    items.forEach((it) => {
+      flatTitles.push({ depth, title: it.title || '' });
+      if (it.children?.length) walk(it.children, depth + 1);
+    });
+  };
+  walk(outline);
+
+  const systemPrompt = '你是一名资深 ESG/绿色报告编制专家，熟悉 GRI 2021、SASB、TCFD、ISO 26000、ISO 14064、GHG Protocol 等可持续发展与温室气体核算标准。请根据用户输入生成结构化 JSON，只返回 JSON 不要 Markdown 代码块。';
+  const userPrompt = `请为绿色报告生成前置页（编制说明、目录、签章页描述），返回 JSON。
+
+【报告信息】
+- 报告类型：${reportTitle}
+- 企业/组织名称：${companyName}
+- 委托单位：${clientUnit}
+- 编制单位：${compileUnit}
+- 报告编号：${reportCode}
+- 编制日期：${compileDate}
+- 报告期：${reportingPeriod}
+- 报告范围：${reportScope || '请根据报告类型合理拟定'}
+
+【报告目录结构（JSON 数组，depth 为层级 1=章 2=节）】
+${JSON.stringify(flatTitles)}
+
+【输出 JSON 格式】
+{
+  "compilationNotes": {
+    "title": "编制说明",
+    "paragraphs": [
+      {"label": "报告范围", "value": "说明本报告覆盖的组织边界、运营边界和时间范围，结合企业名称和报告类型"},
+      {"label": "编制依据", "value": "根据报告类型列出适用标准：ESG报告列GRI 2021/SASB/TCFD；碳足迹报告列ISO 14064/GHG Protocol；环境影响报告列HJ 2.1等；通用列ISO 26000"},
+      {"label": "编制方法", "value": "说明数据来源（企业内部统计、第三方核查、公开披露）和编制原则（独立、客观、公正）"},
+      {"label": "报告期", "value": "${reportingPeriod || '报告期为封面标注的年度'}"},
+      {"label": "其他说明", "value": "说明报告中的数据口径、免责声明等"}
+    ]
+  },
+  "tocEntries": [
+    {"level": 1, "title": "原目录一级标题", "page": ""},
+    {"level": 2, "title": "原目录二级标题", "page": ""}
+  ],
+  "signingPreamble": "本报告由 编制单位名称 接受 委托单位名称 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。"
+}
+
+【要求】
+1. compilationNotes.paragraphs 必须包含上面5个label，value 要具体专业、结合报告类型和企业信息，不要空泛
+2. tocEntries 直接从上面的目录结构转换：depth→level，title 原样保留，page 一律留空字符串
+3. signingPreamble 用实际的委托单位和编制单位名称，2-3句正式声明
+4. 只返回 JSON，不要任何解释文字或 Markdown 代码块`;
+
+  const aiResult = await aiService.requestJson({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+  });
+
+  const compilationNotes = aiResult?.compilationNotes || {
+    title: '编制说明',
+    paragraphs: [
+      { label: '报告范围', value: reportScope || '本报告覆盖企业年度运营活动。' },
+      { label: '编制依据', value: 'GRI 标准、SASB 标准、TCFD 建议' },
+      { label: '编制方法', value: '依据上述标准编制。' },
+      { label: '报告期', value: reportingPeriod || '见封面' },
+    ],
+  };
+
+  // 目录直接从 outline 完整结构生成，不依赖 AI 的 tocEntries（AI 可能简化层级）
+  let tocEntries = addTocNumbering(flatTitles.map((t) => ({ level: t.depth, title: t.title, page: '' })));
+  // 编制说明作为目录第一项
+  tocEntries.unshift({ level: 1, title: '编制说明', page: '' });
+
+  const signingPreamble = aiResult?.signingPreamble || `本报告由 ${compileUnit || '编制单位'} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`;
+
+  const toc = {
+    title: '目录',
+    entries: tocEntries,
+  };
+
+  const signingPage = {
+    title: '第三方编制信息及签章页',
+    preamble: signingPreamble,
+    infoRows: [
+      { label: '报告名称', value: reportTitle },
+      { label: '委托单位', value: clientUnit },
+      { label: '编制单位', value: compileUnit },
+      { label: '报告编号', value: reportCode },
+      { label: '编制日期', value: compileDate },
+      { label: '报告有效期', value: '自签发之日起一年' },
+    ],
+    clientParty: {
+      header: '委托单位（盖章）',
+      unitName: clientUnit,
+      sealHint: '（此处加盖单位公章）',
+      signatureLabel: '法定代表人/授权代表（签字）：',
+      dateLabel: '日期：',
+    },
+    prepareParty: {
+      header: '编制单位（盖章）',
+      unitName: compileUnit,
+      sealHint: '（此处加盖单位公章）',
+      signatureLabel: '法定代表人/授权代表（签字）：',
+      dateLabel: '日期：',
+    },
+  };
+
+  return { compilationNotes, toc, signingPage };
+}
+
 module.exports = {
   buildDocxBuffer,
   buildDocxResult,
+  buildGreenReportFrontMatter,
+  generateFrontMatterByAi,
   createExportService,
 };

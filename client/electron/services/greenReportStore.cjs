@@ -290,12 +290,11 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return { success: true };
   }
 
-  // 生成唯一报告编号 WTHB-ESG-YYYYMM-NNNN，顺序号在单行 meta 上原子递增。
+  // 生成唯一报告编号 WTHB-YYYY0-NNNNN-XYZ，顺序号+随机3位后缀防碰撞。
+  // 格式参考市面上绿色报告通用编号：WTHB-20260-00001-A7F
   function generateReportCode() {
     const nowDate = new Date();
     const yyyy = nowDate.getFullYear();
-    const mm = String(nowDate.getMonth() + 1).padStart(2, '0');
-    const yearMonth = `${yyyy}${mm}`;
     const ts = nowDate.toISOString();
     // 不存在则插入 seq=1，存在则递增；RETURNING 返回最新 seq。
     const info = db.prepare(`INSERT INTO green_report_meta (id, step, report_type, project_info_json, target_words, page_count, document_style, report_seq, created_at, updated_at)
@@ -303,8 +302,14 @@ function createGreenReportStore({ app, db, taskLogStore }) {
       ON CONFLICT(id) DO UPDATE SET report_seq = report_seq + 1, updated_at = excluded.updated_at
       RETURNING report_seq`).get(ts, ts);
     const seq = info?.report_seq ?? 1;
-    const seqPadded = String(seq).padStart(4, '0');
-    return `WTHB-ESG-${yearMonth}-${seqPadded}`;
+    const seqPadded = String(seq).padStart(5, '0');
+    // 随机3位后缀（大写字母+数字），防碰撞
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let suffix = '';
+    for (let i = 0; i < 3; i++) {
+      suffix += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return `WTHB-${yyyy}0-${seqPadded}-${suffix}`;
   }
 
   return {

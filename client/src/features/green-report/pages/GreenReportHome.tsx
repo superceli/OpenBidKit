@@ -178,7 +178,10 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       if (!reportCode) {
         reportCode = await window.lvcert?.greenReport?.generateReportCode();
       }
-      const compileDate = state.projectInfo.compileDate || new Date().toISOString().slice(0, 10);
+      // 编制日期格式为"YYYY年M月"（不到具体日）
+      const rawDate = state.projectInfo.compileDate || new Date().toISOString().slice(0, 10);
+      const dateObj = new Date(rawDate);
+      const compileDate = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月`;
       // 报告标题用用户勾选的报告类型名称（如"ESG（环境、社会、公司治理）报告"）
       const reportType = findReportTypeById(state.reportType);
       const reportTitle = reportType?.name || '绿色报告';
@@ -196,6 +199,10 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
           compileDate,
           reportTitle,
         },
+        reporting_period: state.projectInfo.reportingPeriod || '',
+        report_scope: state.projectInfo.reportScope || '',
+        company_name: state.projectInfo.companyName || '',
+        report_type_name: reportTitle,
       });
       if (result.success && result.path) {
         setWordExportProgress((prev) => ({ ...prev, filePath: result.path as string }));

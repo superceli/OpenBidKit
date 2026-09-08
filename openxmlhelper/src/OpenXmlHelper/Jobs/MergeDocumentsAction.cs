@@ -14,6 +14,63 @@ sealed class MergeDocumentsRequest
     public Dictionary<string, string> CoverFields { get; set; } = new();
     public string BodyDoc { get; set; } = "";
     public string Output { get; set; } = "";
+    public FrontMatterRequest? FrontMatter { get; set; }
+}
+
+sealed class FrontMatterRequest
+{
+    public FrontMatterPage? CompilationNotes { get; set; }
+    public TocPageRequest? Toc { get; set; }
+    public SigningPageRequest? SigningPage { get; set; }
+}
+
+sealed class FrontMatterPage
+{
+    public string Title { get; set; } = "";
+    public List<FrontMatterParagraph> Paragraphs { get; set; } = new();
+}
+
+sealed class FrontMatterParagraph
+{
+    public string Label { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+sealed class TocPageRequest
+{
+    public string Title { get; set; } = "目录";
+    public List<TocEntry> Entries { get; set; } = new();
+}
+
+sealed class TocEntry
+{
+    public int Level { get; set; } = 1;
+    public string Title { get; set; } = "";
+    public string Page { get; set; } = "";
+}
+
+sealed class SigningPageRequest
+{
+    public string Title { get; set; } = "";
+    public string Preamble { get; set; } = "";
+    public List<SigningInfoRow> InfoRows { get; set; } = new();
+    public SigningParty ClientParty { get; set; } = new();
+    public SigningParty PrepareParty { get; set; } = new();
+}
+
+sealed class SigningInfoRow
+{
+    public string Label { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+sealed class SigningParty
+{
+    public string Header { get; set; } = "";
+    public string UnitName { get; set; } = "";
+    public string SealHint { get; set; } = "（此处加盖单位公章）";
+    public string SignatureLabel { get; set; } = "法定代表人/授权代表（签字）：";
+    public string DateLabel { get; set; } = "日期：";
 }
 
 /// <summary>把封面 docx 的两个 section（封面、尾页）插入到正文 docx 前后，并回显封面字段。</summary>
@@ -74,6 +131,17 @@ static class MergeDocumentsAction
             {
                 var sectPara = new Wp.Paragraph(new Wp.ParagraphProperties((Wp.SectionProperties)frontSectPr.CloneNode(true)));
                 destBody.InsertAt(sectPara, insertPos);
+                insertPos++;
+            }
+
+            // 插入前置页（编制说明、目录、签章页），位于封面之后、正文之前
+            if (request.FrontMatter is not null)
+            {
+                foreach (var block in BuildFrontMatterBlocks(request.FrontMatter))
+                {
+                    destBody.InsertAt(block, insertPos);
+                    insertPos++;
+                }
             }
 
             // 把正文 body 末尾 sectPr（1440 边距等）提升为段落级 sectPr，
@@ -230,18 +298,11 @@ static class MergeDocumentsAction
         var newRun = new Wp.Run();
         if (lastRun?.RunProperties is not null)
         {
+            // 字段值继承标签 run 的字体/字号属性，不加粗
             var props = (Wp.RunProperties)lastRun.RunProperties.CloneNode(true);
-            // 字段值显式加粗，让回显内容视觉上和标签区分/突出
-            if (props.GetFirstChild<Wp.Bold>() is null)
-            {
-                props.InsertAt(new Wp.Bold(), 0);
-            }
-            newRun.AppendChild(props);
-        }
-        else
-        {
-            var props = new Wp.RunProperties();
-            props.AppendChild(new Wp.Bold());
+            // 显式移除加粗，确保字段值和标签样式一致
+            props.GetFirstChild<Wp.Bold>()?.Remove();
+            props.GetFirstChild<Wp.BoldComplexScript>()?.Remove();
             newRun.AppendChild(props);
         }
         newRun.AppendChild(new Wp.Text(value) { Space = SpaceProcessingModeValues.Preserve });
@@ -328,6 +389,332 @@ static class MergeDocumentsAction
                 }
             }
         }
+    }
+
+    // ===== 前置页生成（编制说明、目录、签章页）=====
+
+    /// <summary>按顺序生成三个前置页的 blocks，每页末尾加分页符。</summary>
+    static List<OpenXmlElement> BuildFrontMatterBlocks(FrontMatterRequest frontMatter)
+    {
+        var blocks = new List<OpenXmlElement>();
+        if (frontMatter.CompilationNotes is not null)
+        {
+            blocks.AddRange(BuildCompilationNotesPage(frontMatter.CompilationNotes));
+            blocks.Add(MakePageBreakParagraph());
+        }
+        if (frontMatter.Toc is not null)
+        {
+            blocks.AddRange(BuildTocPage(frontMatter.Toc));
+            blocks.Add(MakePageBreakParagraph());
+        }
+        if (frontMatter.SigningPage is not null)
+        {
+            blocks.AddRange(BuildSigningPage(frontMatter.SigningPage));
+            blocks.Add(MakePageBreakParagraph());
+        }
+        return blocks;
+    }
+
+    /// <summary>编制说明页：标题居中加粗 + 正文段落（宋体小四首行缩进、1.5倍行距）。</summary>
+    static List<OpenXmlElement> BuildCompilationNotesPage(FrontMatterPage page)
+    {
+        var blocks = new List<OpenXmlElement>
+        {
+            MakeParagraph(page.Title, centered: true, bold: true, sizeHalfPt: 36),
+            MakeEmptyParagraph(),
+        };
+        foreach (var para in page.Paragraphs)
+        {
+            var text = string.IsNullOrEmpty(para.Label)
+                ? para.Value
+                : $"{para.Label}：{para.Value}";
+            blocks.Add(MakeParagraph(text, sizeHalfPt: 24, firstLineIndent: 480, lineSpacing: 480));
+        }
+        return blocks;
+    }
+
+    /// <summary>目录页：标题 + Word TOC 域（自动生成带页码的目录）。</summary>
+    static List<OpenXmlElement> BuildTocPage(TocPageRequest toc)
+    {
+        var blocks = new List<OpenXmlElement>
+        {
+            MakeParagraph(toc.Title, centered: true, bold: true, sizeHalfPt: 36),
+            MakeEmptyParagraph(),
+            BuildTocFieldParagraph(),
+        };
+        return blocks;
+    }
+
+    /// <summary>构建 Word TOC 域段落：打开文档时自动更新目录及页码。</summary>
+    static Wp.Paragraph BuildTocFieldParagraph()
+    {
+        const string W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var para = new Wp.Paragraph();
+        // fldChar begin
+        para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.Begin }));
+        // instrText: 直接构造原始 XML，确保生成 <w:instrText> 而非 <w:fieldCode>
+        var instrRun = new Wp.Run();
+        instrRun.InnerXml = $"<w:instrText xml:space=\"preserve\" xmlns:w=\"{W_NS}\"> TOC \\o \"1-3\" \\h \\z \\u </w:instrText>";
+        para.AppendChild(instrRun);
+        // fldChar separate
+        para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.Separate }));
+        // 占位提示文字（Word 更新域后会被替换）
+        para.AppendChild(MakeRun("右键点击此处选择「更新域」即可生成目录页码", sizeHalfPt: 22));
+        // fldChar end
+        para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.End }));
+        return para;
+    }
+
+    /// <summary>目录条目段落：章标题加粗带底部分隔线，节标题缩进，点引线+页码右对齐。</summary>
+    static Wp.Paragraph BuildTocEntryParagraph(TocEntry entry)
+    {
+        var level = Math.Max(1, Math.Min(entry.Level, 6));
+        var isChapter = level == 1;
+        // 每级缩进 720 twips（约 2 字符），二级开始缩进
+        var leftIndent = (level - 1) * 720;
+        var para = new Wp.Paragraph();
+        var pPr = new Wp.ParagraphProperties();
+
+        if (isChapter)
+        {
+            // 章标题：段前大间距、段后小间距、底部细实线分隔
+            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "160", After = "40", Line = "360", LineRule = Wp.LineSpacingRuleValues.Auto });
+            pPr.AppendChild(new Wp.ParagraphBorders(
+                new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "BFBFBF", Space = 1 }
+            ));
+        }
+        else
+        {
+            // 节标题：紧凑间距
+            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "20", After = "20", Line = "340", LineRule = Wp.LineSpacingRuleValues.Auto });
+        }
+
+        if (leftIndent > 0)
+        {
+            pPr.AppendChild(new Wp.Indentation { Left = new StringValue(leftIndent.ToString()) });
+        }
+        // 制表符右对齐（8800 twips 处），点引线。TabStop 必须放在 Tabs 集合内。
+        pPr.AppendChild(new Wp.Tabs(
+            new Wp.TabStop { Val = Wp.TabStopValues.Right, Position = 8800, Leader = Wp.TabStopLeaderCharValues.Dot }
+        ));
+        para.AppendChild(pPr);
+        // 章标题三号(32)加粗，节标题小四(24)
+        var size = isChapter ? 32 : 24;
+        var titleRun = MakeRun(entry.Title, sizeHalfPt: size, bold: isChapter);
+        para.AppendChild(titleRun);
+        // 始终渲染制表符+点引线，页码为空时仅显示点引线
+        para.AppendChild(new Wp.Run(new Wp.TabChar()));
+        if (!string.IsNullOrEmpty(entry.Page))
+        {
+            para.AppendChild(MakeRun(entry.Page, sizeHalfPt: size, bold: isChapter));
+        }
+        return para;
+    }
+
+    /// <summary>签章页：标题 + 描述段落 + 小标题 + 信息表(表头背景色) + 小标题 + 双列签章表。</summary>
+    static List<OpenXmlElement> BuildSigningPage(SigningPageRequest signing)
+    {
+        var blocks = new List<OpenXmlElement>
+        {
+            MakeParagraph(signing.Title, centered: true, bold: true, sizeHalfPt: 36),
+            MakeEmptyParagraph(),
+        };
+        if (!string.IsNullOrEmpty(signing.Preamble))
+        {
+            blocks.Add(MakeParagraph(signing.Preamble, sizeHalfPt: 24, firstLineIndent: 480));
+            blocks.Add(MakeEmptyParagraph());
+        }
+
+        // 信息表
+        if (signing.InfoRows.Count > 0)
+        {
+            blocks.Add(MakeParagraph("编制单位信息如下：", bold: true, sizeHalfPt: 24));
+            blocks.Add(MakeEmptyParagraph());
+            blocks.Add(BuildInfoTable(signing.InfoRows));
+            blocks.Add(MakeEmptyParagraph());
+        }
+
+        // 签章表（双列：委托单位 | 编制单位）
+        if (!string.IsNullOrEmpty(signing.ClientParty?.Header) || !string.IsNullOrEmpty(signing.PrepareParty?.Header))
+        {
+            blocks.Add(MakeParagraph("以下为第三方机构及委托方签字盖章位置：", bold: true, sizeHalfPt: 24));
+            blocks.Add(MakeEmptyParagraph());
+            blocks.Add(BuildSignatureTable(signing.ClientParty, signing.PrepareParty));
+        }
+
+        return blocks;
+    }
+
+    /// <summary>构建信息表格：2 列，表头（项目/内容）带浅蓝色背景。</summary>
+    static Wp.Table BuildInfoTable(List<SigningInfoRow> rows)
+    {
+        var table = new Wp.Table();
+        var tblPr = new Wp.TableProperties(
+            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = "9000" },
+            new Wp.TableBorders(
+                new Wp.TopBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.LeftBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.RightBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.InsideHorizontalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" }
+            )
+        );
+        table.AppendChild(tblPr);
+
+        var grid = new Wp.TableGrid(
+            new Wp.GridColumn { Width = "1800" },
+            new Wp.GridColumn { Width = "7200" }
+        );
+        table.AppendChild(grid);
+
+        // 表头行（浅蓝背景）
+        var headerRow = new Wp.TableRow();
+        headerRow.AppendChild(MakeCell("项目", widthTwips: 1800, bold: true, centered: true, shading: "D9E2F3"));
+        headerRow.AppendChild(MakeCell("内容", widthTwips: 7200, bold: true, centered: true, shading: "D9E2F3"));
+        table.AppendChild(headerRow);
+
+        foreach (var row in rows)
+        {
+            var tr = new Wp.TableRow();
+            tr.AppendChild(MakeCell(row.Label, widthTwips: 1800, bold: true));
+            tr.AppendChild(MakeCell(row.Value, widthTwips: 7200));
+            table.AppendChild(tr);
+        }
+        return table;
+    }
+
+    /// <summary>构建双列签章表格：左列委托单位、右列编制单位，表头带浅蓝背景。</summary>
+    static Wp.Table BuildSignatureTable(SigningParty? client, SigningParty? prepare)
+    {
+        var table = new Wp.Table();
+        var tblPr = new Wp.TableProperties(
+            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = "9000" },
+            new Wp.TableBorders(
+                new Wp.TopBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.LeftBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.RightBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.InsideHorizontalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
+                new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" }
+            )
+        );
+        table.AppendChild(tblPr);
+
+        var grid = new Wp.TableGrid(
+            new Wp.GridColumn { Width = "4500" },
+            new Wp.GridColumn { Width = "4500" }
+        );
+        table.AppendChild(grid);
+
+        // 表头行
+        var headerRow = new Wp.TableRow();
+        headerRow.AppendChild(MakeCell(client?.Header ?? "委托单位（盖章）", widthTwips: 4500, bold: true, centered: true, shading: "D9E2F3"));
+        headerRow.AppendChild(MakeCell(prepare?.Header ?? "编制单位（盖章）", widthTwips: 4500, bold: true, centered: true, shading: "D9E2F3"));
+        table.AppendChild(headerRow);
+
+        // 单位名称行
+        var nameRow = new Wp.TableRow();
+        nameRow.AppendChild(MakeCell($"单位名称：{client?.UnitName ?? ""}", widthTwips: 4500));
+        nameRow.AppendChild(MakeCell($"单位名称：{prepare?.UnitName ?? ""}", widthTwips: 4500));
+        table.AppendChild(nameRow);
+
+        // 盖章位置行
+        var sealRow = new Wp.TableRow(new Wp.TableRowHeight { Val = 1800, HeightType = Wp.HeightRuleValues.AtLeast });
+        sealRow.AppendChild(MakeCell(client?.SealHint ?? "（此处加盖单位公章）", widthTwips: 4500));
+        sealRow.AppendChild(MakeCell(prepare?.SealHint ?? "（此处加盖单位公章）", widthTwips: 4500));
+        table.AppendChild(sealRow);
+
+        // 签字行
+        var signRow = new Wp.TableRow();
+        signRow.AppendChild(MakeCell(client?.SignatureLabel ?? "法定代表人/授权代表（签字）：", widthTwips: 4500));
+        signRow.AppendChild(MakeCell(prepare?.SignatureLabel ?? "法定代表人/授权代表（签字）：", widthTwips: 4500));
+        table.AppendChild(signRow);
+
+        // 日期行
+        var dateRow = new Wp.TableRow();
+        dateRow.AppendChild(MakeCell(client?.DateLabel ?? "日期：", widthTwips: 4500));
+        dateRow.AppendChild(MakeCell(prepare?.DateLabel ?? "日期：", widthTwips: 4500));
+        table.AppendChild(dateRow);
+
+        return table;
+    }
+
+    /// <summary>工厂方法：生成带字体/字号/对齐/加粗/首行缩进/行距的段落。</summary>
+    static Wp.Paragraph MakeParagraph(string text, bool centered = false, bool bold = false, int sizeHalfPt = 24, int? firstLineIndent = null, int? lineSpacing = null)
+    {
+        var pPr = new Wp.ParagraphProperties();
+        if (centered)
+        {
+            pPr.AppendChild(new Wp.Justification { Val = Wp.JustificationValues.Center });
+        }
+        if (firstLineIndent is not null)
+        {
+            pPr.AppendChild(new Wp.Indentation { FirstLine = new StringValue(firstLineIndent.Value.ToString()) });
+        }
+        if (lineSpacing is not null)
+        {
+            pPr.AppendChild(new Wp.SpacingBetweenLines { Line = new StringValue(lineSpacing.Value.ToString()), LineRule = Wp.LineSpacingRuleValues.Auto });
+        }
+        var run = MakeRun(text, sizeHalfPt, bold);
+        var para = new Wp.Paragraph(pPr);
+        para.AppendChild(run);
+        return para;
+    }
+
+    /// <summary>工厂方法：生成空段落（占位）。</summary>
+    static Wp.Paragraph MakeEmptyParagraph()
+    {
+        return new Wp.Paragraph();
+    }
+
+    /// <summary>工厂方法：生成分页符段落。</summary>
+    static Wp.Paragraph MakePageBreakParagraph()
+    {
+        var para = new Wp.Paragraph();
+        var run = new Wp.Run(new Wp.Break { Type = Wp.BreakValues.Page });
+        para.AppendChild(run);
+        return para;
+    }
+
+    /// <summary>工厂方法：生成 Run，双字体（中文宋体/西文 Times New Roman）。</summary>
+    static Wp.Run MakeRun(string text, int sizeHalfPt, bool bold = false)
+    {
+        var run = new Wp.Run();
+        var props = new Wp.RunProperties();
+        if (bold)
+        {
+            props.AppendChild(new Wp.Bold());
+            props.AppendChild(new Wp.BoldComplexScript());
+        }
+        props.AppendChild(new Wp.RunFonts { EastAsia = "宋体", Ascii = "Times New Roman", HighAnsi = "Times New Roman" });
+        props.AppendChild(new Wp.FontSize { Val = new StringValue(sizeHalfPt.ToString()) });
+        props.AppendChild(new Wp.FontSizeComplexScript { Val = new StringValue(sizeHalfPt.ToString()) });
+        run.AppendChild(props);
+        run.AppendChild(new Wp.Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        return run;
+    }
+
+    /// <summary>工厂方法：生成表格单元格（指定宽度、可选加粗/居中/背景色）。</summary>
+    static Wp.TableCell MakeCell(string text, int widthTwips, bool bold = false, bool centered = false, string? shading = null)
+    {
+        var cell = new Wp.TableCell();
+        var cellProps = new Wp.TableCellProperties(
+            new Wp.TableCellWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = new StringValue(widthTwips.ToString()) }
+        );
+        if (!string.IsNullOrEmpty(shading))
+        {
+            cellProps.AppendChild(new Wp.Shading { Fill = shading });
+        }
+        cell.AppendChild(cellProps);
+        var para = new Wp.Paragraph();
+        if (centered)
+        {
+            para.AppendChild(new Wp.ParagraphProperties(new Wp.Justification { Val = Wp.JustificationValues.Center }));
+        }
+        para.AppendChild(MakeRun(text, 24, bold));
+        cell.AppendChild(para);
+        return cell;
     }
 
     static bool TryReadRequest(string workspace, string jobId, out MergeDocumentsRequest request, out string error)

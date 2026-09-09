@@ -2290,6 +2290,8 @@ async function buildDocxResult(payload, options = {}) {
   const feasibility = context.feasibility;
   if (feasibility?.includeCover) {
     children.push(...buildFeasibilityCoverParagraphs(payload, feasibility));
+  } else if (payload.cover_template === 'green-report') {
+    // 绿色报告封面由 openxmlhelper 合并，正文 docx 不需要封面页
   } else {
     children.push(
       paragraph([textRun('内容由 AI 生成', { italics: true, size: 18 })], { alignment: AlignmentType.CENTER, after: 120 }),
@@ -2639,6 +2641,29 @@ function toChineseNum(n) {
 }
 
 /**
+ * 估算目录页码：基于各章节正文字数累计，按每页约 600 字计算。
+ * 前置页（封面+扉页+目录+签章）约占 5 页，正文从第 6 页开始。
+ */
+function estimateTocPages(outline) {
+  const CHARS_PER_PAGE = 600;
+  const FRONT_MATTER_PAGES = 5;
+  let cumulativeChars = 0;
+  const result = [];
+
+  const walk = (items, depth = 1) => {
+    items.forEach((it) => {
+      const page = FRONT_MATTER_PAGES + Math.floor(cumulativeChars / CHARS_PER_PAGE) + 1;
+      result.push({ level: depth, title: it.title || '', page: String(page) });
+      const content = it.content || '';
+      cumulativeChars += content.replace(/\s/g, '').length;
+      if (it.children?.length) walk(it.children, depth + 1);
+    });
+  };
+  walk(outline);
+  return result;
+}
+
+/**
  * 给目录条目加书籍式序号：
  * - 一级：第X章（中文数字，如"第一章"）
  * - 二级：章号.节号（如"1.1"、"1.2"）
@@ -2679,11 +2704,11 @@ function addTocNumbering(entries) {
 
 /**
  * 从导出模板配置中读取表头背景色。
- * 读取路径：export_format.table_style.header_row.background_color；
+ * 读取路径：export_format.table.header_row.background_color；
  * 没有配置或取值非法时回退默认浅蓝 D9E2F3。返回值不带 # 前缀。
  */
 function resolveTableHeaderShading(exportFormat) {
-  const raw = exportFormat?.table_style?.header_row?.background_color;
+  const raw = exportFormat?.table?.header_row?.background_color;
   if (typeof raw !== 'string' || !raw.trim()) return 'D9E2F3';
   const cleaned = raw.trim().replace(/^#/, '').toUpperCase();
   return /^[0-9A-F]{6}$/.test(cleaned) ? cleaned : 'D9E2F3';
@@ -2704,14 +2729,7 @@ function buildGreenReportFrontMatter(payload) {
   const compileDate = coverFields.compileDate || '';
   const outline = Array.isArray(payload.outline) ? payload.outline : [];
 
-  const flatTitles = [];
-  const walk = (items, depth = 1) => {
-    items.forEach((it) => {
-      flatTitles.push({ level: depth, title: it.title || '', page: '' });
-      if (it.children?.length) walk(it.children, depth + 1);
-    });
-  };
-  walk(outline);
+  const flatTitles = estimateTocPages(outline);
 
   // 签章日期：当前日期，格式 YYYY年MM月DD日
   const now = new Date();
@@ -2732,7 +2750,7 @@ function buildGreenReportFrontMatter(payload) {
         { label: '公示平台', value: '蔚碳环保官网（https://www.weitanhuanbao.com/）' },
       ],
     },
-    toc: { title: '目录', entries: addTocNumbering(flatTitles.map((t) => ({ level: t.level, title: t.title, page: '' }))) },
+    toc: { title: '目录', entries: addTocNumbering(flatTitles) },
     signingPage: {
       title: '第三方编制信息及签章页',
       preamble: `本报告由 ${compileUnit} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`,
@@ -2778,15 +2796,8 @@ async function generateFrontMatterByAi(aiService, payload) {
   const compileDate = coverFields.compileDate || '';
   const outline = Array.isArray(payload.outline) ? payload.outline : [];
 
-  // 扁平化 outline 为标题层级列表
-  const flatTitles = [];
-  const walk = (items, depth = 1) => {
-    items.forEach((it) => {
-      flatTitles.push({ depth, title: it.title || '' });
-      if (it.children?.length) walk(it.children, depth + 1);
-    });
-  };
-  walk(outline);
+  // 扁平化 outline 为标题层级列表（含估算页码）
+  const flatTitles = estimateTocPages(outline);
 
   const systemPrompt = '你是一名资深 ESG/绿色报告编制专家。请根据用户输入生成结构化 JSON，只返回 JSON 不要 Markdown 代码块。';
   const userPrompt = `请为绿色报告生成签章页的声明段落，返回 JSON。
@@ -2821,8 +2832,8 @@ async function generateFrontMatterByAi(aiService, payload) {
   const now = new Date();
   const signDate = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`;
 
-  // 目录直接从 outline 完整结构生成
-  const tocEntries = addTocNumbering(flatTitles.map((t) => ({ level: t.depth, title: t.title, page: '' })));
+  // 目录直接从 outline 完整结构生成（含估算页码）
+  const tocEntries = addTocNumbering(flatTitles);
 
   const signingPreamble = aiResult?.signingPreamble || `本报告由 ${compileUnit} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`;
 

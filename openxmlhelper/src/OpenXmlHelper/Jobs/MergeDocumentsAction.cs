@@ -236,7 +236,7 @@ static class MergeDocumentsAction
             }
         }
         // 直接在 settings 根节点注入两个开关元素（OpenXML SDK 3.x 无对应强类型）
-        settings.InnerXml = $"<w:updateFields xmlns:w=\"{W_NS}\"/><w:doNotPromptForUpdateFields xmlns:w=\"{W_NS}\"/>" + settings.InnerXml;
+        settings.InnerXml = $"<w:updateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/><w:doNotPromptForUpdateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/>" + settings.InnerXml;
         if (isNew)
         {
             // 新建的 Settings 才需要关联到 Part；已有 Settings 重新赋值会报"已关联到其他 Part"
@@ -512,15 +512,19 @@ static class MergeDocumentsAction
         return blocks;
     }
 
-    /// <summary>目录页：标题 + Word TOC 域（自动生成带页码的目录）。</summary>
+    /// <summary>目录页：标题 + 静态目录条目（带点引线和页码，无需 Word 更新域）。</summary>
     static List<OpenXmlElement> BuildTocPage(TocPageRequest toc)
     {
         var blocks = new List<OpenXmlElement>
         {
             MakeParagraph(toc.Title, centered: true, bold: true, sizeHalfPt: 36),
             MakeEmptyParagraph(),
-            BuildTocFieldParagraph(),
         };
+        // 直接渲染静态目录条目，不使用 TOC 域（避免需要手动更新域）
+        foreach (var entry in toc.Entries ?? new List<TocEntry>())
+        {
+            blocks.Add(BuildTocEntryParagraph(entry));
+        }
         return blocks;
     }
 
@@ -529,8 +533,8 @@ static class MergeDocumentsAction
     {
         const string W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
         var para = new Wp.Paragraph();
-        // fldChar begin
-        para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.Begin }));
+        // fldChar begin — 加 dirty="true" 强制 Word 打开时更新该域
+        para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.Begin, Dirty = true }));
         // instrText: 直接构造原始 XML，确保生成 <w:instrText> 而非 <w:fieldCode>
         var instrRun = new Wp.Run();
         instrRun.InnerXml = $"<w:instrText xml:space=\"preserve\" xmlns:w=\"{W_NS}\"> TOC \\o \"1-3\" \\h \\z \\u </w:instrText>";
@@ -544,44 +548,41 @@ static class MergeDocumentsAction
         return para;
     }
 
-    /// <summary>目录条目段落：章标题加粗带底部分隔线，节标题缩进，点引线+页码右对齐。</summary>
+    /// <summary>目录条目段落：书籍式目录，层级缩进，点引线+页码右对齐。</summary>
     static Wp.Paragraph BuildTocEntryParagraph(TocEntry entry)
     {
         var level = Math.Max(1, Math.Min(entry.Level, 6));
         var isChapter = level == 1;
-        // 每级缩进 720 twips（约 2 字符），二级开始缩进
-        var leftIndent = (level - 1) * 720;
+        // 一级不缩进，二级缩进 360，三级缩进 720，以此类推
+        var leftIndent = (level - 1) * 360;
         var para = new Wp.Paragraph();
         var pPr = new Wp.ParagraphProperties();
 
         if (isChapter)
         {
-            // 章标题：段前大间距、段后小间距、底部细实线分隔
-            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "160", After = "40", Line = "360", LineRule = Wp.LineSpacingRuleValues.Auto });
-            pPr.AppendChild(new Wp.ParagraphBorders(
-                new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "BFBFBF", Space = 1 }
-            ));
+            // 章标题：段前 200 段后 60，行距 1.5 倍
+            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "200", After = "60", Line = "360", LineRule = Wp.LineSpacingRuleValues.Auto });
         }
         else
         {
-            // 节标题：紧凑间距
-            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "20", After = "20", Line = "340", LineRule = Wp.LineSpacingRuleValues.Auto });
+            // 节/小节标题：紧凑间距
+            pPr.AppendChild(new Wp.SpacingBetweenLines { Before = "30", After = "30", Line = "320", LineRule = Wp.LineSpacingRuleValues.Auto });
         }
 
         if (leftIndent > 0)
         {
             pPr.AppendChild(new Wp.Indentation { Left = new StringValue(leftIndent.ToString()) });
         }
-        // 制表符右对齐（8800 twips 处），点引线。TabStop 必须放在 Tabs 集合内。
+        // 制表符右对齐（9000 twips 处），点引线
         pPr.AppendChild(new Wp.Tabs(
-            new Wp.TabStop { Val = Wp.TabStopValues.Right, Position = 8800, Leader = Wp.TabStopLeaderCharValues.Dot }
+            new Wp.TabStop { Val = Wp.TabStopValues.Right, Position = 9000, Leader = Wp.TabStopLeaderCharValues.Dot }
         ));
         para.AppendChild(pPr);
-        // 章标题三号(32)加粗，节标题小四(24)
-        var size = isChapter ? 32 : 24;
+        // 章标题小四加粗(28)，节标题五号(21)，小节五号(21)
+        var size = isChapter ? 28 : 21;
         var titleRun = MakeRun(entry.Title, sizeHalfPt: size, bold: isChapter);
         para.AppendChild(titleRun);
-        // 始终渲染制表符+点引线，页码为空时仅显示点引线
+        // 制表符+点引线+页码
         para.AppendChild(new Wp.Run(new Wp.TabChar()));
         if (!string.IsNullOrEmpty(entry.Page))
         {

@@ -153,19 +153,54 @@ async function runGreenReportContentTask({
     publish('未检索到知识库资料，将基于行业经验预估生成内容', 5);
   }
 
-  // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，作为每章字数下限
+  // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，同时计算上下限
+  // 上限 = 摊分 * 1.1（允许小幅浮动），下限 = max(300, 摊分 * 0.7)（给低篇幅章节留空间）
   const numericTargetWords = Number(targetWords);
-  const perChapterTarget = Number.isFinite(numericTargetWords) && numericTargetWords > 0 && leaves.length > 0
-    ? Math.max(800, Math.floor(numericTargetWords / leaves.length))
+  const basePerChapter = Number.isFinite(numericTargetWords) && numericTargetWords > 0 && leaves.length > 0
+    ? Math.floor(numericTargetWords / leaves.length)
     : 0;
-  if (perChapterTarget) {
-    publish(`全篇目标 ${numericTargetWords} 字，共 ${leaves.length} 章，每章目标约 ${perChapterTarget} 字`, 6);
+  const perChapterMin = basePerChapter > 0 ? Math.max(300, Math.floor(basePerChapter * 0.7)) : 0;
+  const perChapterMax = basePerChapter > 0 ? Math.round(basePerChapter * 1.1) : 0;
+  if (basePerChapter > 0) {
+    publish(`全篇目标 ${numericTargetWords} 字，共 ${leaves.length} 章，每章目标 ${basePerChapter} 字（上限 ${perChapterMax} 字）`, 6);
   }
 
-  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName, perChapterTarget);
+  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName, perChapterMin);
   const total = leaves.length;
   let completed = 0;
   let webSearchDowngradePublished = false;
+
+  // 粗估正文字数：统计中文字符 + 数字/英文字符（排除 Markdown 标记和代码块）
+  function countWords(text) {
+    if (!text) return 0;
+    // 去掉 ```代码块```、# 标题标记、*加粗*、`行内代码`、[链接](url) 等 Markdown 标记
+    const stripped = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]*`/g, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[#>*_`~\-]/g, '')
+      .replace(/\s+/g, '');
+    return stripped.length;
+  }
+
+  // 调用 AI 对超长章节进行精简
+  async function trimContent(originalContent, chapterTitle, targetMax, aiServiceRef) {
+    try {
+      const trimSystem = '你是一名专业的报告内容编辑。请对提供的章节正文进行精简压缩，保留核心论点、关键数据和结构框架，删除冗余表述、重复论证和次要细节。精简后字数须严格不超过目标上限，保持 Markdown 格式和报告文体。只输出精简后的正文，不要解释。';
+      const trimUser = `请精简以下"${chapterTitle}"章节正文，精简后字数严格不超过 ${targetMax} 字。\n\n原文：\n${originalContent}`;
+      const result = await aiServiceRef.chat({
+        messages: [
+          { role: 'system', content: trimSystem },
+          { role: 'user', content: trimUser },
+        ],
+      });
+      const trimmed = typeof result === 'string' ? result : (result?.content || result?.message?.content || '');
+      return trimmed || originalContent;
+    } catch (_err) {
+      return originalContent;
+    }
+  }
 
   for (const leaf of leaves) {
     if (taskControl.signal.aborted) {
@@ -179,7 +214,8 @@ async function runGreenReportContentTask({
       knowledgeContext,
       pageCount,
       targetWords,
-      chapterTargetWords: perChapterTarget,
+      chapterTargetWords: basePerChapter,
+      chapterMaxWords: perChapterMax,
       userRequirements,
     }, reportTypeName);
     const result = await aiService.chat({
@@ -195,9 +231,20 @@ async function runGreenReportContentTask({
       },
     });
 
-    const content = typeof result === 'string'
+    let content = typeof result === 'string'
       ? result
       : (result?.content || result?.message?.content || '');
+
+    // 后处理：如果章节超上限，调用 AI 精简一次
+    if (perChapterMax > 0 && content) {
+      const currentWords = countWords(content);
+      if (currentWords > perChapterMax * 1.2) {
+        publish(`${leaf.title} 实际 ${currentWords} 字，超过上限 ${perChapterMax}，正在精简...`, Math.round((completed / total) * 100));
+        content = await trimContent(content, leaf.title, perChapterMax, aiService);
+        const afterTrim = countWords(content);
+        publish(`${leaf.title} 精简后 ${afterTrim} 字`, Math.round((completed / total) * 100));
+      }
+    }
 
     workspaceStore.saveChapterContent({ nodeId: leaf.id, content });
     completed++;

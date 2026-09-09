@@ -95,6 +95,17 @@ function getGreenReportCoverTemplatePath(app) {
   return path.join(__dirname, '..', '..', 'assets', 'green-report-cover.docx');
 }
 
+/** 绿色报告签章页 docx 模板路径。 */
+function getSigningPageTemplatePath(app) {
+  if (process.env.LVCERT_SIGNING_PAGE_TEMPLATE) {
+    return process.env.LVCERT_SIGNING_PAGE_TEMPLATE;
+  }
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'assets', 'signing-page-template.docx');
+  }
+  return path.join(__dirname, '..', '..', 'assets', 'signing-page-template.docx');
+}
+
 /** 开发时编译用的助手工程路径。 */
 function getOpenXmlHelperProjectPath() {
   return path.join(__dirname, '..', '..', '..', 'openxmlhelper', 'src', 'OpenXmlHelper', 'OpenXmlHelper.csproj');
@@ -137,6 +148,7 @@ module.exports = {
   getDonationStateFilePath,
   getGpuStartupProbePath,
   getGreenReportCoverTemplatePath,
+  getSigningPageTemplatePath,
   getGeneratedImagesDir,
   getImportedImagesDir,
   getKnowledgeBaseDir,

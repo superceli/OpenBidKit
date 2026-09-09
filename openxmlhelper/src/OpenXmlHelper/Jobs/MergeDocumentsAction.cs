@@ -11,6 +11,8 @@ sealed class MergeDocumentsRequest
 {
     public string Action { get; set; } = "";
     public string CoverTemplate { get; set; } = "";
+    /// <summary>签章页模板 docx 路径；提供则用模板填充替代代码生成。</summary>
+    public string SigningPageTemplate { get; set; } = "";
     public Dictionary<string, string> CoverFields { get; set; } = new();
     public string BodyDoc { get; set; } = "";
     public string Output { get; set; } = "";
@@ -147,9 +149,32 @@ static class MergeDocumentsAction
             // 插入前置页（编制说明、目录、签章页），位于封面之后、正文之前
             if (request.FrontMatter is not null)
             {
-                foreach (var block in BuildFrontMatterBlocks(request.FrontMatter))
+                // 1. 扉页 + 目录：代码生成
+                foreach (var block in BuildFrontMatterBlocksExceptSigning(request.FrontMatter))
                 {
                     destBody.InsertAt(block, insertPos);
+                    insertPos++;
+                }
+
+                // 2. 签章页：优先用模板填充，没有模板才代码生成
+                if (request.FrontMatter.SigningPage is not null)
+                {
+                    IEnumerable<OpenXmlElement> signingBlocks;
+                    if (!string.IsNullOrWhiteSpace(request.SigningPageTemplate) && File.Exists(request.SigningPageTemplate))
+                    {
+                        signingBlocks = BuildSigningPageFromTemplate(request.SigningPageTemplate, request.FrontMatter.SigningPage);
+                    }
+                    else
+                    {
+                        signingBlocks = BuildSigningPage(request.FrontMatter.SigningPage);
+                    }
+                    foreach (var block in signingBlocks)
+                    {
+                        destBody.InsertAt(block, insertPos);
+                        insertPos++;
+                    }
+                    // 签章页后加分页符，让正文从新页开始
+                    destBody.InsertAt(MakePageBreakParagraph(), insertPos);
                     insertPos++;
                 }
             }
@@ -445,6 +470,19 @@ static class MergeDocumentsAction
     /// <summary>按顺序生成三个前置页的 blocks，每页末尾加分页符。</summary>
     static List<OpenXmlElement> BuildFrontMatterBlocks(FrontMatterRequest frontMatter)
     {
+        var blocks = BuildFrontMatterBlocksExceptSigning(frontMatter);
+        // 签章页
+        if (frontMatter.SigningPage is not null)
+        {
+            blocks.AddRange(BuildSigningPage(frontMatter.SigningPage));
+            blocks.Add(MakePageBreakParagraph());
+        }
+        return blocks;
+    }
+
+    /// <summary>只生成扉页 + 目录（不含签章页），签章页由调用方单独处理。</summary>
+    static List<OpenXmlElement> BuildFrontMatterBlocksExceptSigning(FrontMatterRequest frontMatter)
+    {
         var blocks = new List<OpenXmlElement>();
         // 1. 扉页（封面后第一页）
         if (frontMatter.TitlePage is not null)
@@ -458,13 +496,175 @@ static class MergeDocumentsAction
             blocks.AddRange(BuildTocPage(frontMatter.Toc));
             blocks.Add(MakePageBreakParagraph());
         }
-        // 3. 签章页
-        if (frontMatter.SigningPage is not null)
-        {
-            blocks.AddRange(BuildSigningPage(frontMatter.SigningPage));
-            blocks.Add(MakePageBreakParagraph());
-        }
         return blocks;
+    }
+
+    /// <summary>从签章页模板 docx 填充字段后克隆内容返回。</summary>
+    static List<OpenXmlElement> BuildSigningPageFromTemplate(string templatePath, SigningPageRequest signing)
+    {
+        using var template = WordprocessingDocument.Open(templatePath, false);
+        var templateBody = template.MainDocumentPart?.Document.Body;
+        if (templateBody is null) return BuildSigningPage(signing);
+
+        // 克隆模板所有段落和表格
+        var blocks = new List<OpenXmlElement>();
+        foreach (var child in templateBody.ChildElements)
+        {
+            blocks.Add((OpenXmlElement)child.CloneNode(true));
+        }
+
+        // 填充字段
+        FillSigningTemplateFields(blocks, signing);
+        return blocks;
+    }
+
+    /// <summary>在签章页模板 blocks 中查找并填充空白字段。</summary>
+    static void FillSigningTemplateFields(List<OpenXmlElement> blocks, SigningPageRequest signing)
+    {
+        // 收集所有段落和表格
+        var allParas = new List<Wp.Paragraph>();
+        var allTables = new List<Wp.Table>();
+        foreach (var block in blocks)
+        {
+            if (block is Wp.Paragraph p) allParas.Add(p);
+            else if (block is Wp.Table t) allTables.Add(t);
+            else if (block is Wp.SectionProperties) { /* skip */ }
+        }
+
+        // === 1. 填充说明段落中的委托单位 ===
+        // 模板原文："本报告由 安徽蔚碳环保科技有限公司 接受 东方工建集团有限公司 委托..."
+        // 把两个公司名替换成实际值
+        var preamblePara = allParas.FirstOrDefault(p => ReadDirectRunText(p).StartsWith("本报告由"));
+        if (preamblePara is not null && !string.IsNullOrWhiteSpace(signing.Preamble))
+        {
+            ReplaceParagraphText(preamblePara, signing.Preamble);
+        }
+
+        // === 2. 填充信息表（第一个表格）===
+        if (allTables.Count >= 1)
+        {
+            FillSigningInfoTable(allTables[0], signing.InfoRows);
+        }
+
+        // === 3. 填充签章表（第二个表格）===
+        if (allTables.Count >= 2)
+        {
+            FillSigningPartyTable(allTables[1], signing.ClientParty, signing.PrepareParty);
+        }
+    }
+
+    /// <summary>替换段落所有文本，保留第一个 Run 的样式，强制覆盖字号为 11pt（22 half-pts），表格内单倍行距。</summary>
+    static void ReplaceParagraphText(Wp.Paragraph para, string newText, int sizeHalfPt = 22)
+    {
+        // 收集第一个 Run 的样式
+        var firstRun = para.Elements<Wp.Run>().FirstOrDefault();
+        var runProps = firstRun?.RunProperties?.CloneNode(true) as Wp.RunProperties;
+
+        // 强制覆盖字号
+        if (runProps is null) runProps = new Wp.RunProperties();
+        runProps.FontSize = new Wp.FontSize { Val = new StringValue(sizeHalfPt.ToString()) };
+        runProps.FontSizeComplexScript = new Wp.FontSizeComplexScript { Val = new StringValue(sizeHalfPt.ToString()) };
+
+        // 强制段落 spacing：单倍行距 + 段前段后 0
+        var pPr = para.GetFirstChild<Wp.ParagraphProperties>() ?? para.AppendChild(new Wp.ParagraphProperties());
+        var oldSpacing = pPr.GetFirstChild<Wp.SpacingBetweenLines>();
+        oldSpacing?.Remove();
+        pPr.AppendChild(new Wp.SpacingBetweenLines
+        {
+            Before = "0",
+            After = "0",
+            Line = "240",
+            LineRule = Wp.LineSpacingRuleValues.Auto,
+        });
+
+        // 移除所有 Run
+        foreach (var run in para.Elements<Wp.Run>().ToList()) run.Remove();
+
+        // 创建新 Run
+        var newRun = new Wp.Run();
+        newRun.RunProperties = runProps;
+        newRun.AppendChild(new Wp.Text(newText) { Space = SpaceProcessingModeValues.Preserve });
+        para.AppendChild(newRun);
+    }
+
+    /// <summary>填充信息表：按第一列的 label 匹配，把第二列空白/占位内容替换成 value。</summary>
+    static void FillSigningInfoTable(Wp.Table table, List<SigningInfoRow> infoRows)
+    {
+        foreach (var row in table.Elements<Wp.TableRow>())
+        {
+            var cells = row.Elements<Wp.TableCell>().ToList();
+            if (cells.Count < 2) continue;
+            var label = GetCellPlainText(cells[0]).Trim();
+            var value = GetCellPlainText(cells[1]).Trim();
+
+            // 跳过表头行
+            if (label is "项目" or "项目" && value is "内容") continue;
+            // 如果第二列已有内容（非空白非模板默认值），跳过
+            if (!string.IsNullOrEmpty(value) && !value.StartsWith("2026")) continue;
+
+            // 查找匹配的 infoRow
+            var match = infoRows.FirstOrDefault(r => r.Label == label);
+            if (match is not null && !string.IsNullOrEmpty(match.Value))
+            {
+                ReplaceParagraphText(cells[1].Elements<Wp.Paragraph>().First(), match.Value);
+            }
+        }
+    }
+
+    /// <summary>填充签章表：按单元格序号填充委托单位（左）和编制单位（右）。</summary>
+    static void FillSigningPartyTable(Wp.Table table, SigningParty? client, SigningParty? prepare)
+    {
+        var row = table.Elements<Wp.TableRow>().FirstOrDefault();
+        if (row is null) return;
+        var cells = row.Elements<Wp.TableCell>().ToList();
+        if (cells.Count < 2) return;
+
+        FillSigningPartyCell(cells[0], client, signingPartyIsClient: true);
+        FillSigningPartyCell(cells[1], prepare, signingPartyIsClient: false);
+    }
+
+    /// <summary>填充签章单元格：单位名称、日期。</summary>
+    static void FillSigningPartyCell(Wp.TableCell cell, SigningParty? party, bool signingPartyIsClient)
+    {
+        if (party is null) return;
+        var paras = cell.Elements<Wp.Paragraph>().ToList();
+        if (paras.Count < 4) return;
+
+        // 第 1 段：单位名称（模板里 "单位名称：" 后面是值）
+        // 模板签章表把所有内容挤在一个单元格的一个段落里，需要特殊处理
+        var fullText = GetCellPlainText(cell);
+
+        // 替换单位名称
+        // 委托单位列："单位名称：" 后面原来可能是 "(空)" 或实际值
+        // 编制单位列："单位名称：" 后面原来已有 "安徽蔚碳环保科技有限公司"
+        if (signingPartyIsClient && paras.Count >= 1)
+        {
+            ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
+        }
+        else if (!signingPartyIsClient && paras.Count >= 1)
+        {
+            ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
+        }
+
+        // 日期段落（通常是最后一段）
+        var lastPara = paras.Last();
+        var dateText = ReadDirectRunText(lastPara);
+        if (dateText.StartsWith("日期：") && party.DateLabel.StartsWith("日期："))
+        {
+            ReplaceParagraphText(lastPara, party.DateLabel);
+        }
+    }
+
+    /// <summary>获取单元格内所有段落的纯文本拼接。</summary>
+    static string GetCellPlainText(Wp.TableCell cell)
+    {
+        var texts = new List<string>();
+        foreach (var p in cell.Elements<Wp.Paragraph>())
+        {
+            var t = ReadDirectRunText(p);
+            if (!string.IsNullOrEmpty(t)) texts.Add(t);
+        }
+        return string.Join(" ", texts);
     }
 
     /// <summary>扉页：标题居中加粗 + 副标题居中，下方信息行左对齐（委托单位/报告编号/编制日期/编制单位/公示平台）。</summary>

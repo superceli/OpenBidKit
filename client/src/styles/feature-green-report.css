@@ -322,6 +322,12 @@
   font-weight: 400;
 }
 
+.green-report-required {
+  color: #e74c3c;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
 .green-report-input,
 .green-report-textarea {
   width: 100%;

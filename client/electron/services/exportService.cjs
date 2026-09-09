@@ -6,7 +6,7 @@ const cheerio = require('cheerio');
 const { imageSize } = require('image-size');
 const { compactLogError, createDeveloperLogger, textMetrics } = require('../utils/developerLog.cjs');
 const { getMermaidCacheEntry, saveMermaidCacheImage } = require('../utils/mermaidCache.cjs');
-const { getGeneratedImagesDir, getImportedImagesDir, getGreenReportCoverTemplatePath, getOpenXmlJobsDir } = require('../utils/paths.cjs');
+const { getGeneratedImagesDir, getImportedImagesDir, getGreenReportCoverTemplatePath, getSigningPageTemplatePath, getOpenXmlJobsDir } = require('../utils/paths.cjs');
 const { REMOTE_IMAGE_RETRY_ATTEMPTS, REMOTE_IMAGE_RETRY_DELAY_MS } = require('../utils/remoteImageRetry.cjs');
 const { renderMarkdownHtml } = require('../utils/renderMarkdownHtml.cjs');
 const { getLocalImageRenderService } = require('./localImageRenderService.cjs');
@@ -572,7 +572,8 @@ function tableCellRunMarks(style) {
 
 function tableCellParagraphOptions(style) {
   return {
-    after: 80,
+    after: 0,
+    line: 240, // 表格内单倍行距
     alignment: alignmentToWordType(style?.alignment || DEFAULT_TABLE_STYLE.body_cell.alignment),
   };
 }
@@ -2479,6 +2480,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
               action: 'merge-documents',
               request: {
                 coverTemplate: coverTemplatePath,
+                signingPageTemplate: getSigningPageTemplatePath(appRef),
                 coverFields: coverFieldsMap,
                 bodyDoc: tempBodyPath,
                 output: result.filePath,
@@ -2722,8 +2724,8 @@ function buildGreenReportFrontMatter(payload) {
   const reportTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
   const reportingPeriod = payload.reporting_period || '';
   const companyName = payload.company_name || '';
-  // 编制单位固定为安徽蔚碳环保科技有限公司
-  const compileUnit = '安徽蔚碳环保科技有限公司';
+  // 编制单位：优先用用户在页面填写的值，没有则用默认
+  const compileUnit = coverFields.compileUnit || '安徽蔚碳环保科技有限公司';
   const clientUnit = coverFields.clientUnit || companyName;
   const reportCode = coverFields.reportCode || '';
   const compileDate = coverFields.compileDate || '';
@@ -2789,8 +2791,8 @@ async function generateFrontMatterByAi(aiService, payload) {
   const reportTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
   const reportingPeriod = payload.reporting_period || '';
   const companyName = payload.company_name || '';
-  // 编制单位固定为安徽蔚碳环保科技有限公司
-  const compileUnit = '安徽蔚碳环保科技有限公司';
+  // 编制单位：优先用用户在页面填写的值，没有则用默认
+  const compileUnit = coverFields.compileUnit || '安徽蔚碳环保科技有限公司';
   const clientUnit = coverFields.clientUnit || companyName;
   const reportCode = coverFields.reportCode || '';
   const compileDate = coverFields.compileDate || '';

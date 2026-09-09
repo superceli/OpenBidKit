@@ -271,7 +271,7 @@ function CompanyInfoPage({
               />
             </label>
             <label className="green-report-field">
-              <span className="green-report-field-label">编制单位</span>
+              <span className="green-report-field-label">编制单位 <span className="green-report-required">*</span></span>
               <input
                 type="text"
                 className="green-report-input"

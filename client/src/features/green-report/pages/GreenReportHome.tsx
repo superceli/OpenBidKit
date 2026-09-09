@@ -287,6 +287,10 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               void window.lvcert?.greenReport?.saveReportType(reportType).catch(() => undefined);
             }}
             onSaveProjectInfo={async () => {
+              if (!draftProjectInfo.compileUnit?.trim()) {
+                showToast('请填写编制单位（必填）', 'error');
+                return;
+              }
               setState((prev) => ({ ...prev, projectInfo: draftProjectInfo }));
               try {
                 await window.lvcert?.greenReport?.saveProjectInfo(draftProjectInfo);

@@ -227,7 +227,7 @@ const defaultExportFormat = {
     spacing_before_pt: 0,
     spacing_after_pt: 0,
     first_line_indent_chars: 2,
-    line_spacing_multiple: 1.2,
+    line_spacing_multiple: 1.5,
     list_style: 'disc',
     ordered_list_style: 'decimal-dot',
     list_indent_chars: 2,

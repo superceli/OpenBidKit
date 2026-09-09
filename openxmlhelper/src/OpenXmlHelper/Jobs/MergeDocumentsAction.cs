@@ -64,6 +64,8 @@ sealed class SigningPageRequest
     public List<SigningInfoRow> InfoRows { get; set; } = new();
     public SigningParty ClientParty { get; set; } = new();
     public SigningParty PrepareParty { get; set; } = new();
+    /// <summary>表头背景色（HEX，不带#），来自导出模板配置；为空时用默认浅蓝 D9E2F3。</summary>
+    public string? HeaderShading { get; set; }
 }
 
 sealed class SigningInfoRow
@@ -479,8 +481,8 @@ static class MergeDocumentsAction
             blocks.Add(MakeEmptyParagraph());
             blocks.Add(MakeParagraph(page.Subtitle, centered: true, sizeHalfPt: 24));
         }
-        // 中部留白：把信息行推到页面下方
-        for (var i = 0; i < 10; i++) blocks.Add(MakeEmptyParagraph());
+        // 中部留白：把信息行推到页面下方（靠近底部）
+        for (var i = 0; i < 22; i++) blocks.Add(MakeEmptyParagraph());
         // 信息行：左对齐，宋体小四（24 half pt），1.5 倍行距
         foreach (var row in page.InfoRows)
         {
@@ -591,43 +593,47 @@ static class MergeDocumentsAction
     /// <summary>签章页：标题 + 描述段落 + 小标题 + 信息表(表头背景色) + 小标题 + 双列签章表。</summary>
     static List<OpenXmlElement> BuildSigningPage(SigningPageRequest signing)
     {
+        var headerShading = string.IsNullOrWhiteSpace(signing.HeaderShading) ? "D9E2F3" : signing.HeaderShading;
         var blocks = new List<OpenXmlElement>
         {
-            MakeParagraph(signing.Title, centered: true, bold: true, sizeHalfPt: 36),
+            MakeParagraph(signing.Title, centered: true, bold: true, sizeHalfPt: 44),
             MakeEmptyParagraph(),
         };
         if (!string.IsNullOrEmpty(signing.Preamble))
         {
-            blocks.Add(MakeParagraph(signing.Preamble, sizeHalfPt: 24, firstLineIndent: 480));
+            blocks.Add(MakeParagraph(signing.Preamble, sizeHalfPt: 28, firstLineIndent: 480, lineSpacing: 480));
             blocks.Add(MakeEmptyParagraph());
         }
 
         // 信息表
         if (signing.InfoRows.Count > 0)
         {
-            blocks.Add(MakeParagraph("编制单位信息如下：", bold: true, sizeHalfPt: 24));
+            blocks.Add(MakeParagraph("编制单位信息如下：", bold: true, sizeHalfPt: 28));
             blocks.Add(MakeEmptyParagraph());
-            blocks.Add(BuildInfoTable(signing.InfoRows));
+            blocks.Add(BuildInfoTable(signing.InfoRows, headerShading));
             blocks.Add(MakeEmptyParagraph());
         }
 
         // 签章表（双列：委托单位 | 编制单位）
         if (!string.IsNullOrEmpty(signing.ClientParty?.Header) || !string.IsNullOrEmpty(signing.PrepareParty?.Header))
         {
-            blocks.Add(MakeParagraph("以下为第三方机构及委托方签字盖章位置：", bold: true, sizeHalfPt: 24));
+            blocks.Add(MakeParagraph("以下为第三方机构及委托方签字盖章位置：", bold: true, sizeHalfPt: 28));
             blocks.Add(MakeEmptyParagraph());
-            blocks.Add(BuildSignatureTable(signing.ClientParty, signing.PrepareParty));
+            blocks.Add(BuildSignatureTable(signing.ClientParty, signing.PrepareParty, headerShading));
         }
 
         return blocks;
     }
 
-    /// <summary>构建信息表格：2 列，表头（项目/内容）带浅蓝色背景。</summary>
-    static Wp.Table BuildInfoTable(List<SigningInfoRow> rows)
+    /// <summary>构建信息表格：2 列，表头（项目/内容）带背景色，全部文字居中，表格占满正文宽度。</summary>
+    static Wp.Table BuildInfoTable(List<SigningInfoRow> rows, string headerShading)
     {
+        const int col1 = 2600;
+        const int col2 = 6600;
         var table = new Wp.Table();
         var tblPr = new Wp.TableProperties(
-            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = "9000" },
+            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = (col1 + col2).ToString() },
+            new Wp.TableJustification { Val = Wp.TableRowAlignmentValues.Center },
             new Wp.TableBorders(
                 new Wp.TopBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.LeftBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
@@ -635,90 +641,133 @@ static class MergeDocumentsAction
                 new Wp.RightBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.InsideHorizontalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" }
+            ),
+            new Wp.TableCellMargin(
+                new Wp.TopMargin { Width = "120", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.LeftMargin { Width = "200", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.BottomMargin { Width = "120", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.RightMargin { Width = "200", Type = Wp.TableWidthUnitValues.Dxa }
             )
         );
         table.AppendChild(tblPr);
 
         var grid = new Wp.TableGrid(
-            new Wp.GridColumn { Width = "1800" },
-            new Wp.GridColumn { Width = "7200" }
+            new Wp.GridColumn { Width = col1.ToString() },
+            new Wp.GridColumn { Width = col2.ToString() }
         );
         table.AppendChild(grid);
 
-        // 表头行（浅蓝背景）
+        // 表头行（背景色来自模板配置）
         var headerRow = new Wp.TableRow();
-        headerRow.AppendChild(MakeCell("项目", widthTwips: 1800, bold: true, centered: true, shading: "D9E2F3"));
-        headerRow.AppendChild(MakeCell("内容", widthTwips: 7200, bold: true, centered: true, shading: "D9E2F3"));
+        headerRow.AppendChild(MakeCell("项目", widthTwips: col1, bold: true, centered: true, shading: headerShading, sizeHalfPt: 28));
+        headerRow.AppendChild(MakeCell("内容", widthTwips: col2, bold: true, centered: true, shading: headerShading, sizeHalfPt: 28));
         table.AppendChild(headerRow);
 
         foreach (var row in rows)
         {
             var tr = new Wp.TableRow();
-            tr.AppendChild(MakeCell(row.Label, widthTwips: 1800, bold: true));
-            tr.AppendChild(MakeCell(row.Value, widthTwips: 7200));
+            tr.AppendChild(MakeCell(row.Label, widthTwips: col1, bold: true, centered: true, sizeHalfPt: 28));
+            tr.AppendChild(MakeCell(row.Value, widthTwips: col2, centered: true, sizeHalfPt: 28));
             table.AppendChild(tr);
         }
         return table;
     }
 
-    /// <summary>构建双列签章表格：左列委托单位、右列编制单位，表头带浅蓝背景。</summary>
-    static Wp.Table BuildSignatureTable(SigningParty? client, SigningParty? prepare)
+    /// <summary>构建双列签章表格：仅 1 行 2 列，左右单元格内用段落排列内容，外框+中间竖线全部实线。</summary>
+    static Wp.Table BuildSignatureTable(SigningParty? client, SigningParty? prepare, string headerShading)
     {
+        const int colW = 4600;
         var table = new Wp.Table();
         var tblPr = new Wp.TableProperties(
-            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = "9000" },
+            new Wp.TableWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = (colW * 2).ToString() },
+            new Wp.TableJustification { Val = Wp.TableRowAlignmentValues.Center },
             new Wp.TableBorders(
                 new Wp.TopBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.LeftBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.RightBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
-                new Wp.InsideHorizontalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" },
                 new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Size = 4, Color = "000000" }
+            ),
+            new Wp.TableCellMargin(
+                new Wp.TopMargin { Width = "40", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.LeftMargin { Width = "200", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.BottomMargin { Width = "40", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.RightMargin { Width = "200", Type = Wp.TableWidthUnitValues.Dxa }
             )
         );
         table.AppendChild(tblPr);
 
         var grid = new Wp.TableGrid(
-            new Wp.GridColumn { Width = "4500" },
-            new Wp.GridColumn { Width = "4500" }
+            new Wp.GridColumn { Width = colW.ToString() },
+            new Wp.GridColumn { Width = colW.ToString() }
         );
         table.AppendChild(grid);
 
-        // 表头行
-        var headerRow = new Wp.TableRow();
-        headerRow.AppendChild(MakeCell(client?.Header ?? "委托单位（盖章）", widthTwips: 4500, bold: true, centered: true, shading: "D9E2F3"));
-        headerRow.AppendChild(MakeCell(prepare?.Header ?? "编制单位（盖章）", widthTwips: 4500, bold: true, centered: true, shading: "D9E2F3"));
-        table.AppendChild(headerRow);
-
-        // 单位名称行
-        var nameRow = new Wp.TableRow();
-        nameRow.AppendChild(MakeCell($"单位名称：{client?.UnitName ?? ""}", widthTwips: 4500));
-        nameRow.AppendChild(MakeCell($"单位名称：{prepare?.UnitName ?? ""}", widthTwips: 4500));
-        table.AppendChild(nameRow);
-
-        // 盖章位置行
-        var sealRow = new Wp.TableRow(new Wp.TableRowHeight { Val = 1800, HeightType = Wp.HeightRuleValues.AtLeast });
-        sealRow.AppendChild(MakeCell(client?.SealHint ?? "（此处加盖单位公章）", widthTwips: 4500));
-        sealRow.AppendChild(MakeCell(prepare?.SealHint ?? "（此处加盖单位公章）", widthTwips: 4500));
-        table.AppendChild(sealRow);
-
-        // 签字行
-        var signRow = new Wp.TableRow();
-        signRow.AppendChild(MakeCell(client?.SignatureLabel ?? "法定代表人/授权代表（签字）：", widthTwips: 4500));
-        signRow.AppendChild(MakeCell(prepare?.SignatureLabel ?? "法定代表人/授权代表（签字）：", widthTwips: 4500));
-        table.AppendChild(signRow);
-
-        // 日期行
-        var dateRow = new Wp.TableRow();
-        dateRow.AppendChild(MakeCell(client?.DateLabel ?? "日期：", widthTwips: 4500));
-        dateRow.AppendChild(MakeCell(prepare?.DateLabel ?? "日期：", widthTwips: 4500));
-        table.AppendChild(dateRow);
+        // 单行双列，每列一个单元格
+        var row = new Wp.TableRow();
+        row.AppendChild(BuildSignatureCell(client, colW, headerShading));
+        row.AppendChild(BuildSignatureCell(prepare, colW, headerShading));
+        table.AppendChild(row);
 
         return table;
     }
 
-    /// <summary>工厂方法：生成带字体/字号/对齐/加粗/首行缩进/行距的段落。</summary>
-    static Wp.Paragraph MakeParagraph(string text, bool centered = false, bool bold = false, int sizeHalfPt = 24, int? firstLineIndent = null, int? lineSpacing = null)
+    /// <summary>构建签章单元格：表头铺满宽度无内边距，内容有左右内边距。</summary>
+    static Wp.TableCell BuildSignatureCell(SigningParty? party, int colW, string headerShading)
+    {
+        const int padTop = 0;
+        const int padBottom = 120;
+        const string contentIndent = "300";
+
+        var cell = new Wp.TableCell();
+        // 单元格左右边距为0，让表头背景铺满到边框
+        var cellProps = new Wp.TableCellProperties(
+            new Wp.TableCellWidth { Type = Wp.TableWidthUnitValues.Dxa, Width = new StringValue(colW.ToString()) },
+            new Wp.TableCellMargin(
+                new Wp.TopMargin { Width = padTop.ToString(), Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.LeftMargin { Width = "0", Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.BottomMargin { Width = padBottom.ToString(), Type = Wp.TableWidthUnitValues.Dxa },
+                new Wp.RightMargin { Width = "0", Type = Wp.TableWidthUnitValues.Dxa }
+            )
+        );
+        cell.AppendChild(cellProps);
+
+        // 表头段落：居中、加粗、背景色铺满、零间距、底边框
+        var headerPara = new Wp.Paragraph();
+        var headerParaPr = new Wp.ParagraphProperties(
+            new Wp.Justification { Val = Wp.JustificationValues.Center },
+            new Wp.Indentation { Left = "0", Right = "0" },
+            new Wp.SpacingBetweenLines { Before = "0", After = "0", Line = "240", LineRule = Wp.LineSpacingRuleValues.Auto },
+            new Wp.Shading { Fill = headerShading },
+            new Wp.ParagraphBorders(
+                new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4u, Color = "000000" }
+            )
+        );
+        headerPara.AppendChild(headerParaPr);
+        headerPara.AppendChild(MakeRun(party?.Header ?? "（盖章）", 24, true));
+        cell.AppendChild(headerPara);
+
+        // 内容段落：左右缩进200作为内边距
+        cell.AppendChild(MakeParagraph($"单位名称：{party?.UnitName ?? ""}", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingBefore: "60"));
+
+        var sealPara = new Wp.Paragraph(
+            new Wp.ParagraphProperties(
+                new Wp.SpacingBetweenLines { Before = "300", After = "300" },
+                new Wp.Indentation { Left = contentIndent, Right = contentIndent }
+            )
+        );
+        sealPara.AppendChild(MakeRun(party?.SealHint ?? "（此处加盖单位公章）", 24, false));
+        cell.AppendChild(sealPara);
+
+        cell.AppendChild(MakeParagraph(party?.SignatureLabel ?? "法定代表人/授权代表（签字）：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent));
+
+        cell.AppendChild(MakeParagraph(party?.DateLabel ?? "日期：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingAfter: "60"));
+
+        return cell;
+    }
+
+    /// <summary>工厂方法：生成带字体/字号/对齐/加粗/首行缩进/行距/左缩进/右缩进/段前段后间距的段落。</summary>
+    static Wp.Paragraph MakeParagraph(string text, bool centered = false, bool bold = false, int sizeHalfPt = 24, int? firstLineIndent = null, int? lineSpacing = null, string? indentation = null, string? rightIndentation = null, string? spacingBefore = null, string? spacingAfter = null)
     {
         var pPr = new Wp.ParagraphProperties();
         if (centered)
@@ -729,9 +778,24 @@ static class MergeDocumentsAction
         {
             pPr.AppendChild(new Wp.Indentation { FirstLine = new StringValue(firstLineIndent.Value.ToString()) });
         }
-        if (lineSpacing is not null)
+        if (indentation is not null || rightIndentation is not null)
         {
-            pPr.AppendChild(new Wp.SpacingBetweenLines { Line = new StringValue(lineSpacing.Value.ToString()), LineRule = Wp.LineSpacingRuleValues.Auto });
+            var ind = new Wp.Indentation();
+            if (indentation is not null) ind.Left = indentation;
+            if (rightIndentation is not null) ind.Right = rightIndentation;
+            pPr.AppendChild(ind);
+        }
+        if (lineSpacing is not null || spacingBefore is not null || spacingAfter is not null)
+        {
+            var spacing = new Wp.SpacingBetweenLines();
+            if (lineSpacing is not null)
+            {
+                spacing.Line = new StringValue(lineSpacing.Value.ToString());
+                spacing.LineRule = Wp.LineSpacingRuleValues.Auto;
+            }
+            if (spacingBefore is not null) spacing.Before = spacingBefore;
+            if (spacingAfter is not null) spacing.After = spacingAfter;
+            pPr.AppendChild(spacing);
         }
         var run = MakeRun(text, sizeHalfPt, bold);
         var para = new Wp.Paragraph(pPr);
@@ -772,8 +836,9 @@ static class MergeDocumentsAction
         return run;
     }
 
-    /// <summary>工厂方法：生成表格单元格（指定宽度、可选加粗/居中/背景色）。</summary>
-    static Wp.TableCell MakeCell(string text, int widthTwips, bool bold = false, bool centered = false, string? shading = null)
+    /// <summary>工厂方法：生成表格单元格（指定宽度、可选加粗/居中/背景色/各边边框）。</summary>
+    static Wp.TableCell MakeCell(string text, int widthTwips, bool bold = false, bool centered = false, string? shading = null, int sizeHalfPt = 24,
+        bool borderTop = false, bool borderBottom = false, bool borderLeft = false, bool borderRight = false)
     {
         var cell = new Wp.TableCell();
         var cellProps = new Wp.TableCellProperties(
@@ -783,13 +848,23 @@ static class MergeDocumentsAction
         {
             cellProps.AppendChild(new Wp.Shading { Fill = shading });
         }
+        if (borderTop || borderBottom || borderLeft || borderRight)
+        {
+            var borders = new Wp.TableCellBorders();
+            // 只添加需要的边框，不添加 Nil 边框（避免 Word 渲染异常）
+            if (borderTop) borders.AppendChild(new Wp.TopBorder { Val = Wp.BorderValues.Single, Size = 4u, Color = "000000" });
+            if (borderBottom) borders.AppendChild(new Wp.BottomBorder { Val = Wp.BorderValues.Single, Size = 4u, Color = "000000" });
+            if (borderLeft) borders.AppendChild(new Wp.LeftBorder { Val = Wp.BorderValues.Single, Size = 4u, Color = "000000" });
+            if (borderRight) borders.AppendChild(new Wp.RightBorder { Val = Wp.BorderValues.Single, Size = 4u, Color = "000000" });
+            cellProps.AppendChild(borders);
+        }
         cell.AppendChild(cellProps);
         var para = new Wp.Paragraph();
         if (centered)
         {
             para.AppendChild(new Wp.ParagraphProperties(new Wp.Justification { Val = Wp.JustificationValues.Center }));
         }
-        para.AppendChild(MakeRun(text, 24, bold));
+        para.AppendChild(MakeRun(text, sizeHalfPt, bold));
         cell.AppendChild(para);
         return cell;
     }

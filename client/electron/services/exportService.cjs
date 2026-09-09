@@ -2678,6 +2678,18 @@ function addTocNumbering(entries) {
 }
 
 /**
+ * 从导出模板配置中读取表头背景色。
+ * 读取路径：export_format.table_style.header_row.background_color；
+ * 没有配置或取值非法时回退默认浅蓝 D9E2F3。返回值不带 # 前缀。
+ */
+function resolveTableHeaderShading(exportFormat) {
+  const raw = exportFormat?.table_style?.header_row?.background_color;
+  if (typeof raw !== 'string' || !raw.trim()) return 'D9E2F3';
+  const cleaned = raw.trim().replace(/^#/, '').toUpperCase();
+  return /^[0-9A-F]{6}$/.test(cleaned) ? cleaned : 'D9E2F3';
+}
+
+/**
  * 兜底版前置页数据（不调用 AI，用于 AI 失败或未注入时）。
  */
 function buildGreenReportFrontMatter(payload) {
@@ -2705,6 +2717,9 @@ function buildGreenReportFrontMatter(payload) {
   const now = new Date();
   const signDate = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`;
 
+  // 表头背景色：优先取导出模板 table_style.header_row.background_color，没有则用默认浅蓝
+  const headerShading = resolveTableHeaderShading(payload.export_format);
+
   return {
     titlePage: {
       title: reportTitle,
@@ -2721,6 +2736,7 @@ function buildGreenReportFrontMatter(payload) {
     signingPage: {
       title: '第三方编制信息及签章页',
       preamble: `本报告由 ${compileUnit} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`,
+      headerShading,
       infoRows: [
         { label: '报告名称', value: reportTitle },
         { label: '委托单位', value: clientUnit },
@@ -2810,6 +2826,9 @@ async function generateFrontMatterByAi(aiService, payload) {
 
   const signingPreamble = aiResult?.signingPreamble || `本报告由 ${compileUnit} 接受 ${clientUnit || '委托单位'} 委托，依据国家相关法律法规、标准规范及委托方提供的技术资料，按照独立、客观、公正的原则编制完成。`;
 
+  // 表头背景色：优先取导出模板 table_style.header_row.background_color，没有则用默认浅蓝
+  const headerShading = resolveTableHeaderShading(payload.export_format);
+
   const titlePage = {
     title: reportTitle,
     subtitle: reportingPeriod ? `（${reportingPeriod}）` : '',
@@ -2830,6 +2849,7 @@ async function generateFrontMatterByAi(aiService, payload) {
   const signingPage = {
     title: '第三方编制信息及签章页',
     preamble: signingPreamble,
+    headerShading,
     infoRows: [
       { label: '报告名称', value: reportTitle },
       { label: '委托单位', value: clientUnit },

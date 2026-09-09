@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml.Packaging;
 using System.IO;
 using System.Diagnostics;
 using Wp = DocumentFormat.OpenXml.Wordprocessing;
+using Dw = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace Yibiao.OpenXmlHelper.Jobs;
 
@@ -222,12 +223,15 @@ static class MergeDocumentsAction
             }
 
             // 现在把尾页内容 + 尾页 sectPr 追加到 body 末尾
+            const long PageWidthEmu = 11906L * 635L;
             foreach (var block in backBlocks)
             {
                 var cloned = (OpenXmlElement)block.CloneNode(true);
                 NormalizeStyleReferences(cloned, context.StyleIds);
                 RemapNumbering(cloned, coverPart, destPart, context);
                 RemapRelationships(cloned, coverPart, destPart, context.RelationshipIds);
+                // 适配尾页文本框铺满页面宽度（跳过图片 anchor 如 QR 码）
+                FitTextboxesToPage(cloned, PageWidthEmu);
                 destBody.AppendChild(cloned);
             }
             // 尾页 section 用封面模板尾页的 sectPr（零边距），让尾页内容铺满整页
@@ -259,6 +263,39 @@ static class MergeDocumentsAction
             var finalTables = destBody.Elements<Wp.Table>().Count();
             var finalSectPr = destBody.Elements<Wp.SectionProperties>().Count();
             Diag($"[merge] SAVE OK. body: paras={finalParas}, tables={finalTables}, sectPr={finalSectPr}");
+
+            // 诊断：重新打开输出文件，dump 签章页（最后两张表）的真实边框状态
+            try
+            {
+                using var verifyDoc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(outputPath, false);
+                var verifyBody = verifyDoc.MainDocumentPart?.Document.Body;
+                if (verifyBody is not null)
+                {
+                    var allTables = verifyBody.Elements<Wp.Table>().ToList();
+                    var lastTwo = allTables.Skip(Math.Max(0, allTables.Count - 2)).ToList();
+                    Diag($"[merge] VERIFY: total tables in output={allTables.Count}, dumping last {lastTwo.Count} (signing page)");
+                    var ti = 0;
+                    foreach (var t in lastTwo)
+                    {
+                        var pr = t.GetFirstChild<Wp.TableProperties>();
+                        var styleNode = pr?.GetFirstChild<Wp.TableStyle>();
+                        var borders = pr?.GetFirstChild<Wp.TableBorders>();
+                        var allPrEx = t.Descendants().Where(e => e.LocalName == "tblPrEx").ToList();
+                        int tcBordersCount = 0;
+                        foreach (var c in t.Elements<Wp.TableRow>().SelectMany(r => r.Elements<Wp.TableCell>()))
+                        {
+                            if (c.GetFirstChild<Wp.TableCellProperties>()?.GetFirstChild<Wp.TableCellBorders>() is not null) tcBordersCount++;
+                        }
+                        Diag($"[merge] VERIFY table[{ti}]: tblStyle={styleNode?.Val?.Value ?? "(none)"} tblBorders_top={borders?.TopBorder?.Color?.Value ?? "(none)"} tblPrEx_count={allPrEx.Count} cell_tcBorders_count={tcBordersCount}");
+                        ti++;
+                    }
+                }
+            }
+            catch (Exception verifyEx)
+            {
+                Diag($"[merge] VERIFY failed: {verifyEx.Message}");
+            }
+
             return JobResult.Success(Name, outputPath);
         }
         catch (Exception exception)
@@ -348,6 +385,30 @@ static class MergeDocumentsAction
         }
 
         return (front, back, frontSectPr, backSectPr);
+    }
+
+    /// <summary>把尾页 block 中所有非图片类 Anchor（文本框）调整为铺满页面宽度。</summary>
+    static void FitTextboxesToPage(OpenXmlElement block, long pageWidthEmu)
+    {
+        foreach (var anchor in block.Descendants<Dw.Anchor>())
+        {
+            // 跳过图片类 anchor（QR 码等带 blip 的保持原样）
+            if (anchor.Descendants<DocumentFormat.OpenXml.Drawing.BlipFill>().Any()) continue;
+
+            // extent.cx = 页面宽度
+            var extent = anchor.Extent;
+            if (extent is not null)
+            {
+                extent.Cx = (uint)pageWidthEmu;
+            }
+
+            // positionH 的 posOffset 设为 0（从页面左侧开始）
+            var posH = anchor.HorizontalPosition;
+            if (posH is not null)
+            {
+                posH.PositionOffset = new Dw.PositionOffset("0");
+            }
+        }
     }
 
     /// <summary>遍历所有段落（含文本框内），匹配"委托单位："等 after-label，在段落末尾追加字段值 Run。</summary>
@@ -567,31 +628,36 @@ static class MergeDocumentsAction
             if (!string.IsNullOrWhiteSpace(borderColor))
             {
                 var tblPr = table.GetFirstChild<Wp.TableProperties>() ?? table.AppendChild(new Wp.TableProperties());
-                // 移除 tblStyle：样式中的边框优先级最高，会覆盖 tblPr/borders
-                var styleNode = tblPr.GetFirstChild<Wp.TableStyle>();
-                if (styleNode is not null)
+
+                // 1a. 清 tblStyle（tblPr 直接子节点）
+                tblPr.GetFirstChild<Wp.TableStyle>()?.Remove();
+
+                // 1b. 清所有 tblPrEx——它可能在 tbl 下或 tr 下，优先级高于 tblPr
+                var allPrEx = table.Descendants().Where(e => e.LocalName == "tblPrEx").ToList();
+                foreach (var ex in allPrEx)
                 {
-                    Diag($"[merge]   clearing tblStyle val={styleNode.Val?.Value}");
-                    styleNode.Remove();
+                    Diag($"[merge]   removing tblPrEx from {ex.Parent?.LocalName}");
+                    ex.Remove();
                 }
 
-                // 清除 tblPrEx（任何命名空间）中的 tblBorders，它优先级高于 tblPr
-                var exNode = table.ChildElements.FirstOrDefault(e => e.LocalName == "tblPrEx");
-                if (exNode is not null)
-                {
-                    Diag($"[merge]   removing tblPrEx (ns={exNode.NamespaceUri})");
-                    exNode.Remove();
-                }
-
-                // 清除所有单元格级边框（TcBorders），否则会覆盖表格级边框
+                // 1c. 清所有单元格级 tcBorders（任何单元格里的边框都会覆盖表格级）
+                int tcBordersCleared = 0;
                 foreach (var cell in table.Elements<Wp.TableRow>().SelectMany(r => r.Elements<Wp.TableCell>()))
                 {
                     var tcPr = cell.GetFirstChild<Wp.TableCellProperties>();
-                    tcPr?.GetFirstChild<Wp.TableCellBorders>()?.Remove();
+                    if (tcPr?.GetFirstChild<Wp.TableCellBorders>() is { } b)
+                    {
+                        b.Remove();
+                        tcBordersCleared++;
+                    }
+                }
+                if (tcBordersCleared > 0)
+                {
+                    Diag($"[merge]   cleared {tcBordersCleared} cell tcBorders");
                 }
 
-                var oldBorders = tblPr.GetFirstChild<Wp.TableBorders>();
-                oldBorders?.Remove();
+                // 1d. 设置表格级 tblBorders
+                tblPr.GetFirstChild<Wp.TableBorders>()?.Remove();
                 var newBorders = new Wp.TableBorders(
                     new Wp.TopBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
                     new Wp.LeftBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
@@ -613,8 +679,7 @@ static class MergeDocumentsAction
                     foreach (var cell in firstRow.Elements<Wp.TableCell>())
                     {
                         var tcPr = cell.GetFirstChild<Wp.TableCellProperties>() ?? cell.AppendChild(new Wp.TableCellProperties());
-                        var oldShd = tcPr.GetFirstChild<Wp.Shading>();
-                        oldShd?.Remove();
+                        tcPr.GetFirstChild<Wp.Shading>()?.Remove();
                         tcPr.AppendChild(new Wp.Shading { Fill = headerBg, Val = Wp.ShadingPatternValues.Clear });
                     }
                     Diag($"[merge]   set header bg={headerBg}, cells={firstRow.Elements<Wp.TableCell>().Count()}");

@@ -2463,11 +2463,13 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
             fs.mkdirSync(jobsDir, { recursive: true });
             fs.writeFileSync(tempBodyPath, buildResult.buffer);
             const coverTemplatePath = getGreenReportCoverTemplatePath(appRef);
+            const coverTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
             const coverFieldsMap = {
               '委托单位': coverFields.clientUnit || '',
               '报告编号': coverFields.reportCode || '',
               '编制单位': coverFields.compileUnit || '',
               '编制日期': coverFields.compileDate || '',
+              reportTitle: coverTitle,
             };
             let frontMatter = null;
             try {

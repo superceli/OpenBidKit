@@ -19,9 +19,17 @@ sealed class MergeDocumentsRequest
 
 sealed class FrontMatterRequest
 {
-    public FrontMatterPage? CompilationNotes { get; set; }
+    public TitlePageRequest? TitlePage { get; set; }
     public TocPageRequest? Toc { get; set; }
     public SigningPageRequest? SigningPage { get; set; }
+}
+
+/// <summary>扉页：报告标题、副标题，以及委托单位/报告编号/编制日期/编制单位/公示平台等信息行。</summary>
+sealed class TitlePageRequest
+{
+    public string Title { get; set; } = "";
+    public string Subtitle { get; set; } = "";
+    public List<FrontMatterParagraph> InfoRows { get; set; } = new();
 }
 
 sealed class FrontMatterPage
@@ -189,6 +197,9 @@ static class MergeDocumentsAction
             // 去掉公示网址文本里的换行符，确保一行展示
             NormalizeWebsiteLineBreaks(destBody);
 
+            // 让 Word 打开时自动更新目录域（页码），且不弹出"是否更新域"提示框
+            EnableUpdateFieldsOnOpen(destPart);
+
             destPart.Document.Save();
             // output 可能位于工作区外（用户保存路径），直接返回绝对路径
             return JobResult.Success(Name, outputPath);
@@ -196,6 +207,42 @@ static class MergeDocumentsAction
         catch (Exception exception)
         {
             return JobResult.Fail(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// 在文档 settings.xml 中设置 updateFields=true 与 doNotPromptForUpdateFields=true，
+    /// 使 Word 打开时自动更新目录域（页码）且不弹出确认提示。
+    /// </summary>
+    static void EnableUpdateFieldsOnOpen(MainDocumentPart destPart)
+    {
+        const string W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var settingsPart = destPart.DocumentSettingsPart ?? destPart.AddNewPart<DocumentSettingsPart>();
+        var settings = settingsPart.Settings;
+        var isNew = settings is null;
+        if (isNew)
+        {
+            settings = new Wp.Settings();
+        }
+        // 移除已有的同名设置，避免重复
+        foreach (var child in settings!.ChildElements.ToList())
+        {
+            var local = child.LocalName;
+            if (local == "updateFields" || local == "doNotPromptForUpdateFields")
+            {
+                child.Remove();
+            }
+        }
+        // 直接在 settings 根节点注入两个开关元素（OpenXML SDK 3.x 无对应强类型）
+        settings.InnerXml = $"<w:updateFields xmlns:w=\"{W_NS}\"/><w:doNotPromptForUpdateFields xmlns:w=\"{W_NS}\"/>" + settings.InnerXml;
+        if (isNew)
+        {
+            // 新建的 Settings 才需要关联到 Part；已有 Settings 重新赋值会报"已关联到其他 Part"
+            settingsPart.Settings = settings;
+        }
+        else
+        {
+            settings.Save();
         }
     }
 
@@ -397,20 +444,50 @@ static class MergeDocumentsAction
     static List<OpenXmlElement> BuildFrontMatterBlocks(FrontMatterRequest frontMatter)
     {
         var blocks = new List<OpenXmlElement>();
-        if (frontMatter.CompilationNotes is not null)
+        // 1. 扉页（封面后第一页）
+        if (frontMatter.TitlePage is not null)
         {
-            blocks.AddRange(BuildCompilationNotesPage(frontMatter.CompilationNotes));
+            blocks.AddRange(BuildTitlePage(frontMatter.TitlePage));
             blocks.Add(MakePageBreakParagraph());
         }
+        // 2. 目录
         if (frontMatter.Toc is not null)
         {
             blocks.AddRange(BuildTocPage(frontMatter.Toc));
             blocks.Add(MakePageBreakParagraph());
         }
+        // 3. 签章页
         if (frontMatter.SigningPage is not null)
         {
             blocks.AddRange(BuildSigningPage(frontMatter.SigningPage));
             blocks.Add(MakePageBreakParagraph());
+        }
+        return blocks;
+    }
+
+    /// <summary>扉页：标题居中加粗 + 副标题居中，下方信息行左对齐（委托单位/报告编号/编制日期/编制单位/公示平台）。</summary>
+    static List<OpenXmlElement> BuildTitlePage(TitlePageRequest page)
+    {
+        var blocks = new List<OpenXmlElement>();
+        // 顶部留白：用空行把标题推到页面约 1/3 处
+        for (var i = 0; i < 6; i++) blocks.Add(MakeEmptyParagraph());
+        // 主标题：居中、加粗、二号字（44 half pt = 22pt）
+        blocks.Add(MakeParagraph(page.Title, centered: true, bold: true, sizeHalfPt: 44));
+        // 副标题：居中、小四（24 half pt）
+        if (!string.IsNullOrEmpty(page.Subtitle))
+        {
+            blocks.Add(MakeEmptyParagraph());
+            blocks.Add(MakeParagraph(page.Subtitle, centered: true, sizeHalfPt: 24));
+        }
+        // 中部留白：把信息行推到页面下方
+        for (var i = 0; i < 10; i++) blocks.Add(MakeEmptyParagraph());
+        // 信息行：左对齐，宋体小四（24 half pt），1.5 倍行距
+        foreach (var row in page.InfoRows)
+        {
+            var text = string.IsNullOrEmpty(row.Label)
+                ? row.Value
+                : $"{row.Label}：{row.Value}";
+            blocks.Add(MakeParagraph(text, sizeHalfPt: 24, lineSpacing: 480));
         }
         return blocks;
     }
@@ -458,8 +535,8 @@ static class MergeDocumentsAction
         para.AppendChild(instrRun);
         // fldChar separate
         para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.Separate }));
-        // 占位提示文字（Word 更新域后会被替换）
-        para.AppendChild(MakeRun("右键点击此处选择「更新域」即可生成目录页码", sizeHalfPt: 22));
+        // 占位提示文字（Word 打开时自动更新目录及页码）
+        para.AppendChild(MakeRun("正在生成目录，请稍候...", sizeHalfPt: 22));
         // fldChar end
         para.AppendChild(new Wp.Run(new Wp.FieldChar { FieldCharType = Wp.FieldCharValues.End }));
         return para;

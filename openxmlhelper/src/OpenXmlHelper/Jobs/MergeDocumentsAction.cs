@@ -224,16 +224,32 @@ static class MergeDocumentsAction
 
             // 现在把尾页内容 + 尾页 sectPr 追加到 body 末尾
             const long PageWidthEmu = 11906L * 635L;
+            Diag($"[merge] backBlocks: {backBlocks.Count}, backSectPr present={backSectPr is not null}");
+            if (backSectPr is not null)
+            {
+                var pgMar = backSectPr.GetFirstChild<Wp.PageMargin>();
+                Diag($"[merge] backSectPr pgMar: top={pgMar?.Top?.Value} right={pgMar?.Right?.Value} bottom={pgMar?.Bottom?.Value} left={pgMar?.Left?.Value}");
+                var pgSz = backSectPr.GetFirstChild<Wp.PageSize>();
+                Diag($"[merge] backSectPr pgSz: w={pgSz?.Width?.Value} h={pgSz?.Height?.Value}");
+            }
+            int backAnchorCount = 0;
             foreach (var block in backBlocks)
             {
+                foreach (var anchor in block.Descendants<Dw.Anchor>()) backAnchorCount++;
                 var cloned = (OpenXmlElement)block.CloneNode(true);
                 NormalizeStyleReferences(cloned, context.StyleIds);
                 RemapNumbering(cloned, coverPart, destPart, context);
                 RemapRelationships(cloned, coverPart, destPart, context.RelationshipIds);
-                // 适配尾页文本框铺满页面宽度（跳过图片 anchor 如 QR 码）
-                FitTextboxesToPage(cloned, PageWidthEmu);
+                // 把尾页背景 inline 图片转成浮动 anchor，固定在页面左上角 (0,0)，铺满页面。
+                // 背景是整页大图片（cx > 7,000,000 EMU），inline 会受段落流影响导致偏移。
+                ConvertBackCoverBackgroundToAnchor(cloned);
+                // 文字框的 positionH/positionV 原来是 relativeFrom="column"/"paragraph"，
+                // 背景转成 anchor 后段落收缩，基准点偏移导致文字错位。
+                // 统一改成 relativeFrom="page"，保持原 posOffset 不变。
+                FixBackCoverAnchorsToPage(cloned);
                 destBody.AppendChild(cloned);
             }
+            Diag($"[merge] backBlocks total anchors: {backAnchorCount}");
             // 尾页 section 用封面模板尾页的 sectPr（零边距），让尾页内容铺满整页
             if (backSectPr is not null)
             {
@@ -407,6 +423,73 @@ static class MergeDocumentsAction
             if (posH is not null)
             {
                 posH.PositionOffset = new Dw.PositionOffset("0");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把尾页背景的 inline 大图片转成浮动 anchor，固定在页面左上角 (0,0)。
+    /// 背景图片 cx > 7,000,000 EMU（接近整页宽），inline 会受段落流影响导致偏移。
+    /// </summary>
+    static void ConvertBackCoverBackgroundToAnchor(OpenXmlElement block)
+    {
+        const long BackgroundMinCx = 7_000_000L;
+        var inlines = block.Descendants<Dw.Inline>().ToList();
+        foreach (var inline in inlines)
+        {
+            var extent = inline.Extent;
+            if (extent is null) continue;
+            long cx = (long)(extent.Cx?.Value ?? 0);
+            if (cx < BackgroundMinCx) continue;
+
+            // 用 inline 的子元素（graphic 等）构造一个新的 anchor
+            var graphic = inline.GetFirstChild<DocumentFormat.OpenXml.Drawing.Graphic>();
+            if (graphic is null) continue;
+
+            var posH = new Dw.HorizontalPosition(new Dw.PositionOffset("0"))
+            {
+                RelativeFrom = Dw.HorizontalRelativePositionValues.Page,
+            };
+            var posV = new Dw.VerticalPosition(new Dw.PositionOffset("0"))
+            {
+                RelativeFrom = Dw.VerticalRelativePositionValues.Page,
+            };
+            var anchor = new Dw.Anchor(
+                new Dw.SimplePosition { X = 0L, Y = 0L },
+                posH,
+                posV,
+                new Dw.Extent { Cx = extent.Cx, Cy = extent.Cy },
+                new Dw.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new Dw.WrapNone(),
+                new Dw.DocProperties { Id = 1, Name = "BackCoverBackground" })
+            {
+                LayoutInCell = true,
+                AllowOverlap = true,
+            };
+            anchor.AppendChild((DocumentFormat.OpenXml.Drawing.Graphic)graphic.CloneNode(true));
+
+            inline.Parent?.ReplaceChild(anchor, inline);
+            Diag($"[merge]   converted background inline cx={cx} to anchor at page (0,0)");
+        }
+    }
+
+    /// <summary>
+    /// 把尾页所有 anchor 的 positionH/positionV 改成 relativeFrom="page"，保持原 posOffset。
+    /// 文字框原来是 column/paragraph 基准，背景转成浮动 anchor 后段落收缩，基准点偏移导致错位。
+    /// </summary>
+    static void FixBackCoverAnchorsToPage(OpenXmlElement block)
+    {
+        foreach (var anchor in block.Descendants<Dw.Anchor>())
+        {
+            var posH = anchor.HorizontalPosition;
+            if (posH is not null)
+            {
+                posH.RelativeFrom = Dw.HorizontalRelativePositionValues.Page;
+            }
+            var posV = anchor.VerticalPosition;
+            if (posV is not null)
+            {
+                posV.RelativeFrom = Dw.VerticalRelativePositionValues.Page;
             }
         }
     }

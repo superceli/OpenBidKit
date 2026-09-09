@@ -2424,7 +2424,9 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
       reportProgress(progressContext, 2, stats.mermaidCount
         ? `检测到 ${stats.mermaidCount} 张 Mermaid 图，导出时会转换为 Word 图片。`
         : '正在准备 Word 导出。');
-      const defaultFilename = `${sanitizeFilename(payload.project_name || (payload.feasibility_options ? '可行性研究报告' : '标书文档'))}_${formatExportTimestamp()}.docx`;
+      const reportName = (payload.cover_fields && payload.cover_fields.reportTitle) || payload.report_type_name || (payload.feasibility_options ? '可行性研究报告' : '标书文档');
+      const companyName = payload.company_name || (payload.cover_fields && payload.cover_fields.clientUnit) || '';
+      const defaultFilename = `${sanitizeFilename(reportName)}${companyName ? `-${sanitizeFilename(companyName)}` : ''}-${formatExportTimestamp()}.docx`;
       const defaultDir = app?.getPath ? app.getPath('downloads') : process.env.USERPROFILE || process.cwd();
       const result = await dialog.showSaveDialog({
         title: '导出 Word 文档',
@@ -2564,7 +2566,9 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
 
       const progressContext = { onProgress, warnings: [], stats };
       reportProgress(progressContext, 2, '正在准备 PDF 导出。');
-      const defaultFilename = `${sanitizeFilename(payload.project_name || '绿色报告')}_${formatExportTimestamp()}.pdf`;
+      const reportName = (payload.cover_fields && payload.cover_fields.reportTitle) || payload.report_type_name || '绿色报告';
+      const companyName = payload.company_name || (payload.cover_fields && payload.cover_fields.clientUnit) || '';
+      const defaultFilename = `${sanitizeFilename(reportName)}${companyName ? `-${sanitizeFilename(companyName)}` : ''}-${formatExportTimestamp()}.pdf`;
       const defaultDir = app?.getPath ? app.getPath('downloads') : process.env.USERPROFILE || process.cwd();
       const result = await dialog.showSaveDialog({
         title: '导出 PDF 文档',

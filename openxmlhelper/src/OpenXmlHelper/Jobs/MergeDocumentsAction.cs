@@ -710,33 +710,49 @@ static class MergeDocumentsAction
         FillSigningPartyCell(cells[1], prepare, signingPartyIsClient: false);
     }
 
-    /// <summary>填充签章单元格：单位名称、日期。</summary>
+    /// <summary>填充签章单元格：单位名称、日期，并设置各段之间的留白。</summary>
     static void FillSigningPartyCell(Wp.TableCell cell, SigningParty? party, bool signingPartyIsClient)
     {
         if (party is null) return;
         var paras = cell.Elements<Wp.Paragraph>().ToList();
         if (paras.Count < 1) return;
 
-        // 第 1 段：单位名称
-        ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
-
-        // 找日期段落：优先找含"日期"关键字的段落，找不到就用最后一段
-        Wp.Paragraph? datePara = null;
+        // 遍历每个段落，按内容类型设置文本和留白
         foreach (var p in paras)
         {
-            var t = ReadDirectRunText(p);
-            if (t.Contains("日期")) { datePara = p; break; }
-        }
-        datePara ??= paras.Last();
+            var text = ReadDirectRunText(p);
 
-        if (!string.IsNullOrWhiteSpace(party.DateLabel))
-        {
-            ReplaceParagraphText(datePara, party.DateLabel);
-            // 日期段落加段前间距，避免和上面的签字文字挤在一起
-            var datePPr = datePara.GetFirstChild<Wp.ParagraphProperties>() ?? datePara.AppendChild(new Wp.ParagraphProperties());
-            var dateSpacing = datePPr.GetFirstChild<Wp.SpacingBetweenLines>() ?? datePPr.AppendChild(new Wp.SpacingBetweenLines());
-            dateSpacing.Before = "60";
+            if (text.StartsWith("单位名称") || text.StartsWith("单位名称："))
+            {
+                ReplaceParagraphText(p, $"单位名称：{party.UnitName}");
+                SetParaSpacing(p, before: "120", after: "120");
+            }
+            else if (text.Contains("此处加盖") || text.Contains("公章"))
+            {
+                ReplaceParagraphText(p, party.SealHint);
+                SetParaSpacing(p, before: "400", after: "400");
+            }
+            else if (text.Contains("法定代表人") || text.Contains("授权代表") || text.Contains("签字"))
+            {
+                ReplaceParagraphText(p, party.SignatureLabel);
+                SetParaSpacing(p, before: "0", after: "200");
+            }
+            else if (text.Contains("日期"))
+            {
+                ReplaceParagraphText(p, party.DateLabel);
+                SetParaSpacing(p, before: "200", after: "120");
+            }
         }
+    }
+
+    /// <summary>设置段落的段前段后间距（twips）。</summary>
+    static void SetParaSpacing(Wp.Paragraph para, string? before = null, string? after = null, string? line = null)
+    {
+        var pPr = para.GetFirstChild<Wp.ParagraphProperties>() ?? para.AppendChild(new Wp.ParagraphProperties());
+        var spacing = pPr.GetFirstChild<Wp.SpacingBetweenLines>() ?? pPr.AppendChild(new Wp.SpacingBetweenLines());
+        if (before is not null) spacing.Before = before;
+        if (after is not null) spacing.After = after;
+        if (line is not null) { spacing.Line = line; spacing.LineRule = Wp.LineSpacingRuleValues.Auto; }
     }
 
     /// <summary>获取单元格内所有段落的纯文本拼接。</summary>
@@ -1032,21 +1048,21 @@ static class MergeDocumentsAction
         headerPara.AppendChild(MakeRun(party?.Header ?? "（盖章）", 24, true));
         cell.AppendChild(headerPara);
 
-        // 内容段落：左右缩进200作为内边距
-        cell.AppendChild(MakeParagraph($"单位名称：{party?.UnitName ?? ""}", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingBefore: "60"));
+        // 内容段落：左右缩进200作为内边距，各段之间预留盖章留白
+        cell.AppendChild(MakeParagraph($"单位名称：{party?.UnitName ?? ""}", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingBefore: "120", spacingAfter: "120"));
 
         var sealPara = new Wp.Paragraph(
             new Wp.ParagraphProperties(
-                new Wp.SpacingBetweenLines { Before = "300", After = "300" },
+                new Wp.SpacingBetweenLines { Before = "400", After = "400" },
                 new Wp.Indentation { Left = contentIndent, Right = contentIndent }
             )
         );
         sealPara.AppendChild(MakeRun(party?.SealHint ?? "（此处加盖单位公章）", 24, false));
         cell.AppendChild(sealPara);
 
-        cell.AppendChild(MakeParagraph(party?.SignatureLabel ?? "法定代表人/授权代表（签字）：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent));
+        cell.AppendChild(MakeParagraph(party?.SignatureLabel ?? "法定代表人/授权代表（签字）：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingBefore: "0", spacingAfter: "200"));
 
-        cell.AppendChild(MakeParagraph(party?.DateLabel ?? "日期：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingAfter: "60"));
+        cell.AppendChild(MakeParagraph(party?.DateLabel ?? "日期：", sizeHalfPt: 24, indentation: contentIndent, rightIndentation: contentIndent, spacingBefore: "200", spacingAfter: "120"));
 
         return cell;
     }

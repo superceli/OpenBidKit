@@ -18,6 +18,39 @@ function collectLeaves(items = [], leaves = []) {
   return leaves;
 }
 
+/** 把嵌套 outline 拍平成叶子骨架列表，用于构建跨章节去重上下文。 */
+function collectOutlineSkeleton(items = [], flat = []) {
+  items.forEach((item) => {
+    if (item.children?.length) {
+      collectOutlineSkeleton(item.children, flat);
+      return;
+    }
+    flat.push({ id: item.id || '', title: item.title || '' });
+  });
+  return flat;
+}
+
+/**
+ * 简易并发限流：同时最多 limit 个任务在飞。
+ * 返回的 Promise 会在所有任务 resolve 后 resolve；任何一个 task reject 都会让整体 reject。
+ */
+async function parallelLimit(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function runner() {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      results[idx] = await mapper(items[idx], idx);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => runner());
+  await Promise.all(workers);
+  return results;
+}
+
 /**
  * 获取知识库上下文：优先使用 payload 中已有的，否则根据企业名称和行业自动检索。
  */
@@ -169,11 +202,13 @@ async function runGreenReportContentTask({
   const total = leaves.length;
   let completed = 0;
   let webSearchDowngradePublished = false;
+  // 构建全篇目录骨架，注入每个章节的 user prompt，实现跨章节去重
+  const outlineSkeleton = collectOutlineSkeleton(state.outlineData?.outline || []);
+  publish(`全篇目录骨架已准备（共 ${outlineSkeleton.length} 个章节）`, 8);
 
   // 粗估正文字数：统计中文字符 + 数字/英文字符（排除 Markdown 标记和代码块）
   function countWords(text) {
     if (!text) return 0;
-    // 去掉 ```代码块```、# 标题标记、*加粗*、`行内代码`、[链接](url) 等 Markdown 标记
     const stripped = text
       .replace(/```[\s\S]*?```/g, '')
       .replace(/`[^`]*`/g, '')
@@ -202,12 +237,22 @@ async function runGreenReportContentTask({
     }
   }
 
-  for (const leaf of leaves) {
+  // 并发数：根据章节数动态调节，章节少就不用并发
+  const CONCURRENCY = total <= 4 ? 1 : 4;
+  if (CONCURRENCY > 1) {
+    publish(`启动 ${CONCURRENCY} 路并发生成，预计耗时大幅缩短`, 10);
+  }
+
+  // 单章节生成任务（会被并行调度）
+  async function generateOneChapter(leaf, _idx) {
     if (taskControl.signal.aborted) {
       throw taskControl.signal.reason || new Error('任务已取消');
     }
 
-    publish(`正在生成: ${leaf.title} (${completed + 1}/${total})`, Math.round((completed / total) * 100));
+    // 在骨架中找到本章位置（用于 publish 日志）
+    const skeletonIdx = outlineSkeleton.findIndex((s) => s.id === leaf.id);
+    const seq = skeletonIdx >= 0 ? skeletonIdx + 1 : 0;
+    publish(`正在生成: ${leaf.title}${seq ? ` (${seq}/${total})` : ''}`, Math.round((completed / total) * 100));
 
     const userPrompt = buildContentUserInstruction(leaf, projectInfo, reportType, {
       documentStyle,
@@ -217,6 +262,7 @@ async function runGreenReportContentTask({
       chapterTargetWords: basePerChapter,
       chapterMaxWords: perChapterMax,
       userRequirements,
+      outlineSkeleton, // 跨章节去重上下文
     }, reportTypeName);
     const result = await aiService.chat({
       messages: [
@@ -231,6 +277,11 @@ async function runGreenReportContentTask({
       },
     });
 
+    // **取消护栏**：请求可能已经在飞，但用户中途点了取消。此时不要保存结果。
+    if (taskControl.signal.aborted) {
+      throw taskControl.signal.reason || new Error('任务已取消');
+    }
+
     let content = typeof result === 'string'
       ? result
       : (result?.content || result?.message?.content || '');
@@ -241,15 +292,24 @@ async function runGreenReportContentTask({
       if (currentWords > perChapterMax * 1.2) {
         publish(`${leaf.title} 实际 ${currentWords} 字，超过上限 ${perChapterMax}，正在精简...`, Math.round((completed / total) * 100));
         content = await trimContent(content, leaf.title, perChapterMax, aiService);
+        // 精简后再检查一次取消标志（精简本身也是一次异步调用）
+        if (taskControl.signal.aborted) {
+          throw taskControl.signal.reason || new Error('任务已取消');
+        }
         const afterTrim = countWords(content);
         publish(`${leaf.title} 精简后 ${afterTrim} 字`, Math.round((completed / total) * 100));
       }
     }
 
     workspaceStore.saveChapterContent({ nodeId: leaf.id, content });
+
+    // 原子完成计数（并发安全：JS 单线程，自增无竞争）
     completed++;
     publish(`已完成: ${leaf.title} (${completed}/${total})`, Math.round((completed / total) * 100));
   }
+
+  // 并发调度所有章节
+  await parallelLimit(leaves, CONCURRENCY, generateOneChapter);
 
   const finalState = workspaceStore.loadState();
   checkpointTask(

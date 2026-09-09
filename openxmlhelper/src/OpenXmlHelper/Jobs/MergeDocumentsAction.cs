@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using System.IO;
+using System.Diagnostics;
 using Wp = DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Yibiao.OpenXmlHelper.Jobs;
@@ -13,6 +15,10 @@ sealed class MergeDocumentsRequest
     public string CoverTemplate { get; set; } = "";
     /// <summary>签章页模板 docx 路径；提供则用模板填充替代代码生成。</summary>
     public string SigningPageTemplate { get; set; } = "";
+    /// <summary>签章页表格边框颜色（如 dcdff6）；为空则保留模板原值。</summary>
+    public string TableBorderColor { get; set; } = "";
+    /// <summary>签章页表头背景色（如 eef5ff）；为空则保留模板原值。</summary>
+    public string TableHeaderBg { get; set; } = "";
     public Dictionary<string, string> CoverFields { get; set; } = new();
     public string BodyDoc { get; set; } = "";
     public string Output { get; set; } = "";
@@ -90,6 +96,14 @@ static class MergeDocumentsAction
 {
     public const string Name = "merge-documents";
     const string RelationshipNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    static readonly string DiagLogPath = Path.Combine(Path.GetTempPath(), "merge-diag.log");
+
+    static void Diag(string msg)
+    {
+        var line = $"[{DateTime.Now:HH:mm:ss}] {msg}{Environment.NewLine}";
+        File.AppendAllText(DiagLogPath, line);
+        Console.Error.WriteLine(msg);
+    }
 
     // 封面字段标签：以中文冒号或英文冒号结尾。聚合段落后匹配"委托单位：""报告编号："等。
     static readonly Regex CoverFieldPattern = new(
@@ -130,6 +144,7 @@ static class MergeDocumentsAction
 
             // 在输出 body 开头插入封面 + 结束封面节的 sectPr 段落
             var insertPos = 0;
+            Diag($"[merge] Cover frontBlocks: {frontBlocks.Count}, frontSectPr: {frontSectPr is not null}");
             foreach (var block in frontBlocks)
             {
                 var cloned = (OpenXmlElement)block.CloneNode(true);
@@ -147,10 +162,17 @@ static class MergeDocumentsAction
             }
 
             // 插入前置页（编制说明、目录、签章页），位于封面之后、正文之前
+            Diag($"[merge] FrontMatter is null? {request.FrontMatter is null}");
             if (request.FrontMatter is not null)
             {
+                Diag($"[merge] TitlePage={request.FrontMatter.TitlePage is not null}, Toc={request.FrontMatter.Toc is not null}, SigningPage={request.FrontMatter.SigningPage is not null}");
+                Diag($"[merge] SigningPageTemplate='{request.SigningPageTemplate}', exists={(!string.IsNullOrWhiteSpace(request.SigningPageTemplate) && File.Exists(request.SigningPageTemplate))}");
+                Diag($"[merge] TableBorderColor='{request.TableBorderColor}', TableHeaderBg='{request.TableHeaderBg}'");
+
                 // 1. 扉页 + 目录：代码生成
-                foreach (var block in BuildFrontMatterBlocksExceptSigning(request.FrontMatter))
+                var frontMatterBlocks = BuildFrontMatterBlocksExceptSigning(request.FrontMatter);
+                Diag($"[merge] FrontMatterExceptSigning blocks: {frontMatterBlocks.Count}");
+                foreach (var block in frontMatterBlocks)
                 {
                     destBody.InsertAt(block, insertPos);
                     insertPos++;
@@ -162,13 +184,17 @@ static class MergeDocumentsAction
                     IEnumerable<OpenXmlElement> signingBlocks;
                     if (!string.IsNullOrWhiteSpace(request.SigningPageTemplate) && File.Exists(request.SigningPageTemplate))
                     {
-                        signingBlocks = BuildSigningPageFromTemplate(request.SigningPageTemplate, request.FrontMatter.SigningPage);
+                        Diag("[merge] Using signing page template");
+                        signingBlocks = BuildSigningPageFromTemplate(request.SigningPageTemplate, request.FrontMatter.SigningPage, request.TableBorderColor, request.TableHeaderBg);
                     }
                     else
                     {
+                        Diag("[merge] Using code-generated signing page");
                         signingBlocks = BuildSigningPage(request.FrontMatter.SigningPage);
                     }
-                    foreach (var block in signingBlocks)
+                    var signingList = signingBlocks.ToList();
+                    Diag($"[merge] Signing blocks: {signingList.Count}");
+                    foreach (var block in signingList)
                     {
                         destBody.InsertAt(block, insertPos);
                         insertPos++;
@@ -228,11 +254,16 @@ static class MergeDocumentsAction
             EnableUpdateFieldsOnOpen(destPart);
 
             destPart.Document.Save();
-            // output 可能位于工作区外（用户保存路径），直接返回绝对路径
+            // 诊断：统计最终 body 里的段落/表格/sectPr 数量
+            var finalParas = destBody.Elements<Wp.Paragraph>().Count();
+            var finalTables = destBody.Elements<Wp.Table>().Count();
+            var finalSectPr = destBody.Elements<Wp.SectionProperties>().Count();
+            Diag($"[merge] SAVE OK. body: paras={finalParas}, tables={finalTables}, sectPr={finalSectPr}");
             return JobResult.Success(Name, outputPath);
         }
         catch (Exception exception)
         {
+            Diag($"[merge] ERROR: {exception.Message}{Environment.NewLine}{exception.StackTrace}");
             return JobResult.Fail(exception.Message);
         }
     }
@@ -499,8 +530,8 @@ static class MergeDocumentsAction
         return blocks;
     }
 
-    /// <summary>从签章页模板 docx 填充字段后克隆内容返回。</summary>
-    static List<OpenXmlElement> BuildSigningPageFromTemplate(string templatePath, SigningPageRequest signing)
+    /// <summary>从签章页模板 docx 填充字段后克隆内容返回，覆盖表格样式。</summary>
+    static List<OpenXmlElement> BuildSigningPageFromTemplate(string templatePath, SigningPageRequest signing, string? borderColor = null, string? headerBg = null)
     {
         using var template = WordprocessingDocument.Open(templatePath, false);
         var templateBody = template.MainDocumentPart?.Document.Body;
@@ -513,9 +544,64 @@ static class MergeDocumentsAction
             blocks.Add((OpenXmlElement)child.CloneNode(true));
         }
 
+        // 覆盖表格样式（边框色、表头背景）
+        if (!string.IsNullOrWhiteSpace(borderColor) || !string.IsNullOrWhiteSpace(headerBg))
+        {
+            ApplyTableStylesToBlocks(blocks, borderColor, headerBg);
+        }
+
         // 填充字段
         FillSigningTemplateFields(blocks, signing);
         return blocks;
+    }
+
+    /// <summary>覆盖表格样式（边框色、表头背景色）。</summary>
+    static void ApplyTableStylesToBlocks(List<OpenXmlElement> blocks, string? borderColor, string? headerBg)
+    {
+        foreach (var block in blocks)
+        {
+            if (block is not Wp.Table table) continue;
+
+            // === 1. 覆盖表格级边框 ===
+            if (!string.IsNullOrWhiteSpace(borderColor))
+            {
+                // 清除所有单元格级边框（TcBorders），否则会覆盖表格级边框
+                foreach (var cell in table.Elements<Wp.TableRow>().SelectMany(r => r.Elements<Wp.TableCell>()))
+                {
+                    var tcPr = cell.GetFirstChild<Wp.TableCellProperties>();
+                    tcPr?.GetFirstChild<Wp.TableCellBorders>()?.Remove();
+                }
+
+                var tblPr = table.GetFirstChild<Wp.TableProperties>() ?? table.AppendChild(new Wp.TableProperties());
+                var oldBorders = tblPr.GetFirstChild<Wp.TableBorders>();
+                oldBorders?.Remove();
+                var newBorders = new Wp.TableBorders(
+                    new Wp.TopBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
+                    new Wp.LeftBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
+                    new Wp.BottomBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
+                    new Wp.RightBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
+                    new Wp.InsideHorizontalBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 },
+                    new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 }
+                );
+                tblPr.AppendChild(newBorders);
+            }
+
+            // === 2. 覆盖表头行单元格背景色 ===
+            if (!string.IsNullOrWhiteSpace(headerBg))
+            {
+                var firstRow = table.Elements<Wp.TableRow>().FirstOrDefault();
+                if (firstRow is not null)
+                {
+                    foreach (var cell in firstRow.Elements<Wp.TableCell>())
+                    {
+                        var tcPr = cell.GetFirstChild<Wp.TableCellProperties>() ?? cell.AppendChild(new Wp.TableCellProperties());
+                        var oldShd = tcPr.GetFirstChild<Wp.Shading>();
+                        oldShd?.Remove();
+                        tcPr.AppendChild(new Wp.Shading { Fill = headerBg, Val = Wp.ShadingPatternValues.Clear });
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>在签章页模板 blocks 中查找并填充空白字段。</summary>
@@ -553,8 +639,8 @@ static class MergeDocumentsAction
         }
     }
 
-    /// <summary>替换段落所有文本，保留第一个 Run 的样式，强制覆盖字号为 11pt（22 half-pts），表格内单倍行距。</summary>
-    static void ReplaceParagraphText(Wp.Paragraph para, string newText, int sizeHalfPt = 22)
+    /// <summary>替换段落所有文本，保留第一个 Run 的样式，强制覆盖字号为小四（12pt=24 half-pts），表格内单倍行距。</summary>
+    static void ReplaceParagraphText(Wp.Paragraph para, string newText, int sizeHalfPt = 24)
     {
         // 收集第一个 Run 的样式
         var firstRun = para.Elements<Wp.Run>().FirstOrDefault();
@@ -614,7 +700,8 @@ static class MergeDocumentsAction
     /// <summary>填充签章表：按单元格序号填充委托单位（左）和编制单位（右）。</summary>
     static void FillSigningPartyTable(Wp.Table table, SigningParty? client, SigningParty? prepare)
     {
-        var row = table.Elements<Wp.TableRow>().FirstOrDefault();
+        // 签章表第一行是表头（委托单位盖章/编制单位盖章），签章内容在最后一行
+        var row = table.Elements<Wp.TableRow>().LastOrDefault();
         if (row is null) return;
         var cells = row.Elements<Wp.TableCell>().ToList();
         if (cells.Count < 2) return;
@@ -628,30 +715,27 @@ static class MergeDocumentsAction
     {
         if (party is null) return;
         var paras = cell.Elements<Wp.Paragraph>().ToList();
-        if (paras.Count < 4) return;
+        if (paras.Count < 1) return;
 
-        // 第 1 段：单位名称（模板里 "单位名称：" 后面是值）
-        // 模板签章表把所有内容挤在一个单元格的一个段落里，需要特殊处理
-        var fullText = GetCellPlainText(cell);
+        // 第 1 段：单位名称
+        ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
 
-        // 替换单位名称
-        // 委托单位列："单位名称：" 后面原来可能是 "(空)" 或实际值
-        // 编制单位列："单位名称：" 后面原来已有 "安徽蔚碳环保科技有限公司"
-        if (signingPartyIsClient && paras.Count >= 1)
+        // 找日期段落：优先找含"日期"关键字的段落，找不到就用最后一段
+        Wp.Paragraph? datePara = null;
+        foreach (var p in paras)
         {
-            ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
+            var t = ReadDirectRunText(p);
+            if (t.Contains("日期")) { datePara = p; break; }
         }
-        else if (!signingPartyIsClient && paras.Count >= 1)
-        {
-            ReplaceParagraphText(paras[0], $"单位名称：{party.UnitName}");
-        }
+        datePara ??= paras.Last();
 
-        // 日期段落（通常是最后一段）
-        var lastPara = paras.Last();
-        var dateText = ReadDirectRunText(lastPara);
-        if (dateText.StartsWith("日期：") && party.DateLabel.StartsWith("日期："))
+        if (!string.IsNullOrWhiteSpace(party.DateLabel))
         {
-            ReplaceParagraphText(lastPara, party.DateLabel);
+            ReplaceParagraphText(datePara, party.DateLabel);
+            // 日期段落加段前间距，避免和上面的签字文字挤在一起
+            var datePPr = datePara.GetFirstChild<Wp.ParagraphProperties>() ?? datePara.AppendChild(new Wp.ParagraphProperties());
+            var dateSpacing = datePPr.GetFirstChild<Wp.SpacingBetweenLines>() ?? datePPr.AppendChild(new Wp.SpacingBetweenLines());
+            dateSpacing.Before = "60";
         }
     }
 

@@ -315,11 +315,11 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
   return `你是一名专业的${label}写作专家。请根据目录节点标题和描述，生成专业、详实的报告正文。
 
 写作规则：
-1. 使用 Markdown 格式
-2. 语言正式、专业，符合报告文体
+1. 使用 Markdown 格式；语言正式、专业，符合报告文体
+2. 本章开头必须先写"本章要点"摘要：用 2-3 句话概括本章核心内容、关键数据/结论，放在正文最开头，不要加小标题或加粗标记，直接作为正文首段。示例："本章介绍了公司 2025 年度的温室气体排放情况。全年碳排放总量约 5.2 万吨 CO₂e，同比下降 8.3%，主要得益于生产工艺节能改造。"——这是正式报告的标准写法，后续段落再展开具体内容
 3. 章节编号规则（非常重要）：
    - 章节编号（如"第一章""1.1""2.1"等）已由报告大纲统一管理，正文不要重复输出章节级编号标题
-   - 正文内部如需细分小标题，使用 Markdown 三级标题（###）或加粗短语，不要手动添加"1.1""2.1"等数字编号
+   - 正文内部如需细分小标题，**只能使用 Markdown 三级标题（###）或加粗短语**，严禁使用 # 或 ## 开头的标题（渲染层已降级但会丢失格式），不要手动添加"1.1""2.1"等数字编号
    - 若必须使用编号，须以前置给定的"本章编号"为前缀逐级递增（如本章编号为 1.1，则内部子项为 1.1.1、1.1.2），严禁每个章节都从 1.1 开始
 4. 信息来源策略（重要）：
    - 优先级：知识库资料 > 模型联网查询结果 > AI 行业经验预估
@@ -336,16 +336,52 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
    - 允许在上下限之间浮动（如目标 666 字、上限 732 字，则写 600-732 字均可）
    - 不要为了凑字数而堆砌废话、重复论证；内容充实度以覆盖章节要点为准
    - 若章节内容可在较少字数内充分表达，不必强行拉满字数
-6. 适当使用表格、列表增强可读性
+6. 适当使用表格、列表增强可读性；如涉及指标对比、数据展示，优先用 Markdown 表格
 7. 如涉及标准引用，标注标准名称（如GRI 305、ISO 14064等）；如涉及行业议题，结合下方提供的行业议题说明进行展开
 8. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有估算值${conclusionRule}
-10. 若章节标题含"附录"，正文可使用表格罗列指标数据、标准索引、评分明细表、资质证明清单等内容，不强制字数下限
-11. 写作风格：${styleGuidance}`;
+9. 若章节标题含"附录"，正文可使用表格罗列指标数据、标准索引、评分明细表、资质证明清单等内容，不强制字数下限
+10. 写作风格：${styleGuidance}
+11. 跨章节去重（极其重要，违反将导致全篇大量重复内容）：
+    - 下方会提供本篇报告的完整目录骨架和本章位置，你只写本章负责的内容，严禁跨章节重复
+    - "公司概况""企业概况""组织与运营概况""报告前言"这类开篇章节已经介绍了企业背景、行业定位、业务范围等信息，后续所有章节（ESG治理、环境绩效、社会绩效、治理绩效等）一律不要再重复写这些基础信息
+    - 环境绩效章节写能源消耗、温室气体排放，治理绩效章节写公司治理结构、商业道德，社会绩效章节写员工权益、社区参与——各管各的议题，不要交叉复述
+    - 同一数据（如"全年能耗 10 万吨标准煤"）只在最合适的章节（如环境绩效）详细展开，其他章节如要引用只写"详见 X.X 章节"
+    - 若本章处于全篇末尾（如展望、附录），也不要回头重述前文已讲过的论点，保持与前文呼应但不重复`;
 }
 
 function buildContentUserInstruction(node, projectInfo, reportType, options = {}, reportTypeName) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const parts = [`请为以下${label}章节生成正文。\n`];
+
+  // —— 全篇目录骨架 & 本章位置（用于跨章节去重）——
+  const outlineSkeleton = options.outlineSkeleton; // [{ id, title }]
+  if (Array.isArray(outlineSkeleton) && outlineSkeleton.length > 0) {
+    const currentIdx = outlineSkeleton.findIndex((item) => item.id === node.id);
+    const currentTitle = node.title;
+    let dedupHint = '';
+    if (currentIdx >= 0) {
+      const leadingContext = outlineSkeleton.slice(0, currentIdx).map((item) => `  ${item.id}. ${item.title}`).join('\n');
+      const trailingContext = outlineSkeleton.slice(currentIdx + 1).map((item) => `  ${item.id}. ${item.title}`).join('\n');
+      dedupHint = `\n\n—— 全篇目录骨架与本章议题分工（严格遵守，禁止跨章节重复）——
+全篇共 ${outlineSkeleton.length} 个正文章节，完整目录如下：
+${outlineSkeleton.map((item, i) => `  ${i + 1}. ${item.id}. ${item.title}`).join('\n')}
+
+当前正在生成：第 ${currentIdx + 1} 章「${currentTitle}」
+
+议题分工（极其重要，违反将导致全篇大量重复内容）：
+- 下面列出的"前置章节"按大纲顺序排在你之前，**它们专门负责相关的议题**，你写本章时严禁复述它们应该负责的内容。例如：前置章节含"企业概况"时，你不要再写企业简介、业务范围、组织架构等基础信息
+- 下面列出的"后置章节"按大纲顺序排在你之后，**那些议题留给它们来写**，你不要在本章提前展开。例如：后置章节含"ESG目标与展望"时，你不要在本章写未来目标和改进计划
+- 同一数据（如"全年能耗 10 万吨"）只在最相关的那一章详细展开，其他章节如需引用只写"详见 X.X 章节"
+
+前置章节（以下议题不在本章负责范围内，严禁重复）：
+${leadingContext || '  （本章是第一章，开篇章节负责企业背景和报告框架介绍，可以写）'}
+
+后置章节（以下议题留给后续章节，不要提前展开）：
+${trailingContext || '  （本章是最后一章）'}`;
+    }
+    parts.push(dedupHint);
+  }
+
   // node.id 形如 "1"、"1.1"、"2.1"，本身就是大纲层级编号，直接作为本章编号告知 AI
   const chapterNo = node.id || '';
   if (chapterNo) parts.push(`本章编号：${chapterNo}（正文内部子项编号须此前缀递增，如 ${chapterNo}.1、${chapterNo}.2）`);

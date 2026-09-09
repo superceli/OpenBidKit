@@ -1651,7 +1651,9 @@ function isMermaidCodeElement($, codeNode) {
 }
 
 async function htmlHeadingToDocxBlocks($, node, context) {
-  const mdLevel = Math.min(Math.max(parseInt(htmlTagName(node).slice(1), 10) || 1, 1), 6);
+  let mdLevel = Math.min(Math.max(parseInt(htmlTagName(node).slice(1), 10) || 1, 1), 6);
+  // AI 正文里的 H1/H2 一律降级为 H3，避免与 Word 章节标题（outline 已生成的 H1/H2/H3）层级冲突
+  if (mdLevel <= 2) mdLevel = 3;
   const style = getHeadingStyle(context.exportFormat, mdLevel);
   const headingOpts = {
     heading: headingLevel(mdLevel),
@@ -2266,8 +2268,8 @@ async function buildDocxResult(payload, options = {}) {
   const bodyStyle = (exportFormat && exportFormat.body_text) ? exportFormat.body_text : null;
   const bodyFont = bodyStyle ? (bodyStyle.font || '宋体') : '宋体';
   const bodySizeHalfPt = bodyStyle ? chineseSizeToHalfPt(bodyStyle.size || '小四') : 24;
-  const bodyLineSpacing = bodyStyle ? 240 * (bodyStyle.line_spacing_multiple || 1.2) : 360;
-  const bodyAfterSpacing = bodyStyle ? (bodyStyle.spacing_after_pt || 0) * 20 : 160;
+  const bodyLineSpacing = bodyStyle ? 240 * (bodyStyle.line_spacing_multiple || 1.5) : 360;
+  const bodyAfterSpacing = bodyStyle ? (bodyStyle.spacing_after_pt ?? 4) * 20 : 80;
 
   // 注入正文样式到 context，供正文段落/文本渲染时使用
   context.bodyRunFont = bodyFont;
@@ -2481,6 +2483,8 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
               request: {
                 coverTemplate: coverTemplatePath,
                 signingPageTemplate: getSigningPageTemplatePath(appRef),
+                tableBorderColor: resolveMergeTableBorderColor(payload.export_format),
+                tableHeaderBg: resolveMergeTableHeaderBg(payload.export_format),
                 coverFields: coverFieldsMap,
                 bodyDoc: tempBodyPath,
                 output: result.filePath,
@@ -2714,6 +2718,22 @@ function resolveTableHeaderShading(exportFormat) {
   if (typeof raw !== 'string' || !raw.trim()) return 'D9E2F3';
   const cleaned = raw.trim().replace(/^#/, '').toUpperCase();
   return /^[0-9A-F]{6}$/.test(cleaned) ? cleaned : 'D9E2F3';
+}
+
+/**签章页表格边框色：空字符串表示保留模板原值。*/
+function resolveMergeTableBorderColor(exportFormat) {
+  const raw = exportFormat?.table?.border_color;
+  if (typeof raw !== 'string') return '';
+  const v = raw.trim().replace(/^#/, '');
+  return /^[0-9A-Fa-f]{6}$/.test(v) ? v.toUpperCase() : '';
+}
+
+/**签章页表头背景色：空字符串表示保留模板原值。*/
+function resolveMergeTableHeaderBg(exportFormat) {
+  const raw = exportFormat?.table?.header_row?.background_color;
+  if (typeof raw !== 'string') return '';
+  const v = raw.trim().replace(/^#/, '');
+  return /^[0-9A-Fa-f]{6}$/.test(v) ? v.toUpperCase() : '';
 }
 
 /**

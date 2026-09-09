@@ -173,7 +173,12 @@ async function runGreenReportContentTask({
     const text = String(message || '').trim();
     if (text && text !== logs[logs.length - 1]) logs = [...logs, text];
     const nextProgress = Math.max(task.progress || 0, progress || task.progress || 0);
-    task = updateTask({ status: 'running', progress: nextProgress, logs });
+    // 每次进度推送都带上最新 outlineData，让前端实时回显已完成章节内容
+    const currentState = workspaceStore.loadState();
+    task = updateTask(
+      { status: 'running', progress: nextProgress, logs },
+      { outlineData: currentState.outlineData },
+    );
   }
 
   // 自动检索知识库

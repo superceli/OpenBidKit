@@ -558,6 +558,7 @@ static class MergeDocumentsAction
     /// <summary>覆盖表格样式（边框色、表头背景色）。</summary>
     static void ApplyTableStylesToBlocks(List<OpenXmlElement> blocks, string? borderColor, string? headerBg)
     {
+        Diag($"[merge] ApplyTableStylesToBlocks called, borderColor='{borderColor}', headerBg='{headerBg}', blocks.Count={blocks.Count}");
         foreach (var block in blocks)
         {
             if (block is not Wp.Table table) continue;
@@ -565,6 +566,23 @@ static class MergeDocumentsAction
             // === 1. 覆盖表格级边框 ===
             if (!string.IsNullOrWhiteSpace(borderColor))
             {
+                var tblPr = table.GetFirstChild<Wp.TableProperties>() ?? table.AppendChild(new Wp.TableProperties());
+                // 移除 tblStyle：样式中的边框优先级最高，会覆盖 tblPr/borders
+                var styleNode = tblPr.GetFirstChild<Wp.TableStyle>();
+                if (styleNode is not null)
+                {
+                    Diag($"[merge]   clearing tblStyle val={styleNode.Val?.Value}");
+                    styleNode.Remove();
+                }
+
+                // 清除 tblPrEx（任何命名空间）中的 tblBorders，它优先级高于 tblPr
+                var exNode = table.ChildElements.FirstOrDefault(e => e.LocalName == "tblPrEx");
+                if (exNode is not null)
+                {
+                    Diag($"[merge]   removing tblPrEx (ns={exNode.NamespaceUri})");
+                    exNode.Remove();
+                }
+
                 // 清除所有单元格级边框（TcBorders），否则会覆盖表格级边框
                 foreach (var cell in table.Elements<Wp.TableRow>().SelectMany(r => r.Elements<Wp.TableCell>()))
                 {
@@ -572,7 +590,6 @@ static class MergeDocumentsAction
                     tcPr?.GetFirstChild<Wp.TableCellBorders>()?.Remove();
                 }
 
-                var tblPr = table.GetFirstChild<Wp.TableProperties>() ?? table.AppendChild(new Wp.TableProperties());
                 var oldBorders = tblPr.GetFirstChild<Wp.TableBorders>();
                 oldBorders?.Remove();
                 var newBorders = new Wp.TableBorders(
@@ -584,6 +601,7 @@ static class MergeDocumentsAction
                     new Wp.InsideVerticalBorder { Val = Wp.BorderValues.Single, Color = borderColor, Size = 4 }
                 );
                 tblPr.AppendChild(newBorders);
+                Diag($"[merge]   set tblPr.TableBorders color={borderColor}");
             }
 
             // === 2. 覆盖表头行单元格背景色 ===
@@ -599,6 +617,7 @@ static class MergeDocumentsAction
                         oldShd?.Remove();
                         tcPr.AppendChild(new Wp.Shading { Fill = headerBg, Val = Wp.ShadingPatternValues.Clear });
                     }
+                    Diag($"[merge]   set header bg={headerBg}, cells={firstRow.Elements<Wp.TableCell>().Count()}");
                 }
             }
         }
@@ -617,25 +636,89 @@ static class MergeDocumentsAction
             else if (block is Wp.SectionProperties) { /* skip */ }
         }
 
-        // === 1. 填充说明段落中的委托单位 ===
-        // 模板原文："本报告由 安徽蔚碳环保科技有限公司 接受 东方工建集团有限公司 委托..."
-        // 把两个公司名替换成实际值
+        // === 1. 填充说明段落（preamble）===
         var preamblePara = allParas.FirstOrDefault(p => ReadDirectRunText(p).StartsWith("本报告由"));
         if (preamblePara is not null && !string.IsNullOrWhiteSpace(signing.Preamble))
         {
             ReplaceParagraphText(preamblePara, signing.Preamble);
+            // 声明段落：保留模板原有格式（首行缩进480、两端对齐、1.5倍行距），段后留白
+            NormalizePreamblePara(preamblePara);
         }
 
-        // === 2. 填充信息表（第一个表格）===
+        // === 2. 统一设置小标题段落格式（加粗、段前段后间距、无首行缩进）===
+        // 小标题 1：编制单位信息如下：
+        var infoHeadingPara = allParas.FirstOrDefault(p => ReadDirectRunText(p).Contains("编制单位信息如下"));
+        if (infoHeadingPara is not null) NormalizeSubheadingPara(infoHeadingPara, before: "200", after: "120");
+
+        // 小标题 2：以下为第三方机构及委托方签字盖章位置：
+        var signHeadingPara = allParas.FirstOrDefault(p => ReadDirectRunText(p).Contains("签字盖章位置"));
+        if (signHeadingPara is not null) NormalizeSubheadingPara(signHeadingPara, before: "200", after: "120");
+
+        // === 3. 填充信息表（第一个表格）===
         if (allTables.Count >= 1)
         {
             FillSigningInfoTable(allTables[0], signing.InfoRows);
         }
 
-        // === 3. 填充签章表（第二个表格）===
+        // === 4. 填充签章表（第二个表格）===
         if (allTables.Count >= 2)
         {
             FillSigningPartyTable(allTables[1], signing.ClientParty, signing.PrepareParty);
+        }
+    }
+
+    /// <summary>规范化声明段落：首行缩进、两端对齐、1.5倍行距、段后留白 200。</summary>
+    static void NormalizePreamblePara(Wp.Paragraph para)
+    {
+        var pPr = para.GetFirstChild<Wp.ParagraphProperties>() ?? para.AppendChild(new Wp.ParagraphProperties());
+        // spacing
+        var oldSpacing = pPr.GetFirstChild<Wp.SpacingBetweenLines>();
+        oldSpacing?.Remove();
+        pPr.AppendChild(new Wp.SpacingBetweenLines
+        {
+            Before = "0",
+            After = "200",
+            Line = "360",
+            LineRule = Wp.LineSpacingRuleValues.Auto,
+        });
+        // 首行缩进 480 (2字符)
+        var oldInd = pPr.GetFirstChild<Wp.Indentation>();
+        oldInd?.Remove();
+        pPr.AppendChild(new Wp.Indentation { FirstLine = "480" });
+        // 两端对齐
+        var oldJc = pPr.GetFirstChild<Wp.Justification>();
+        oldJc?.Remove();
+        pPr.AppendChild(new Wp.Justification { Val = Wp.JustificationValues.Both });
+    }
+
+    /// <summary>规范化小标题段落：加粗、无首行缩进、段前段后间距、1.5倍行距。</summary>
+    static void NormalizeSubheadingPara(Wp.Paragraph para, string before, string after)
+    {
+        var pPr = para.GetFirstChild<Wp.ParagraphProperties>() ?? para.AppendChild(new Wp.ParagraphProperties());
+        // spacing
+        var oldSpacing = pPr.GetFirstChild<Wp.SpacingBetweenLines>();
+        oldSpacing?.Remove();
+        pPr.AppendChild(new Wp.SpacingBetweenLines
+        {
+            Before = before,
+            After = after,
+            Line = "360",
+            LineRule = Wp.LineSpacingRuleValues.Auto,
+        });
+        // 清除首行缩进/左右缩进
+        var oldInd = pPr.GetFirstChild<Wp.Indentation>();
+        oldInd?.Remove();
+        // 两端对齐
+        var oldJc = pPr.GetFirstChild<Wp.Justification>();
+        oldJc?.Remove();
+        pPr.AppendChild(new Wp.Justification { Val = Wp.JustificationValues.Both });
+        // 加粗第一个 Run
+        var firstRun = para.Elements<Wp.Run>().FirstOrDefault();
+        if (firstRun is not null)
+        {
+            firstRun.RunProperties ??= new Wp.RunProperties();
+            firstRun.RunProperties.AppendChild(new Wp.Bold());
+            firstRun.RunProperties.AppendChild(new Wp.BoldComplexScript());
         }
     }
 

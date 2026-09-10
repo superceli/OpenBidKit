@@ -2416,21 +2416,126 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 {updateStatus === 'downloaded' ? '安装并重启' : updateBusy ? '检查中...' : '检查更新'}
               </button>
             </article>
-            <article className="about-info-card about-links-card" style={{ display: 'none' }}>
-              <span>信息与授权</span>
+            <article
+              className="about-info-card about-license-card"
+              style={{
+                background: 'linear-gradient(135deg, #ffffff, #eaf3ff)',
+                borderColor: 'var(--yb-border-soft)',
+              }}
+            >
+              <div className="about-card-head">
+                <span>信息与授权</span>
+              </div>
               <ul className="about-links-list">
                 <li className="about-links-item">
-                  <span className="about-links-label">使用文档</span>
-                  <a
-                    className="about-links-value is-link"
-                    href="https://wiki.agnet.top/"
-                    target="_blank"
-                    rel="noreferrer"
+                  <span className="about-links-label">授权状态</span>
+                  <span
+                    className="about-links-value"
+                    style={{
+                      color: licenseStatus?.status === 'active'
+                        ? '#27ae60'
+                        : licenseStatus?.status === 'debug_disabled'
+                          ? '#8a8a8a'
+                          : licenseStatus?.status === 'missing' || !licenseStatus?.status
+                            ? '#e67e22'
+                            : '#e74c3c',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
                   >
-                    wiki.agnet.top
-                  </a>
+                    {licenseStatus?.status === 'active' && (
+                      <>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#27ae60',
+                        }} />
+                        已激活{licenseStatus?.sourceTrusted ? ' · 官方构建' : ''}
+                      </>
+                    )}
+                    {licenseStatus?.status === 'debug_disabled' && (
+                      <>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#8a8a8a',
+                        }} />
+                        开发调试模式
+                      </>
+                    )}
+                    {licenseStatus?.status === 'missing' && (
+                      <>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#e67e22',
+                        }} />
+                        未激活{licenseStatus?.sourceTrusted ? '' : ' · 不可信来源'}
+                      </>
+                    )}
+                    {licenseStatus?.status === 'expired' && (
+                      <>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#e74c3c',
+                        }} />
+                        授权已过期
+                      </>
+                    )}
+                    {licenseStatus?.status === 'machine_mismatch' && (
+                      <>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#e74c3c',
+                        }} />
+                        设备不匹配
+                      </>
+                    )}
+                  </span>
                 </li>
-                </ul>
+                {licenseStatus?.status === 'active' && (
+                  <>
+                    {licenseStatus.expiresAt && (
+                      <li className="about-links-item">
+                        <span className="about-links-label">有效期至</span>
+                        <span className="about-links-value">{licenseStatus.expiresAt?.slice(0, 10) || '—'}</span>
+                      </li>
+                    )}
+                    {licenseStatus.expiresAt && (
+                      <li className="about-links-item">
+                        <span className="about-links-label">剩余天数</span>
+                        <span className="about-links-value">
+                          {Math.max(
+                            0,
+                            Math.ceil((new Date(licenseStatus.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
+                          )}
+                          {' '}天
+                        </span>
+                      </li>
+                    )}
+                  </>
+                )}
+              </ul>
+              <button
+                type="button"
+                className="about-links-activate"
+                onClick={() => setOfflineLicenseDialogOpen(true)}
+              >
+                {licenseStatus?.status === 'active' ? '更换离线授权码' : '离线激活授权'}
+              </button>
             </article>
           </div>
           <div className="privacy-statement">

@@ -104,6 +104,8 @@ async function main() {
   const versionMax = args['version-max'] || DEFAULT_VERSION_MAX;
 
   const payload = {
+    activationMode: 'offline',
+    plan: 'offline',
     clientId,
     machineFingerprintHash: machineFp,
     expiresAt: formatIsoDaysLater(days),

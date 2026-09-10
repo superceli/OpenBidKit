@@ -352,7 +352,7 @@ function createLicenseService({ app, configStore }) {
     const payload = envelope.payload;
     const offlineLicense = isOfflineLicensePayload(payload);
     const buildChanged = offlineLicense ? false : !isLicenseBuildCurrent(payload, buildAttestation);
-    if (payload.clientId !== runtimeContext.clientId || (payload.machineFingerprintHash && payload.machineFingerprintHash !== runtimeContext.machineFingerprintHash)) {
+    if ((payload.clientId !== '*' && payload.clientId !== runtimeContext.clientId) || (payload.machineFingerprintHash && payload.machineFingerprintHash !== runtimeContext.machineFingerprintHash)) {
       invalidateLocalLicense(envelope, 'license_machine_mismatch');
       currentStatus = statusFromPayload(payload, 'machine_mismatch', {
         ...base,
@@ -484,7 +484,7 @@ function createLicenseService({ app, configStore }) {
 
     const context = buildContext();
     const payload = normalizedEnvelope.payload;
-    if (payload.clientId !== context.clientId) {
+    if (payload.clientId !== '*' && payload.clientId !== context.clientId) {
       throw new Error('离线授权不属于当前客户端');
     }
     if (payload.machineFingerprintHash && payload.machineFingerprintHash !== context.machineFingerprintHash) {

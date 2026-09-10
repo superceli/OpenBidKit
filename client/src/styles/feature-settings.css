@@ -1036,7 +1036,7 @@ fieldset.settings-list {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr);
   gap: 14px;
-  padding: 0 24px 24px;
+  padding: 20px 24px 24px;
 }
 
 .about-update-card,

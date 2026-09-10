@@ -9,6 +9,10 @@ const { getConfigFilePath, getGeneratedImagesDir, getGpuStartupProbePath, getImp
 // 支持通过环境变量覆盖 userData 路径（用于测试/沙箱环境）
 if (process.env.LVCERT_USER_DATA_DIR) {
   app.setPath('userData', process.env.LVCERT_USER_DATA_DIR);
+} else if (app.isPackaged) {
+  // 打包版显式设置产品名（避免 Electron 退回到 package.json.name = "lvcert-client"）
+  // 这里硬编码，避免 asar 内相对路径 require/package.json 不可靠的问题
+  app.setName('哲元绿证报告工具箱');
 }
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;

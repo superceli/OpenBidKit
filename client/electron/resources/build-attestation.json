@@ -1,11 +1,11 @@
 {
-  "projectName": "yibiao-client",
-  "appId": "com.yibiao.openbidkit",
-  "productName": "哲元投标工具箱",
+  "projectName": "lvcert-client",
+  "appId": "com.lvcert.report",
+  "productName": "哲元绿证报告工具箱",
   "buildId": "development-build",
-  "gitCommitSha": "",
-  "builtAt": "",
-  "keyId": "development-build-key",
+  "gitCommitSha": "f910f0bf0e89930d7f76da90f35aabddd85a0aa5",
+  "builtAt": "2026-09-10T08:38:16.066Z",
+  "keyId": "official-build-key-2026-09",
   "algorithm": "ECDSA_P256_SHA256",
-  "signature": ""
+  "signature": "XH9K4XbN0kBCxLWGZHkkw2DGrMk-S0uMwKQimb3IglDvO6-my7awr9BFuA1VhdfeIQc9OSifonFvjO7CCYMhJw"
 }

@@ -998,22 +998,25 @@ static class MergeDocumentsAction
         return string.Join(" ", texts);
     }
 
-    /// <summary>扉页：标题居中加粗 + 副标题居中，下方信息行左对齐（委托单位/报告编号/编制日期/编制单位/公示平台）。</summary>
+    /// <summary>扉页：标题居中加粗 + 副标题居中，下方信息行左对齐（委托单位/报告编号/编制日期/编制单位/公示平台）。
+    /// 使用段前段后间距（twips，物理单位）替代空段落，确保 PC 与移动端 WPS 渲染一致。</summary>
     static List<OpenXmlElement> BuildTitlePage(TitlePageRequest page)
     {
         var blocks = new List<OpenXmlElement>();
-        // 顶部留白：用空行把标题推到页面约 1/3 处
-        for (var i = 0; i < 6; i++) blocks.Add(MakeEmptyParagraph());
-        // 主标题：居中、加粗、二号字（44 half pt = 22pt）
-        blocks.Add(MakeParagraph(page.Title, centered: true, bold: true, sizeHalfPt: 44));
-        // 副标题：居中、小四（24 half pt）
+        // 主标题：段前 4000 twips（≈2.78 英寸）推到页面上 1/3 处，居中加粗
+        blocks.Add(MakeParagraph(page.Title, centered: true, bold: true, sizeHalfPt: 44, spacingBefore: "4000"));
+        // 副标题：段前 200 twips 紧贴主标题下方
         if (!string.IsNullOrEmpty(page.Subtitle))
         {
-            blocks.Add(MakeEmptyParagraph());
-            blocks.Add(MakeParagraph(page.Subtitle, centered: true, sizeHalfPt: 24));
+            blocks.Add(MakeParagraph(page.Subtitle, centered: true, sizeHalfPt: 24, spacingBefore: "200", spacingAfter: "4000"));
         }
-        // 中部留白：把信息行推到页面下方（靠近底部）
-        for (var i = 0; i < 22; i++) blocks.Add(MakeEmptyParagraph());
+        else
+        {
+            // 无副标题时，加一个空段落作为间隔，用段后间距把信息行推到底部附近
+            var spacer = new Wp.Paragraph(new Wp.ParagraphProperties(
+                new Wp.SpacingBetweenLines { Before = "0", After = "8000" }));
+            blocks.Add(spacer);
+        }
         // 信息行：左对齐，宋体小四（24 half pt），1.5 倍行距
         foreach (var row in page.InfoRows)
         {

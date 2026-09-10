@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const bridge = {
-  appName: '绿证报告工具箱',
+  appName: '哲元绿证报告工具箱',
   platform: process.platform,
   getVersion: () => ipcRenderer.invoke('app:get-version'),
   getGpuHardwareAccelerationStatus: () => ipcRenderer.invoke('app:get-gpu-hardware-acceleration-status'),

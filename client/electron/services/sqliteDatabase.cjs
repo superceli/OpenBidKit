@@ -1085,7 +1085,7 @@ function createGreenReportSchema(db) {
   `);
 }
 
-// 绿色报告工具箱：清理所有投标相关表结构。
+// 哲元绿色报告工具箱：清理所有投标相关表结构。
 function createTaskLogsSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_logs (
@@ -1405,7 +1405,7 @@ const migrations = [
   },
   {
     version: 25,
-    description: '绿色报告工具箱：清理投标相关表结构',
+    description: '哲元绿色报告工具箱：清理投标相关表结构',
     up: dropBiddingTables,
   },
   {

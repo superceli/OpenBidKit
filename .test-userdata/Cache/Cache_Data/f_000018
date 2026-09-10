@@ -66,7 +66,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }) {
         columnNumber: 9
       }, this),
       /* @__PURE__ */ jsxDEV("div", { className: "brand-copy", children: [
-        /* @__PURE__ */ jsxDEV("span", { children: "绿证" }, void 0, false, {
+        /* @__PURE__ */ jsxDEV("span", { children: "哲元绿证" }, void 0, false, {
           fileName: "D:/develop/OpenBidKit/client/src/components/Sidebar.tsx",
           lineNumber: 71,
           columnNumber: 11

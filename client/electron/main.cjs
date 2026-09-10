@@ -341,7 +341,7 @@ function createMainWindow() {
     minWidth: 1040,
     minHeight: 720,
     backgroundColor: '#f8fafd',
-    title: '绿证报告工具箱',
+    title: '哲元绿证报告工具箱',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

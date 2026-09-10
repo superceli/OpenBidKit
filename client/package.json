@@ -2,7 +2,7 @@
   "name": "lvcert-client",
   "version": "1.0.0",
   "private": true,
-  "description": "绿证报告工具箱独立桌面客户端",
+  "description": "哲元绿证报告工具箱独立桌面客户端",
   "author": "mark",
   "main": "electron/main.cjs",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.lvcert.report",
-    "productName": "绿证报告工具箱",
+    "productName": "哲元绿证报告工具箱",
     "copyright": "Copyright © 2026 mark",
     "asar": true,
     "directories": {

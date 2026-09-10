@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## 范围
-- 本项目是「绿证报告工具箱」（lvcert-client），用于生成 ESG、可持续发展、社会责任等绿色报告。
+- 本项目是「哲元绿证报告工具箱」（lvcert-client），用于生成 ESG、可持续发展、社会责任等绿色报告。
 - 当前有效产品代码在 `client/`。
 - `analytics/` 是独立 Cloudflare Worker API 与 Dashboard：除埋点采集、聚合和查看外，也承载客户端公告、资源、插件、模型信息、许可证和 Agent 失败诊断等在线服务；修改上述在线服务协议时同步检查两端。
 

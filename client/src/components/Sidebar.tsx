@@ -68,7 +68,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
           <img src={logoUrl} alt="" />
         </div>
         <div className="brand-copy">
-          <span>绿证</span>
+          <span>哲元绿证</span>
           <strong>报告工具箱</strong>
         </div>
       </div>
@@ -111,7 +111,8 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
 
       <div className="sidebar-footer">
         <div className="sidebar-footer-shortcuts">
-          {collapsed ? wrapTooltip('使用文档', renderUserGuideButton()) : renderUserGuideButton()}
+          {/* 暂时隐藏使用文档按钮 */}
+          {/* {collapsed ? wrapTooltip('使用文档', renderUserGuideButton()) : renderUserGuideButton()} */}
           {collapsed ? wrapTooltip('加好友', renderGroupChatButton(() => setGroupChatOpen(true))) : renderGroupChatButton(() => setGroupChatOpen(true))}
         </div>
         {collapsed ? wrapTooltip('设置', renderSettingsButton(activeSection, onSectionChange)) : renderSettingsButton(activeSection, onSectionChange)}
@@ -126,7 +127,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
         cardClassName="group-chat-dialog"
         actions={<button type="button" className="secondary-action" onClick={() => setGroupChatOpen(false)}>关闭</button>}
       >
-        <img className="group-chat-qr" src={groupChatQrUrl} alt="绿证用户交流群二维码" />
+        <img className="group-chat-qr" src={groupChatQrUrl} alt="哲元绿证用户交流群二维码" />
       </AppDialog>
     </aside>
   );

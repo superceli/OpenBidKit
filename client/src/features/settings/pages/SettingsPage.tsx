@@ -2416,7 +2416,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 {updateStatus === 'downloaded' ? '安装并重启' : updateBusy ? '检查中...' : '检查更新'}
               </button>
             </article>
-            <article className="about-info-card about-links-card">
+            <article className="about-info-card about-links-card" style={{ display: 'none' }}>
               <span>信息与授权</span>
               <ul className="about-links-list">
                 <li className="about-links-item">

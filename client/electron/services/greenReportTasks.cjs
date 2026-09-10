@@ -124,6 +124,23 @@ async function runGreenReportOutlineTask({
     userRequirements,
   }, reportTypeName);
 
+  // AI 调用期间的模拟进度：从 20% 逐步涨到 65%，让用户看到持续推进
+  let aiProgressTimer = null;
+  let simulatedProgress = 20;
+  const startSimulatedProgress = () => {
+    aiProgressTimer = setInterval(() => {
+      if (taskControl.signal.aborted || simulatedProgress >= 65) {
+        clearInterval(aiProgressTimer);
+        aiProgressTimer = null;
+        return;
+      }
+      simulatedProgress += Math.random() * 3 + 1; // 每次涨 1~4
+      if (simulatedProgress > 65) simulatedProgress = 65;
+      task = updateTask({ status: 'running', progress: Math.round(simulatedProgress), logs });
+    }, 800);
+  };
+  startSimulatedProgress();
+
   const outlineData = await aiService.requestJson({
     messages: [
       { role: 'system', content: systemPrompt },
@@ -131,6 +148,12 @@ async function runGreenReportOutlineTask({
     ],
     progressLabel: '绿色报告目录',
   });
+
+  // AI 返回后清除模拟进度
+  if (aiProgressTimer) {
+    clearInterval(aiProgressTimer);
+    aiProgressTimer = null;
+  }
 
   if (taskControl.signal.aborted) {
     throw taskControl.signal.reason || new Error('任务已取消');

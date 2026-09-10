@@ -3,7 +3,9 @@ const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
 
-const GITHUB_RELEASE_API = 'https://api.github.com/repos/superceli/OpenBidKit/releases/latest';
+const YIBIAO_RELEASE_TAG_PREFIX = 'lvsebaogao-v';
+
+const GITHUB_RELEASE_LIST_API = 'https://api.github.com/repos/superceli/OpenBidKit/releases?per_page=10';
 const GITHUB_RELEASE_DOWNLOAD_URL = 'https://github.com/superceli/OpenBidKit/releases/latest';
 const GITHUB_PROVIDER_OPTIONS = {
   provider: 'github',
@@ -15,7 +17,7 @@ const CLOUDFLARE_RELEASE_BASE_URL = 'https://openbidkit-oss.agnet.top/release';
 const CLOUDFLARE_LATEST_JSON_URL = `${CLOUDFLARE_RELEASE_BASE_URL}/latest.json`;
 const ATOMGIT_REPOSITORY_URL = 'https://atomgit.com/qq_45963071/OpenBidKit';
 const ATOMGIT_RELEASE_API_BASE_URL = 'https://api.atomgit.com/api/v5/repos/qq_45963071/OpenBidKit/releases';
-const ATOMGIT_LATEST_RELEASE_API = `${ATOMGIT_RELEASE_API_BASE_URL}/latest`;
+const ATOMGIT_RELEASE_LIST_API = `${ATOMGIT_RELEASE_API_BASE_URL}?per_page=10`;
 
 let autoUpdaterInstance = null;
 let downloadedUpdateVersion = '';
@@ -134,8 +136,32 @@ function requestJson(url, label, headers = {}) {
   });
 }
 
+// 从 release 列表中挑出绿色报告（tag 以 'lvsebaogao-v' 开头且非预发布）中版本号最大的一条。
+// 不依赖 API 返回顺序，用 compareVersions 逐版比对。
+function pickLatestYibiaoRelease(releases) {
+  if (!Array.isArray(releases)) return null;
+  const candidates = releases.filter((release) => {
+    const tagName = String(release?.tag_name || '');
+    if (!tagName.startsWith(YIBIAO_RELEASE_TAG_PREFIX)) return false;
+    if (release?.draft) return false;
+    if (release?.prerelease) return false;
+    if (release?.release_status === 'pre') return false;
+    return true;
+  });
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, current) => {
+    const latestVersion = String(latest?.tag_name || '').replace(/^lvsebaogao-v/i, '');
+    const currentVersion = String(current?.tag_name || '').replace(/^lvsebaogao-v/i, '');
+    return compareVersions(currentVersion, latestVersion) > 0 ? current : latest;
+  });
+}
+
 async function fetchGithubLatestRelease() {
-  const release = await requestJson(GITHUB_RELEASE_API, 'GitHub API ');
+  const releases = await requestJson(GITHUB_RELEASE_LIST_API, 'GitHub API ');
+  const release = pickLatestYibiaoRelease(releases);
+  if (!release) {
+    throw new Error('未找到绿色报告的正式版 Release');
+  }
   const files = Array.isArray(release.assets)
     ? release.assets.map((asset) => ({
       name: asset.name || '',
@@ -147,7 +173,7 @@ async function fetchGithubLatestRelease() {
   const downloadFile = pickPlatformDownloadFile(files);
   return {
     channel: 'github',
-    version: release.tag_name?.replace(/^v/, '') || '',
+    version: release.tag_name?.replace(/^lvsebaogao-v/i, '') || '',
     name: release.name || '',
     body: release.body || '',
     published_at: release.published_at || '',
@@ -228,7 +254,11 @@ function createAtomGitAssetDownloadUrl(tagName, fileName) {
 
 // 获取 AtomGit 最新 Release 及可下载附件。
 async function fetchAtomGitLatestRelease() {
-  const release = await requestJson(ATOMGIT_LATEST_RELEASE_API, 'AtomGit API ');
+  const releases = await requestJson(ATOMGIT_RELEASE_LIST_API, 'AtomGit API ');
+  const release = pickLatestYibiaoRelease(releases);
+  if (!release) {
+    throw new Error('未找到绿色报告的正式版 Release');
+  }
   const tagName = String(release.tag_name || '');
   const files = Array.isArray(release.assets)
     ? release.assets.map((asset) => {
@@ -245,7 +275,7 @@ async function fetchAtomGitLatestRelease() {
   const downloadFile = pickPlatformDownloadFile(files);
   return {
     channel: 'atomgit',
-    version: tagName.replace(/^v/i, ''),
+    version: tagName.replace(/^lvsebaogao-v/i, ''),
     name: release.name || tagName,
     body: release.body || '',
     published_at: release.created_at || '',

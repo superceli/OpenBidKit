@@ -76,6 +76,7 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
               value={state.outlineTask?.progress ?? 0}
               label={state.outlineTask?.logs?.[state.outlineTask.logs.length - 1] ?? ''}
               showPercentage
+              active={outlineTaskRunning}
             />
             {state.outlineTask?.status === 'error' && (
               <div className="green-report-error-text">

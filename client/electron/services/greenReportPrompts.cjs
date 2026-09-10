@@ -255,7 +255,12 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
   if (projectInfo.reportScope) parts.push(`报告范围：${projectInfo.reportScope}`);
   if (projectInfo.keyTopics) parts.push(`重点关注议题：${projectInfo.keyTopics}`);
-  // 目标字数 + 页数：让 AI 据此控制目录章节数量和每章深度，避免章节过多导致内容稀释或过少导致每章过长
+  // 评价类报告：传评测机构信息给大纲 AI
+  if (isEvaluationReport(reportType, reportTypeName)) {
+    if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
+    if (projectInfo.clientUnit) parts.push(`委托单位：${projectInfo.clientUnit}`);
+  }
+  // 目标字数 + 页数：让 AI 据此控制目录章节数量和每章深度
   const estimatedFromPages = options.pageCount ? options.pageCount * 800 : 0;
   const estimatedTotal = options.targetWords || estimatedFromPages;
   if (options.pageCount) {
@@ -294,17 +299,17 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
 function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, minWords) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
-  const floor = Number.isFinite(minWords) && minWords > 0 ? minWords : 800;
   const isEval = isEvaluationReport(reportType, reportTypeName);
   const isEia = isEnvironmentalImpactReport(reportType, reportTypeName);
 
   let conclusionRule;
   if (isEval) {
-    conclusionRule = `\n9. 若章节标题含"评价结论"或"综合评价结论"，必须按市面绿色评价报告规范生成：
-   - 必须明确给出综合评价等级（A级 / AA级 / AAA级，仅从这三档中选一，不得自创等级名称）
-   - 等级判定须有据可依：列出各一级指标（如基础设施、管理体系、能源资源投入、产品、环境排放）的得分及加权汇总
+    conclusionRule = `\n9. 本报告为绿色评价类报告，必须包含综合评价等级（A级/AA级/AAA级）：
+   - 在"综合评价结论"章节必须给出明确评级，评级判定标准：总分 ≥ 90 分 → AAA级；80-89 分 → AA级；70-79 分 → A级
+   - 评级须有据可依：列出各一级指标（基础设施、管理体系、能源资源投入、产品、环境排放）的得分及加权汇总
    - 列明扣分项、重大不符合项及其影响
    - 不得随意给分或凑分；评级与得分须前后一致
+   - 第三方评价章节须以第三方评测机构视角撰写
    - 末尾给出改进建议要点，与"改进建议"章节呼应`;
   } else if (isEia) {
     conclusionRule = `\n9. 若章节标题含"评价结论"或"评价结论与建议"，按建设项目环评规范生成工程环境可行性总结论（明确给出"从环境保护角度，项目建设可行/不可行"的结论性意见），并附主要环境影响结论、污染防治措施可行性结论与建议措施；本报告为环境影响评价报告，不适用 A级/AA级/AAA级 分级评价`;
@@ -340,10 +345,15 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
 5. 字数控制：严格遵守"本章目标字数"和"本章字数上限"，不要为了凑字数堆砌废话，也不要因为字数限制而输出你的压缩策略分析——直接写出符合字数的内容即可
 6. 适当使用表格、列表增强可读性；如涉及指标对比、数据展示，优先用 Markdown 表格
 7. 如涉及标准引用，标注标准名称（如GRI 305、ISO 14064等）；如涉及行业议题，结合下方提供的行业议题说明进行展开
-8. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有估算值${conclusionRule}
-9. 若章节标题含"附录"，正文可使用表格罗列指标数据、标准索引、评分明细表、资质证明清单等内容，不强制字数下限
-10. 写作风格：${styleGuidance}
-11. 跨章节去重（极其重要，违反将导致全篇大量重复内容）：
+8. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有估算值
+${conclusionRule}
+10. 若章节标题含"附录"，正文可使用表格罗列指标数据、标准索引、评分明细表、资质证明清单等内容，不强制字数下限，也不强制写章节摘要（规则 #2 对附录章节豁免）
+11. 写作风格：${styleGuidance}
+12. 跨章节数据一致性（并发生成时极其重要）：
+    - 同一数据（如全年碳排放总量、能耗总量、员工人数等）在所有章节中必须保持一致，不得出现在 A 章是 5.2 万吨、在 B 章变成 3.8 万吨的情况
+    - 如果不确定某数据的精确值，使用"约 X"给出量级，并在所有章节中保持同一量级
+    - 需要引用其他章节的数据时，写"详见 X.X 章节"并保持数值一致
+    - 跨章节去重（极其重要，违反将导致全篇大量重复内容）：
     - 下方会提供本篇报告的完整目录骨架和本章位置，你只写本章负责的内容，严禁跨章节重复
     - "公司概况""企业概况""组织与运营概况""报告前言"这类开篇章节已经介绍了企业背景、行业定位、业务范围等信息，后续所有章节（ESG治理、环境绩效、社会绩效、治理绩效等）一律不要再重复写这些基础信息
     - 环境绩效章节写能源消耗、温室气体排放，治理绩效章节写公司治理结构、商业道德，社会绩效章节写员工权益、社区参与——各管各的议题，不要交叉复述
@@ -392,6 +402,9 @@ ${trailingContext || '  （本章是最后一章）'}`;
   if (projectInfo.companyName) parts.push(`企业名称：${projectInfo.companyName}`);
   if (projectInfo.industry) parts.push(`所属行业：${projectInfo.industry}`);
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
+  // 第三方评测机构信息（评价类报告必需）
+  if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
+  if (projectInfo.clientUnit) parts.push(`委托单位：${projectInfo.clientUnit}`);
   // 篇幅约束：每章目标字数 + 字数上限（硬护栏）+ 页数指引
   if (options.chapterTargetWords && options.chapterMaxWords) {
     parts.push(`本章目标字数：${options.chapterTargetWords} 字（字数上限 ${options.chapterMaxWords} 字，严禁超出上限；允许略低于目标，不必强行凑字）`);
@@ -411,13 +424,53 @@ ${trailingContext || '  （本章是最后一章）'}`;
 
   // 评价结论/环评结论章节的明确指引
   const nodeTitle = String(node.title || '');
-  if (isEvaluationReport(reportType, reportTypeName) && (nodeTitle.includes('评价结论') || nodeTitle.includes('综合评价'))) {
-    parts.push(`\n本章为综合评价结论章节，必须按市面绿色评价报告规范输出：
-- 在章节开头明确给出综合评价等级（A级 / AA级 / AAA级，仅从这三档中选一）
-- 列出各一级指标得分及加权汇总（如基础设施、管理体系、能源资源投入、产品、环境排放）
-- 列明扣分项、重大不符合项及其影响
-- 评级须与各维度得分前后一致，不得随意给分
-- 末尾给出改进建议要点`);
+  if (isEvaluationReport(reportType, reportTypeName)) {
+    // 评价类报告：自评价结果章节
+    if (nodeTitle.includes('自评价') || nodeTitle.includes('自评结果') || nodeTitle.includes('自评得分')) {
+      parts.push(`\n本章为企业自评价结果章节，须以企业自身视角撰写，包含：
+- 企业对照评价指标体系逐项自评的过程说明
+- 各一级指标的自评得分与依据
+- 提供的佐证材料清单（如管理体系认证证书、监测报告、能源审计报告等）
+- 自评总分汇总`);
+    }
+    // 评价类报告：第三方评价章节注入评测机构信息
+    if (nodeTitle.includes('第三方评价') || nodeTitle.includes('第三方评估') || nodeTitle.includes('第三方审查')) {
+      const evaluator = projectInfo.compileUnit || projectInfo.companyName || '第三方评价机构';
+      parts.push(`\n本章为第三方评价章节，由"${evaluator}"作为第三方评测机构出具。正文须以第三方评测机构的视角撰写，包含：
+- 评价流程说明（文件审查、现场核查、数据验证等）
+- 评价方法（指标对标法、权重加权评分法等）
+- 各一级指标（基础设施、管理体系、能源资源投入、产品、环境排放等）的第三方评分与扣分项
+- 现场核查发现的关键问题与重大不符合项`);
+    }
+    // 综合评价结论章节：强制输出评级
+    if (nodeTitle.includes('评价结论') || nodeTitle.includes('综合评价')) {
+      const evaluator = projectInfo.compileUnit || '第三方评测机构';
+      parts.push(`\n本章为综合评价结论章节，是整份评价报告的核心结论，必须按以下规范输出：
+
+一、综合评价等级（必须输出，不可省略）：
+- 必须在章节开头明确给出综合评价等级：A级 / AA级 / AAA级（仅从这三档中选一）
+- 评级判定标准：总分 ≥ 90 分 → AAA级；80-89 分 → AA级；70-79 分 → A级；低于 70 分不予评级
+- 必须写出最终得分和等级，格式示例："经综合评价，${projectInfo.companyName || '该企业'}综合得分 85 分，综合评价等级为 AA级。"
+
+二、各维度评分汇总（必须输出，不可省略）：
+- 用 Markdown 表格列出各一级指标得分、权重、加权得分，示例：
+  | 一级指标 | 权重(%) | 得分 | 加权得分 |
+  |---------|--------|------|---------|
+  | 基础设施 | 20 | 85 | 17.0 |
+  | 管理体系 | 20 | 80 | 16.0 |
+  | 能源资源投入 | 20 | 90 | 18.0 |
+  | 产品 | 20 | 85 | 17.0 |
+  | 环境排放 | 20 | 85 | 17.0 |
+  | **合计** | **100** | | **85.0** |
+
+三、扣分项与重大不符合项：
+- 列明各维度的扣分项及扣分原因
+- 如有重大不符合项（一票否决项），明确标注其影响
+
+四、评价结论与建议：
+- 由"${evaluator}"出具综合评价结论
+- 末尾给出改进建议要点，与"改进建议"章节呼应`);
+    }
   } else if (isEnvironmentalImpactReport(reportType, reportTypeName) && nodeTitle.includes('评价结论')) {
     parts.push(`\n本章为环境影响评价结论章节，按建设项目环评规范输出工程环境可行性总结论（明确"从环境保护角度，项目建设可行/不可行"），并附主要环境影响结论、污染防治措施可行性结论与建议措施；本报告为环评报告，不适用 A级/AA级/AAA级 分级评价`);
   } else if (nodeTitle.includes('附录')) {

@@ -304,9 +304,18 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     };
 
     const previousState = loadWorkspaceState(definition) || {};
+    // 互斥任务：启动当前任务时清除同组的另一个任务状态，避免旧进度条残留
+    const siblingReset = {};
+    if (definition.stateKey === 'greenReport') {
+      if (taskField === 'outlineTask') {
+        siblingReset.contentTask = null;
+      } else if (taskField === 'contentTask') {
+        siblingReset.outlineTask = null;
+      }
+    }
     const initialState = startOptions.skipInitialStateUpdate
       ? previousState
-      : { ...initialPartial, [taskField]: currentTask };
+      : { ...siblingReset, ...initialPartial, [taskField]: currentTask };
     if (!startOptions.skipInitialStateUpdate) {
       updateWorkspaceStateWithoutReload(definition, initialState);
     }

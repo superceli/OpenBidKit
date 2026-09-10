@@ -3,11 +3,11 @@ name: Release Client
 on:
   push:
     tags:
-      - 'v*'
+      - 'lvsebaogao-v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: '要发布的 tag，例如 v2.0.1'
+        description: '要发布的 tag，例如 lvsebaogao-v2.0.1'
         required: true
         type: string
 
@@ -43,7 +43,7 @@ jobs:
         env:
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
-          VERSION="${TAG_NAME#v}"
+          VERSION="${TAG_NAME#lvsebaogao-v}"
           if [[ "$VERSION" == *-* ]]; then
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
@@ -153,7 +153,7 @@ jobs:
         env:
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
-          VERSION="${TAG_NAME#v}"
+          VERSION="${TAG_NAME#lvsebaogao-v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Generate build attestation
@@ -271,7 +271,7 @@ jobs:
         env:
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
-          VERSION="${TAG_NAME#v}"
+          VERSION="${TAG_NAME#lvsebaogao-v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Generate build attestation

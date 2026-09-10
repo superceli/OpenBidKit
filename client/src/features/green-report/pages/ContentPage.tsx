@@ -93,6 +93,7 @@ function ContentPage({
                 value={state.contentTask?.progress ?? 0}
                 label={state.contentTask?.logs?.[state.contentTask.logs.length - 1] ?? ''}
                 showPercentage
+                active={contentTaskRunning}
               />
               {state.contentTask?.status === 'error' && (
                 <div className="green-report-error-text">

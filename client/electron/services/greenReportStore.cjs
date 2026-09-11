@@ -238,6 +238,13 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return { outlineData: state.outlineData };
   }
 
+  /** 清空所有节点的 content 字段，用于重新生成目录/正文前清除旧数据。 */
+  function clearAllChapterContent() {
+    db.prepare('UPDATE green_report_outline_nodes SET content = ?, updated_at = ?').run('', now());
+    const state = loadState();
+    return { outlineData: state.outlineData };
+  }
+
   function saveOutlineFromResult(outlineData) {
     assignIds(outlineData.outline || [], null, '');
     if (outlineData.project_name) saveMeta({ outline_project_name: outlineData.project_name });
@@ -316,6 +323,7 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     saveKnowledgeContext,
     saveOutline,
     saveChapterContent,
+    clearAllChapterContent,
     saveOutlineFromResult,
     saveTaskState,
     updateGreenReportWithoutReload,

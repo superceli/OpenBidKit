@@ -309,8 +309,12 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     if (definition.stateKey === 'greenReport') {
       if (taskField === 'outlineTask') {
         siblingReset.contentTask = null;
+        // 重新生成目录时同时清空旧正文，避免 ContentPage 残留旧勾选/正文
+        Object.assign(siblingReset, greenReportStore.clearAllChapterContent());
       } else if (taskField === 'contentTask') {
         siblingReset.outlineTask = null;
+        // 重新生成正文时先清空所有节点的旧正文，让勾选归零后重新生成
+        Object.assign(siblingReset, greenReportStore.clearAllChapterContent());
       }
     }
     const initialState = startOptions.skipInitialStateUpdate

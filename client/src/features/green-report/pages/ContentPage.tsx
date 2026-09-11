@@ -87,7 +87,7 @@ function ContentPage({
               {contentTaskRunning ? '生成中...' : '生成正文'}
             </button>
           </div>
-          {(contentTaskRunning || state.contentTask) && (
+          {(contentTaskRunning || state.contentTask?.status === 'error') && (
             <div style={{ padding: '4px 8px' }}>
               <ProgressBar
                 value={state.contentTask?.progress ?? 0}

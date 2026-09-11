@@ -70,7 +70,7 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
           </div>
         </div>
 
-        {(outlineTaskRunning || state.outlineTask) && (
+        {(outlineTaskRunning || state.outlineTask?.status === 'error') && (
           <div style={{ marginBottom: '16px' }}>
             <ProgressBar
               value={state.outlineTask?.progress ?? 0}

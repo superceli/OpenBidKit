@@ -598,11 +598,90 @@
   font-size: 13px;
   cursor: pointer;
   transition: all var(--yb-duration-fast) var(--yb-ease);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .green-report-outline-item:hover {
   border-color: rgba(33, 116, 253, 0.22);
   background: rgba(33, 116, 253, 0.04);
+}
+
+.green-report-outline-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.green-report-outline-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 1px;
+  opacity: 0;
+  transition: opacity var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-report-outline-item:hover .green-report-outline-item-actions {
+  opacity: 1;
+}
+
+.green-report-outline-action-btn {
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--yb-radius-sm);
+  border: 1px solid var(--yb-border);
+  background: var(--yb-surface);
+  color: var(--yb-text-muted);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+  white-space: nowrap;
+}
+
+.green-report-outline-action-btn:hover:not(:disabled) {
+  border-color: rgba(33, 116, 253, 0.4);
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.06);
+}
+
+.green-report-outline-action-btn.is-danger:hover:not(:disabled) {
+  border-color: var(--yb-danger, #e5484d);
+  color: var(--yb-danger, #e5484d);
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.green-report-outline-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.green-report-outline-actions {
+  padding: 6px 0 2px;
+}
+
+.green-report-outline-add-root {
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: var(--yb-radius-md);
+  border: 1px dashed var(--yb-border-strong, #c4c7d1);
+  background: transparent;
+  color: var(--yb-text-muted);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+  width: 100%;
+}
+
+.green-report-outline-add-root:hover:not(:disabled) {
+  border-color: var(--yb-primary);
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.04);
+}
+
+.green-report-outline-add-root:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .green-report-outline-item.is-selected {
@@ -659,6 +738,9 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
 }
 
 .green-report-outline-stats {

@@ -44,8 +44,8 @@ function ContentPage({
     try {
       await onGenerate();
       showToast('正文生成任务已启动', 'info');
-    } finally {
-      /* 忽略 */
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   };
 

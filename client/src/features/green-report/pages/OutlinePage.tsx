@@ -24,13 +24,15 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
 
   const handleGenerate = async () => {
     if (!state.projectInfo.companyName?.trim()) {
-      showToast('请先在"企业信息"步骤填写企业名称', 'error');
+      showToast('请先在"企业信息"步骤填写委托单位', 'error');
       return;
     }
     setGenerating(true);
     try {
       await onGenerateOutline();
       showToast('目录生成任务已启动，请等待完成', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setGenerating(false);
     }

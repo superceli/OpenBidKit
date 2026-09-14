@@ -166,8 +166,8 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       // 报告标题用用户勾选的报告类型名称（如"ESG（环境、社会、公司治理）报告"）
       const reportType = findReportTypeById(state.reportType);
       const reportTitle = reportType?.name || '绿色报告';
-      // 委托单位优先取 clientUnit，为空时回退到企业/组织名称
-      const clientUnit = state.projectInfo.clientUnit || state.projectInfo.companyName || '';
+      // 委托单位即企业名称（全局唯一企业标识字段，UI 上已合并）
+      const clientUnit = state.projectInfo.companyName || '';
       const result = await window.lvcert.export.exportWord({
         project_name: state.projectInfo.companyName || '绿色报告',
         outline: state.outlineData.outline,
@@ -269,7 +269,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             }}
             onSaveProjectInfo={async () => {
               if (!draftProjectInfo.companyName?.trim()) {
-                showToast('请填写企业/组织名称（必填）', 'error');
+                showToast('请填写委托单位（必填）', 'error');
                 return;
               }
               if (!draftProjectInfo.compileUnit?.trim()) {
@@ -314,20 +314,16 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               void window.lvcert?.greenReport?.saveOutlineConfig(patch).catch(() => undefined);
             }}
             onGenerateOutline={async () => {
-              try {
-                await window.lvcert.tasks.startGreenReportOutline({
-                  reportType: state.reportType,
-                  reportTypeName: findReportTypeById(state.reportType)?.name || '',
-                  projectInfo: state.projectInfo,
-                  targetWords: state.targetWords,
-                  pageCount: state.pageCount,
-                  documentStyle: state.documentStyle,
-                  knowledgeContext: state.knowledgeContext,
-                  userRequirements: state.outlineRequirements,
-                });
-              } catch (error) {
-                showToast(error instanceof Error ? error.message : String(error), 'error');
-              }
+              await window.lvcert.tasks.startGreenReportOutline({
+                reportType: state.reportType,
+                reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                projectInfo: state.projectInfo,
+                targetWords: state.targetWords,
+                pageCount: state.pageCount,
+                documentStyle: state.documentStyle,
+                knowledgeContext: state.knowledgeContext,
+                userRequirements: state.outlineRequirements,
+              });
             }}
             onSaveOutline={async (request) => {
               setState((prev) => ({
@@ -348,21 +344,17 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             state={state}
             onContentRequirementsChange={(req) => setState((prev) => ({ ...prev, contentRequirements: req }))}
             onGenerate={async () => {
-              try {
-                await window.lvcert.tasks.startGreenReportContent({
-                  reportType: state.reportType,
-                  reportTypeName: findReportTypeById(state.reportType)?.name || '',
-                  projectInfo: state.projectInfo,
-                  outlineData: state.outlineData,
-                  targetWords: state.targetWords,
-                  pageCount: state.pageCount,
-                  documentStyle: state.documentStyle,
-                  knowledgeContext: state.knowledgeContext,
-                  userRequirements: state.contentRequirements,
-                });
-              } catch (error) {
-                showToast(error instanceof Error ? error.message : String(error), 'error');
-              }
+              await window.lvcert.tasks.startGreenReportContent({
+                reportType: state.reportType,
+                reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                projectInfo: state.projectInfo,
+                outlineData: state.outlineData,
+                targetWords: state.targetWords,
+                pageCount: state.pageCount,
+                documentStyle: state.documentStyle,
+                knowledgeContext: state.knowledgeContext,
+                userRequirements: state.contentRequirements,
+              });
             }}
             onSaveChapter={async (nodeId, content) => {
               setState((prev) => {

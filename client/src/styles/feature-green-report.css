@@ -159,6 +159,40 @@
   gap: 12px;
 }
 
+.green-report-type-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 0 12px;
+  background: rgba(33, 116, 253, 0.08);
+  border: 1px solid rgba(33, 116, 253, 0.35);
+  border-radius: var(--yb-radius-md);
+  color: var(--yb-primary-deep, #1d4ed8);
+  font-size: 13px;
+}
+
+.green-report-type-selected-name {
+  font-weight: 600;
+}
+
+.green-report-type-selected-clear {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--yb-text-secondary, #666);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.green-report-type-selected-clear:hover {
+  background: rgba(33, 116, 253, 0.12);
+  color: var(--yb-primary, #2174fd);
+}
+
 .green-report-type-group {
   display: flex;
   flex-direction: column;

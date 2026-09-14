@@ -1,7 +1,7 @@
 import { useMemo, useState, type ChangeEvent } from 'react';
 import { useToast } from '../../../shared/ui';
 import type { GreenProjectInfo, GreenReportState, GreenReportType } from '../types';
-import { GREEN_REPORT_TYPES, groupReportTypesByCategory, searchReportTypes, type GreenReportCategory } from '../reportTypes';
+import { findReportTypeById, GREEN_REPORT_TYPES, groupReportTypesByCategory, searchReportTypes, type GreenReportCategory } from '../reportTypes';
 
 interface CompanyInfoPageProps {
   state: GreenReportState;
@@ -32,6 +32,8 @@ function CompanyInfoPage({
     onDraftChange({ ...draftProjectInfo, [field]: e.target.value });
   };
 
+  const selectedReportType = findReportTypeById(state.reportType);
+
   const handleGenerateReportCode = async () => {
     setGeneratingCode(true);
     try {
@@ -60,6 +62,19 @@ function CompanyInfoPage({
               onChange={(e) => setReportTypeSearch(e.target.value)}
             />
           </div>
+          {selectedReportType && (
+            <div className="green-report-type-selected">
+              当前选择：<span className="green-report-type-selected-name">{selectedReportType.name}</span>
+              <button
+                type="button"
+                className="green-report-type-selected-clear"
+                onClick={() => onReportTypeChange('')}
+                title="清除选择"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="green-report-type-list">
             {Object.entries(filteredGroups).map(([category, items]) => (
               <div key={category} className="green-report-type-group">
@@ -97,13 +112,13 @@ function CompanyInfoPage({
           <p className="green-report-subtitle">用于生成报告封面和正文背景描述</p>
           <div className="green-report-form">
             <label className="green-report-field">
-              <span className="green-report-field-label">企业/组织名称 <span className="green-report-required">*</span></span>
+              <span className="green-report-field-label">委托单位 <span className="green-report-required">*</span></span>
               <input
                 type="text"
                 className="green-report-input"
                 value={draftProjectInfo.companyName}
                 onChange={handleFieldChange('companyName')}
-                placeholder="请输入企业全称"
+                placeholder="请输入委托单位全称（即被评价企业）"
               />
             </label>
 

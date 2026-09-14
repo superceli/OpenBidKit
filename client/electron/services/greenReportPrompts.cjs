@@ -296,7 +296,8 @@ function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
 function buildOutlineUserInstruction(reportType, projectInfo, options = {}, reportTypeName) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const parts = [`请为以下企业生成一份${label}目录。\n`];
-  if (projectInfo.companyName) parts.push(`企业名称：${projectInfo.companyName}`);
+  // 委托单位即企业名称（UI 上已合并为唯一字段）
+  if (projectInfo.companyName) parts.push(`委托单位：${projectInfo.companyName}`);
   if (projectInfo.industry) parts.push(`所属行业：${projectInfo.industry}`);
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
   if (projectInfo.reportScope) parts.push(`报告范围：${projectInfo.reportScope}`);
@@ -304,7 +305,6 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   // 评价类报告：传评测机构信息给大纲 AI
   if (isEvaluationReport(reportType, reportTypeName)) {
     if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
-    if (projectInfo.clientUnit) parts.push(`委托单位：${projectInfo.clientUnit}`);
   }
   // 目标字数 + 页数：让 AI 据此控制目录章节数量和每章深度
   const estimatedFromPages = options.pageCount ? options.pageCount * 800 : 0;
@@ -450,12 +450,12 @@ ${trailingContext || '  （本章是最后一章）'}`;
   if (chapterNo) parts.push(`本章编号：${chapterNo}（正文内部子项编号须此前缀递增，如 ${chapterNo}.1、${chapterNo}.2）`);
   parts.push(`章节标题：${node.title}`);
   parts.push(`章节描述：${node.description || ''}`);
-  if (projectInfo.companyName) parts.push(`企业名称：${projectInfo.companyName}`);
+  // 委托单位即企业名称（UI 上已合并为唯一字段）
+  if (projectInfo.companyName) parts.push(`委托单位：${projectInfo.companyName}`);
   if (projectInfo.industry) parts.push(`所属行业：${projectInfo.industry}`);
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
   // 第三方评测机构信息（评价类报告必需）
   if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
-  if (projectInfo.clientUnit) parts.push(`委托单位：${projectInfo.clientUnit}`);
   // 篇幅约束：每章目标字数 + 字数上限（硬护栏）+ 页数指引
   if (options.chapterTargetWords && options.chapterMaxWords) {
     parts.push(`本章目标字数：${options.chapterTargetWords} 字（字数上限 ${options.chapterMaxWords} 字，严禁超出上限；允许略低于目标，不必强行凑字）`);

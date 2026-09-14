@@ -22,7 +22,16 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return {
       step: row.step || 'company-info',
       reportType: row.report_type || 'esg',
-      projectInfo: row.project_info_json ? JSON.parse(row.project_info_json) : { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', clientUnit: '', compileUnit: '', compileDate: '', reportCode: '' },
+      projectInfo: (() => {
+        if (!row.project_info_json) return { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileUnit: '', compileDate: '', reportCode: '' };
+        const parsed = JSON.parse(row.project_info_json);
+        // 兼容老数据：剥离已废弃的 clientUnit 字段（UI 已合并到 companyName）
+        // 下次 saveMeta 时该字段不会再次写入数据库
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'clientUnit')) {
+          delete parsed.clientUnit;
+        }
+        return parsed;
+      })(),
       targetWords: row.target_words || 20000,
       pageCount: row.page_count || 30,
       documentStyle: row.document_style || 'standard',
@@ -133,7 +142,7 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return {
       step: meta?.step || 'company-info',
       reportType: meta?.reportType || 'esg',
-      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', clientUnit: '', compileUnit: '', compileDate: '', reportCode: '' },
+      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileUnit: '', compileDate: '', reportCode: '' },
       targetWords: meta?.targetWords || 20000,
       pageCount: meta?.pageCount || 30,
       documentStyle: meta?.documentStyle || 'standard',

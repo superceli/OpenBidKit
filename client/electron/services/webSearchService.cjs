@@ -20,8 +20,29 @@ const PAGE_FETCH_TIMEOUT_MS = 12000;
 const MAX_DETAIL_PAGES = 5;
 const WAYBACK_TIMEOUT_MS = 10000;
 
+// 调试开关：环境变量 LVCERT_WEB_SEARCH_DEBUG=1 时输出抓取到的 HTML 头部供 SSR 字段名校准
+const WEB_SEARCH_DEBUG = process.env.LVCERT_WEB_SEARCH_DEBUG === '1' || process.env.LVCERT_WEB_SEARCH_DEBUG === 'true';
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 调试日志：仅在 LVCERT_WEB_SEARCH_DEBUG=1 时输出到 console。
+ * 用于 SSR 字段名校准：用户跑一次搜索后查看日志中实际抓到的 HTML 头部，
+ * 据此调整 parseQccResults/parseAiqichaResults 中的字段名正则。
+ */
+function debugLog(label, content) {
+  if (!WEB_SEARCH_DEBUG) return;
+  try {
+    const text = String(content || '');
+    // 限制日志长度，只输出前 2000 字符供字段名校准
+    const preview = text.length > 2000 ? `${text.slice(0, 2000)}...(总长 ${text.length})` : text;
+    // eslint-disable-next-line no-console
+    console.log(`[webSearchService][${label}] ${preview}\n`);
+  } catch {
+    // 日志输出失败忽略
+  }
 }
 
 // 过滤掉内容多为截断摘要的聚合站（企查查、爱企查已作为直接搜索源，不再屏蔽）
@@ -93,6 +114,22 @@ function isBlockedUrl(url) {
 }
 
 /**
+ * 根据搜索结果 URL 判断企业信息聚合站来源。
+ * 用于在合并多来源字段时按来源优先级排序，避免 snippet 内容误判。
+ * @param {string} url 搜索结果 URL
+ * @returns {'tianyancha'|'qcc'|'aiqicha'|'gsxt'|'other'}
+ */
+function getSourceByDomain(url) {
+  const u = String(url || '').toLowerCase();
+  if (!u) return 'other';
+  if (u.includes('tianyancha.com')) return 'tianyancha';
+  if (u.includes('qcc.com')) return 'qcc';
+  if (u.includes('aiqicha.baidu.com') || u.includes('aiqicha.com')) return 'aiqicha';
+  if (u.includes('gsxt.gov.cn')) return 'gsxt';
+  return 'other';
+}
+
+/**
  * 从 Bing 搜索结果页提取条目。
  */
 function parseBingResults(html) {
@@ -101,10 +138,24 @@ function parseBingResults(html) {
   let blockMatch;
   while ((blockMatch = blockRegex.exec(html)) !== null) {
     const block = blockMatch[1];
-    const linkMatch = block.match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-    const url = linkMatch ? linkMatch[1] : '';
-    if (!url || isBlockedUrl(url)) continue;
-    const title = stripHtmlTags(linkMatch ? linkMatch[2] : '');
+    // 跳过 <link rel="stylesheet"> 标签和站点图标链接（class="tilk"），
+    // 只匹配真正的搜索结果主链接（target="_blank" 且非 tilk 的 a 标签）
+    const cleaned = block.replace(/<link[^>]*>/gi, '');
+    const aTags = cleaned.match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi) || [];
+    let url = '';
+    let title = '';
+    for (const aTag of aTags) {
+      if (/class="[^"]*tilk[^"]*"/i.test(aTag)) continue;
+      const m = aTag.match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+      if (!m || !m[1]) continue;
+      const candidateUrl = m[1];
+      if (!candidateUrl || isBlockedUrl(candidateUrl)) continue;
+      if (candidateUrl.startsWith('/') || candidateUrl.startsWith('#')) continue;
+      url = candidateUrl;
+      title = stripHtmlTags(m[2]);
+      break;
+    }
+    if (!url) continue;
     const pMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
     const snippet = stripHtmlTags(pMatch ? pMatch[1] : '');
     if (title || snippet) {
@@ -122,6 +173,7 @@ function parseBingResults(html) {
  * @param {string} [companyName] 传入时做页面级公司名校验，页面提及公司则所有片段都可使用
  */
 function parseQccResults(html, companyName) {
+  debugLog('qcc-html', html);
   const results = [];
   const coreName2 = companyName ? companyName.replace(/(有限责任公司|股份有限公司|有限公司)$/, '') : '';
   const pageMentionsCompany = companyName
@@ -131,15 +183,16 @@ function parseQccResults(html, companyName) {
   // 方法1：从 JSON 数据中提取工商字段值
   // 企查查可能在 SSR 或 window.__INITIAL_STATE__ 中嵌入结构化数据
   // 字段名可能为驼峰命名：legalPerson、regCapital、startDate、address、creditNo 等
+  // 字段名候选经过扩充，覆盖企查查/爱企查/天眼查常见 SSR JSON 命名差异
   const jsonFieldPatterns = [
-    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
-    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapitalStr)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
-    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
-    { regex: /"(?:address|regAddress|regLocation|companyAddress)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
-    { regex: /"(?:creditNo|unifiedSocialCreditCode|creditCode|creditNoStr)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
-    { regex: /"(?:companyType|entType|econType|companyOrgType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
-    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
-    { regex: /"(?:phoneNumber|tel|phone|contactPhone)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
+    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal|legalPersonName|repName|representative|frName|chargePerson|principal|ceoName)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
+    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapitalStr|regCapAmount|capitalAmount|registCapital)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
+    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate|estiblishDate|regDate|setupDate|regTime)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
+    { regex: /"(?:address|regAddress|regLocation|companyAddress|regAddr|addr|regLocationStr|businessAddress)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
+    { regex: /"(?:creditNo|unifiedSocialCreditCode|creditCode|creditNoStr|unifiedCode|unifiedCodeNo|socialCreditCode|regNo|taxRegNo)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
+    { regex: /"(?:companyType|entType|econType|companyOrgType|entStatus|economicType|type|orgType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
+    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr|opScopeDesc|scopeStr|businessRange)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
+    { regex: /"(?:phoneNumber|tel|phone|contactPhone|telephone|contactNumber|phoneNo|mobile|landline)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
   ];
   for (const { regex, label } of jsonFieldPatterns) {
     let fieldMatch;
@@ -187,6 +240,7 @@ function parseQccResults(html, companyName) {
  * @param {string} [companyName] 传入时做页面级公司名校验
  */
 function parseAiqichaResults(html, companyName) {
+  debugLog('aiqicha-html', html);
   const results = [];
   const coreName2 = companyName ? companyName.replace(/(有限责任公司|股份有限公司|有限公司)$/, '') : '';
   const pageMentionsCompany = companyName
@@ -195,15 +249,16 @@ function parseAiqichaResults(html, companyName) {
 
   // 方法1：从 JSON 中提取工商字段值
   // 爱企查 SSR 数据字段名可能为：legalPerson、regCap、startDate、address、unifiedCode、companyType、scope 等
+  // 字段名候选与企查查保持一致，覆盖常见命名差异
   const jsonFieldPatterns = [
-    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
-    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapStr)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
-    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate|startDateStr)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
-    { regex: /"(?:address|regAddress|regLocation|companyAddress|addr)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
-    { regex: /"(?:unifiedCode|unifiedSocialCreditCode|creditCode|creditNo)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
-    { regex: /"(?:companyType|entType|econType|companyOrgType|economicType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
-    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
-    { regex: /"(?:phoneNumber|tel|phone|contactPhone|telephone)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
+    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal|legalPersonName|repName|representative|frName|chargePerson|principal|ceoName)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
+    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapStr|regCapitalStr|regCapAmount|capitalAmount|registCapital)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
+    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate|startDateStr|estiblishDate|regDate|setupDate|regTime)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
+    { regex: /"(?:address|regAddress|regLocation|companyAddress|addr|regAddr|regLocationStr|businessAddress)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
+    { regex: /"(?:unifiedCode|unifiedSocialCreditCode|creditCode|creditNo|unifiedCodeNo|socialCreditCode|regNo|taxRegNo|creditNoStr)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
+    { regex: /"(?:companyType|entType|econType|companyOrgType|economicType|entStatus|type|orgType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
+    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr|opScopeDesc|scopeStr|businessRange)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
+    { regex: /"(?:phoneNumber|tel|phone|contactPhone|telephone|contactNumber|phoneNo|mobile|landline)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
   ];
   for (const { regex, label } of jsonFieldPatterns) {
     let fieldMatch;
@@ -650,8 +705,11 @@ function extractFieldsFromText(text) {
 
   const patterns = {
     legalRepresentative: [
-      /法定代表人[：:\s为是]*(?:为|是)?\s*([\u4e00-\u9fa5·]{2,4}?)(?=注册资本|成立|注册地|统一|企业类|经营范|联系电|登记|存续|$)/,
-      /法人[：:\s为是]*(?:为|是)?\s*([\u4e00-\u9fa5·]{2,4}?)(?=注册资本|成立|注册地|统一|企业类|经营范|联系电|登记|存续|$)/,
+      // 法定代表人：2-15 字符（含少数民族·、-分隔符）；冒号后允许全角空格、&nbsp;、多空格
+      // lookahead 用边界词，避免在名字后跟其他字时被非贪婪截断到 2 字
+      /法定代表人[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([\u4e00-\u9fa5·\-•]{2,15}?)(?=\s|注册资本|成立|注册地|注册资|统一|企业类|公司类|经营范|联系电|登记|存续|状况|<br|<|，|,|;|；|。|$)/,
+      /法人代表[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([\u4e00-\u9fa5·\-•]{2,15}?)(?=\s|注册资本|成立|注册地|注册资|统一|企业类|公司类|经营范|联系电|登记|存续|状况|<br|<|，|,|;|；|。|$)/,
+      /法人[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([\u4e00-\u9fa5·\-•]{2,15}?)(?=\s|注册资本|成立|注册地|注册资|统一|企业类|公司类|经营范|联系电|登记|存续|状况|<br|<|，|,|;|；|。|$)/,
     ],
     registeredCapital: [
       /注册资本[：:\s为是]*(?:为|是|人民币)?\s*([0-9]+\.?[0-9]*\s*[万亿]?\s*(?:元人民币|元|万)?)/,
@@ -670,9 +728,12 @@ function extractFieldsFromText(text) {
       /位于\s*([^\n，,;；。]{4,120}(?:省|市|区|县|路|号|街|镇|乡|村|园))/,
     ],
     unifiedSocialCreditCode: [
-      /统一社会信用代码[：:\s为是]*(?:为|是)?\s*([0-9A-HJ-NPQRTUWXY]{18})/,
-      /社会信用代码[：:\s为是]*(?:为|是)?\s*([0-9A-HJ-NPQRTUWXY]{18})/,
-      /信用代码[：:\s为是]*(?:为|是)?\s*([0-9A-HJ-NPQRTUWXY]{18})/,
+      // 标准：统一社会信用代码：91330110MA2ABC...（冒号后允许全角空格、&nbsp;、多空格、<br>等）
+      /统一社会信用代码[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([0-9A-HJ-NPQRTUWXY]{18})/,
+      /社会信用代码[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([0-9A-HJ-NPQRTUWXY]{18})/,
+      /信用代码[\s\u3000\u00a0：:]*[为是]?\s*(?:<br\s*\/?>)?[\s\u3000\u00a0]*([0-9A-HJ-NPQRTUWXY]{18})/,
+      // 兜底：在标签/换行后的 18 位统一社会信用代码（无前缀词，靠位置匹配）
+      /(?:代码|证号|注册号|编号)[\s\u3000\u00a0：:]*[为是]?\s*([0-9A-HJ-NPQRTUWXY]{18})/,
     ],
     enterpriseType: [
       /企业类型[：:\s为是]*(?:为|是)?\s*([^\s,，;；。\n"{}[\]\\]{2,30})/,
@@ -802,9 +863,14 @@ function validateFields(fields) {
     }
   }
 
-  // 经营范围校验：长度合理
-  if (result.businessScope && (result.businessScope.length < 4 || result.businessScope.length > 500)) {
-    delete result.businessScope;
+  // 经营范围校验：长度合理 + 黑名单过滤搜索引擎/导航类垃圾值
+  if (result.businessScope) {
+    const scope = String(result.businessScope).trim();
+    // 搜索引擎品牌词、导航类词误抓：如 "_百度搜索""百度搜索""搜狗搜索"等
+    const blacklistRegex = /^(?:[_\-\s]*(?:百度|搜狗|360|必应|bing|google|谷歌)?搜索[_\-\s]*|搜索)$/i;
+    if (scope.length < 4 || scope.length > 500 || blacklistRegex.test(scope)) {
+      delete result.businessScope;
+    }
   }
 
   // 企业类型校验：应包含"公司""企业""有限""合伙"等关键词
@@ -837,14 +903,29 @@ function businessFieldsToMarkdown(fields) {
 }
 
 function createWebSearchService() {
+  // 进程内工商信息搜索缓存：同企业 10 分钟内复用，避免目录/正文任务重复搜索
+  // key=公司名，value={result, ts}
+  const businessInfoCache = new Map();
+  const BUSINESS_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
+
   /**
    * 搜索企业工商基础信息。
    * @param {string} companyName 企业全称
+   * @param {object} [options] { force?: boolean, onProgress?: (msg) => void }
    * @returns {Promise<{results: Array, businessFields: Record<string,string>}>}
    */
-  async function searchForBusinessInfo(companyName) {
+  async function searchForBusinessInfo(companyName, options = {}) {
     const name = String(companyName || '').trim();
     if (!name) return { results: [], businessFields: {} };
+
+    // 缓存命中检查（force=true 时跳过缓存）
+    const now = Date.now();
+    if (!options.force) {
+      const cached = businessInfoCache.get(name);
+      if (cached && (now - cached.ts) < BUSINESS_INFO_CACHE_TTL_MS) {
+        return cached.result;
+      }
+    }
 
     // 提取公司核心名称（去掉"有限公司/有限责任公司/股份有限公司"等后缀），用于模糊匹配
     const coreName = name.replace(/(有限责任公司|股份有限公司|有限公司)$/, '').trim();
@@ -862,15 +943,25 @@ function createWebSearchService() {
     }
 
     // 多组关键词定向搜索（精简数量，避免触发搜索引擎反爬）
+    // 注意：避免直接使用"法定代表人""注册资本""统一社会信用代码"等字段名作为关键词，
+    // 搜索引擎会判定为爬虫意图并触发反爬/安全验证；改用工商登记、企业基本信息等软词
     const keywords = [
       `${name} 工商信息`,
-      `${name} 天眼查 法定代表人 注册资本`,
-      `${name} 统一社会信用代码 注册地址 经营范围`,
+      `${name} 企业基本信息 工商登记`,
+      `${coreName || name} 注册时间 注册地 经营范围`,
     ];
 
     const allItems = [];
-    const tycTexts = []; // 天眼查来源文本（优先使用）
-    const otherTexts = []; // 其他来源文本
+    // 多来源 buckets：按权威性排序合并（聚合站 > 普通搜索）
+    // 注意：来源判断基于 URL 域名，避免 snippet 内容误判（如百度知识卡片含"天眼查"字样）
+    const sourceTexts = {
+      tianyancha: [], // 天眼查（优先）
+      qcc: [],        // 企查查
+      aiqicha: [],    // 爱企查
+      gsxt: [],       // 国家企业信用信息公示系统
+      other: [],      // 其他来源（普通网页、知识卡片等）
+    };
+    const sourceStats = { baidu: 'pending', bing: 'pending', qcc: 'pending', aiqicha: 'pending', gsxt: 'pending' };
     try {
       // 百度搜索：串行执行并加延迟，避免触发安全验证
       for (let i = 0; i < keywords.length; i++) {
@@ -879,58 +970,68 @@ function createWebSearchService() {
         for (const item of baiduResults) {
           allItems.push(item);
           if (item.snippet && (item.pageMentionsCompany || isCompanyRelated(item.snippet))) {
-            // 天眼查数据特征：包含"天眼查"或"统一社会信用代码"+18位编码
-            if (item.snippet.includes('天眼查') || /统一社会信用代码\s*[0-9A-HJ-NPQRTUWXY]{18}/.test(item.snippet)) {
-              tycTexts.push(item.snippet);
-            } else {
-              otherTexts.push(item.snippet);
-            }
+            const src = getSourceByDomain(item.url);
+            sourceTexts[src].push(item.snippet);
           }
         }
       }
+      sourceStats.baidu = 'ok';
 
       // Bing + 企查查 + 爱企查：并行执行（聚合站带 cookie 处理与反爬重试）
       const bingTasks = keywords.map((keyword) => fetchSearchResults(buildBingUrl(keyword), parseBingResults));
       const qccTask = fetchQccResults(buildQccUrl(name), parseQccResults, name);
       const aiqichaTask = fetchAiqichaResults(buildAiqichaUrl(name), parseAiqichaResults, name);
       const parallelSettled = await Promise.allSettled([...bingTasks, qccTask, aiqichaTask]);
-      for (const result of parallelSettled) {
+      // settled 数组顺序对应 [bingTask1, bingTask2, bingTask3, qccTask, aiqichaTask]
+      const sourceOrder = ['bing', 'bing', 'bing', 'qcc', 'aiqicha'];
+      parallelSettled.forEach((result, idx) => {
+        const src = sourceOrder[idx] || 'bing';
         if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+          if (result.value.length === 0) {
+            sourceStats[src] = 'empty';
+          } else {
+            sourceStats[src] = 'ok';
+          }
           for (const item of result.value) {
             allItems.push(item);
             if (item.snippet && isCompanyRelated(item.snippet)) {
-              if (item.snippet.includes('天眼查') || /统一社会信用代码\s*[0-9A-HJ-NPQRTUWXY]{18}/.test(item.snippet)) {
-                tycTexts.push(item.snippet);
-              } else {
-                otherTexts.push(item.snippet);
-              }
+              // 聚合站来源按 URL 域名分流；Bing 普通结果也走 URL 域名
+              const domainSrc = getSourceByDomain(item.url);
+              sourceTexts[domainSrc].push(item.snippet);
             }
           }
+        } else {
+          sourceStats[src] = 'fail';
         }
-      }
+      });
     } catch {
       // 搜索失败不阻塞主流程
     }
 
-    // 优先从天眼查来源提取，再用其他来源补充缺失字段
+    // 按权威性顺序合并：tianyancha > qcc > aiqicha > gsxt > other
+    // 已提取的字段不被空值覆盖；同字段多次出现取最长值（通常更完整）
     let fields = {};
-    if (tycTexts.length > 0) {
-      fields = extractFieldsFromText(tycTexts.join(' \n '));
-    }
-    if (otherTexts.length > 0) {
-      const otherFields = extractFieldsFromText(otherTexts.join(' \n '));
-      fields = mergeFields(fields, otherFields);
+    const mergeOrder = ['tianyancha', 'qcc', 'aiqicha', 'gsxt', 'other'];
+    for (const src of mergeOrder) {
+      if (sourceTexts[src].length > 0) {
+        const srcFields = extractFieldsFromText(sourceTexts[src].join(' \n '));
+        fields = mergeFields(fields, srcFields);
+      }
     }
 
     // 尝试抓取详情页补充字段（仅对缺失字段）
     let missingFields = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
     if (missingFields.length > 0) {
       const detailUrls = [];
+      // 跳过搜索引擎跳转链接（如 http://www.baidu.com/link?url=...）和聚合站
+      const isJumpLink = (url) => /(?:baidu\.com\/link|google\.com\/url|sogou\.com\/link)/i.test(url || '');
       for (const item of allItems) {
-        // 只抓取与目标公司相关的结果页面
-        if (item.url && !isBlockedUrl(item.url) && !detailUrls.includes(item.url) && isCompanyRelated(item.snippet)) {
-          detailUrls.push(item.url);
-        }
+        if (!item.url || isBlockedUrl(item.url) || isJumpLink(item.url)) continue;
+        if (detailUrls.includes(item.url)) continue;
+        // snippet 为空时降级用 URL 是否包含公司名/核心名作参考（fetchDetailPage 内还会做内容级校验）
+        const related = isCompanyRelated(item.snippet)
+          || (isCompanyRelated(item.url) && isCompanyRelated(item.title || ''));
+        if (related) detailUrls.push(item.url);
       }
       const pagesToFetch = detailUrls.slice(0, MAX_DETAIL_PAGES);
       if (pagesToFetch.length > 0) {
@@ -962,36 +1063,37 @@ function createWebSearchService() {
       try {
         const gsxtUrl = buildBingSiteUrl(name, 'gsxt.gov.cn');
         const gsxtResults = await fetchSearchResults(gsxtUrl, parseBingResults);
-        const gsxtTexts = [];
         for (const item of gsxtResults) {
           allItems.push(item);
           if (item.snippet && isCompanyRelated(item.snippet)) {
-            gsxtTexts.push(item.snippet);
+            sourceTexts.gsxt.push(item.snippet);
           }
           // 通过 Wayback 抓历史快照（避免触发 gsxt 图形校验）
           if (item.url && isCompanyRelated(item.snippet)) {
             const pageText = await fetchWaybackPage(item.url);
             if (pageText && isCompanyRelated(pageText)) {
-              gsxtTexts.push(stripHtmlTags(pageText));
+              sourceTexts.gsxt.push(stripHtmlTags(pageText));
             }
           }
         }
-        if (gsxtTexts.length > 0) {
-          const gsxtFields = extractFieldsFromText(gsxtTexts.join(' \n '));
+        if (sourceTexts.gsxt.length > 0) {
+          const gsxtFields = extractFieldsFromText(sourceTexts.gsxt.join(' \n '));
           fields = mergeFields(fields, gsxtFields);
           if (Object.keys(fields).length > 0) strategy = 'gsxt-fallback';
         }
+        sourceStats.gsxt = sourceTexts.gsxt.length > 0 ? 'ok' : 'empty';
       } catch {
-        // gsxt 兜底失败继续下一策略
+        sourceStats.gsxt = 'fail';
       }
 
       // 兜底2：宽松关键词二次搜索（仅公司名 + 工商字段名）
+      // 注意：仍要避免直接使用字段名作为关键词触发反爬，改用工商登记、企业资质等软词
       const stillMissing = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
       if (stillMissing.length > 0) {
         try {
           const relaxedKeywords = [
-            `${coreName || name} 工商注册信息 法定代表人 注册资本`,
-            `${coreName || name} 统一社会信用代码 注册地址 经营范围 企业类型`,
+            `${coreName || name} 工商登记 企业资质`,
+            `${coreName || name} 注册时间 注册地 经营项`,
           ];
           const relaxedBingTasks = relaxedKeywords.map((kw) => fetchSearchResults(buildBingUrl(kw), parseBingResults));
           const relaxedSettled = await Promise.allSettled(relaxedBingTasks);
@@ -1001,6 +1103,8 @@ function createWebSearchService() {
             for (const item of r.value) {
               allItems.push(item);
               if (item.snippet && isCompanyRelated(item.snippet)) {
+                const src = getSourceByDomain(item.url);
+                sourceTexts[src].push(item.snippet);
                 relaxedTexts.push(item.snippet);
               }
             }
@@ -1018,7 +1122,10 @@ function createWebSearchService() {
 
     fields = validateFields(fields);
     if (Object.keys(fields).length === 0) strategy = 'none';
-    return { results: allItems, businessFields: fields, strategy };
+    const result = { results: allItems, businessFields: fields, strategy, sourceStats };
+    // 写入缓存
+    businessInfoCache.set(name, { result, ts: Date.now() });
+    return result;
   }
 
   /**
@@ -1126,10 +1233,36 @@ function createWebSearchService() {
     return name.includes('deepseek') || name.includes('ds-') || name.includes('doubao');
   }
 
+  /**
+   * 清空工商信息搜索缓存。
+   */
+  function clearBusinessInfoCache() {
+    businessInfoCache.clear();
+  }
+
+  /**
+   * 查看缓存状态（调试用）。
+   */
+  function getBusinessInfoCacheInfo() {
+    const entries = [];
+    for (const [name, { result, ts }] of businessInfoCache.entries()) {
+      entries.push({
+        name,
+        ts,
+        ageMs: Date.now() - ts,
+        strategy: result?.strategy,
+        fieldCount: Object.keys(result?.businessFields || {}).length,
+      });
+    }
+    return entries;
+  }
+
   return {
     searchForBusinessInfo,
     businessFieldsToMarkdown,
     needsClientSideSearch,
+    clearBusinessInfoCache,
+    getBusinessInfoCacheInfo,
     FIELD_LABELS,
   };
 }

@@ -16,13 +16,12 @@ export type GreenTaskStatus = 'running' | 'paused' | 'success' | 'error';
 export type GreenSaveOutlineReason = 'sort' | 'edit' | 'delete' | 'add-root' | 'add-child' | 'replace';
 
 export interface GreenProjectInfo {
+  /** 委托单位（即被评价企业名称），全局唯一企业标识字段 */
   companyName: string;
   industry: string;
   reportingPeriod: string;
   reportScope: string;
   keyTopics: string;
-  /** 封面回显字段：委托单位 */
-  clientUnit: string;
   /** 封面回显字段：编制单位 */
   compileUnit: string;
   /** 封面回显字段：编制日期 YYYY-MM-DD */
@@ -106,7 +105,6 @@ export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   reportingPeriod: '',
   reportScope: '',
   keyTopics: '',
-  clientUnit: '',
   compileUnit: '',
   compileDate: new Date().toISOString().slice(0, 10),
   reportCode: '',

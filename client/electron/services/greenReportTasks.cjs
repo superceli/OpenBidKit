@@ -101,11 +101,19 @@ async function resolveBusinessInfo({ aiService, webSearchService, projectInfo, p
     const result = await webSearchService.searchForBusinessInfo(companyName);
     const fields = result?.businessFields || {};
     const fieldCount = Object.keys(fields).length;
+    const strategy = result?.strategy || 'none';
     if (fieldCount > 0) {
-      publish?.(`已获取企业工商信息（${fieldCount} 项）`, 18);
+      const hint = strategy === 'main'
+        ? `已获取企业工商信息（${fieldCount} 项）`
+        : strategy === 'gsxt-fallback'
+          ? `已通过国家企业信用信息公示系统补充工商信息（${fieldCount} 项）`
+          : `已通过宽松搜索补充工商信息（${fieldCount} 项）`;
+      publish?.(hint, 18);
       return { fields, rawResults: result?.results || [] };
     }
-    publish?.('未检索到可用的工商信息，将基于行业经验生成', 18);
+    // 已联网搜索但未获取到工商字段，返回显式标记，让正文 Prompt 走"不展示工商信息"分支
+    publish?.('未检索到可用的工商信息，正文中将不展示工商登记字段', 18);
+    return { fields: {}, rawResults: result?.results || [], searchedButEmpty: true };
   } catch {
     // 联网搜索失败不阻塞生成流程
   }

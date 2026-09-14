@@ -18,13 +18,14 @@
 const SEARCH_TIMEOUT_MS = 15000;
 const PAGE_FETCH_TIMEOUT_MS = 12000;
 const MAX_DETAIL_PAGES = 5;
+const WAYBACK_TIMEOUT_MS = 10000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 过滤掉内容多为截断摘要的聚合站（企查查已作为直接搜索源，不再屏蔽）
-const BLOCKED_DOMAINS = ['aiqicha.baidu.com', 'aiqicha.com', 'tianyancha.com', 'qixin.com'];
+// 过滤掉内容多为截断摘要的聚合站（企查查、爱企查已作为直接搜索源，不再屏蔽）
+const BLOCKED_DOMAINS = ['tianyancha.com', 'qixin.com'];
 
 function buildBingUrl(keyword) {
   const q = encodeURIComponent(keyword);
@@ -39,6 +40,22 @@ function buildBaiduUrl(keyword) {
 function buildQccUrl(keyword) {
   const q = encodeURIComponent(keyword);
   return `https://www.qcc.com/web/search?key=${q}`;
+}
+
+function buildAiqichaUrl(keyword) {
+  const q = encodeURIComponent(keyword);
+  return `https://aiqicha.baidu.com/s?q=${q}`;
+}
+
+/**
+ * 构造 Bing site: 限定搜索 URL。
+ * 用于在主搜索无果时，定向从特定权威站点（如国家企业信用信息公示系统 gsxt.gov.cn）抓快照。
+ * @param {string} keyword 关键词
+ * @param {string} site 限定域名，如 'gsxt.gov.cn'
+ */
+function buildBingSiteUrl(keyword, site) {
+  const q = encodeURIComponent(`${keyword} site:${site}`);
+  return `https://cn.bing.com/search?q=${q}&ensearch=0`;
 }
 
 function getHeaders() {
@@ -123,6 +140,70 @@ function parseQccResults(html, companyName) {
     { regex: /"(?:companyType|entType|econType|companyOrgType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
     { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
     { regex: /"(?:phoneNumber|tel|phone|contactPhone)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
+  ];
+  for (const { regex, label } of jsonFieldPatterns) {
+    let fieldMatch;
+    while ((fieldMatch = regex.exec(html)) !== null) {
+      const value = fieldMatch[1]
+        .replace(/\\u003C/g, '<')
+        .replace(/\\u003E/g, '>')
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, ' ')
+        .replace(/\\t/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (value && value.length > 1) {
+        results.push({ title: '', snippet: `${label}：${value}`, url: '', pageMentionsCompany: true });
+      }
+    }
+  }
+
+  // 方法2：从 HTML 文本中提取包含工商字段关键词的文本块
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const rawMatches = text.match(/[^<>]{0,100}(?:法定代表人|注册资本|成立[日期时间]|注册地址|统一社会信用代码|企业类型|经营范围|联系电话)[^<>]{0,200}/g);
+  if (rawMatches) {
+    for (const raw of rawMatches) {
+      const cleaned = raw
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (cleaned.length <= 15) continue;
+      if (companyName && !cleaned.includes(companyName) && !(coreName2 && cleaned.includes(coreName2))) {
+        continue;
+      }
+      results.push({ title: '', snippet: cleaned, url: '', pageMentionsCompany: true });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * 从爱企查搜索结果页提取条目。
+ * 爱企查（aiqicha.baidu.com）是百度系企业信息聚合站，搜索页常 SSR 嵌入 JSON。
+ * 字段命名接近企查查，但部分字段为 pid/entName 等。
+ * @param {string} html
+ * @param {string} [companyName] 传入时做页面级公司名校验
+ */
+function parseAiqichaResults(html, companyName) {
+  const results = [];
+  const coreName2 = companyName ? companyName.replace(/(有限责任公司|股份有限公司|有限公司)$/, '') : '';
+  const pageMentionsCompany = companyName
+    ? html.includes(companyName) || (coreName2 && html.includes(coreName2))
+    : false;
+
+  // 方法1：从 JSON 中提取工商字段值
+  // 爱企查 SSR 数据字段名可能为：legalPerson、regCap、startDate、address、unifiedCode、companyType、scope 等
+  const jsonFieldPatterns = [
+    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
+    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapStr)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
+    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate|startDateStr)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
+    { regex: /"(?:address|regAddress|regLocation|companyAddress|addr)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
+    { regex: /"(?:unifiedCode|unifiedSocialCreditCode|creditCode|creditNo)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
+    { regex: /"(?:companyType|entType|econType|companyOrgType|economicType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
+    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
+    { regex: /"(?:phoneNumber|tel|phone|contactPhone|telephone)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
   ];
   for (const { regex, label } of jsonFieldPatterns) {
     let fieldMatch;
@@ -302,6 +383,262 @@ async function fetchSearchResults(url, parser, companyName) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// 企查查 cookie jar：跨请求维护 antiparser 等反爬 cookie，单进程内有效
+let qccCookieJar = '';
+let qccWarmupAt = 0; // 上次 warmup 时间戳（ms），用于节流避免频繁预热
+const QCC_WARMUP_INTERVAL_MS = 60_000;
+
+/**
+ * 从 fetch 响应的 Set-Cookie 头收集 cookie，合并进企查查 cookie jar。
+ * Node undici 支持 response.headers.getSetCookie()，老版本 fallback 到 'set-cookie'。
+ */
+function updateQccCookies(response) {
+  try {
+    let setCookies = [];
+    if (typeof response.headers.getSetCookie === 'function') {
+      setCookies = response.headers.getSetCookie();
+    } else {
+      const raw = response.headers.get('set-cookie');
+      if (raw) setCookies = [raw];
+    }
+    if (!setCookies || setCookies.length === 0) return;
+    const map = new Map();
+    // 解析已有 jar
+    if (qccCookieJar) {
+      for (const part of qccCookieJar.split('; ').filter(Boolean)) {
+        const idx = part.indexOf('=');
+        if (idx > 0) map.set(part.slice(0, idx), part.slice(idx + 1));
+      }
+    }
+    // 合并新 cookie（同名覆盖）
+    for (const sc of setCookies) {
+      const pair = String(sc).split(';')[0];
+      const idx = pair.indexOf('=');
+      if (idx > 0) map.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
+    }
+    qccCookieJar = Array.from(map, ([k, v]) => `${k}=${v}`).join('; ');
+  } catch {
+    // cookie 解析失败不阻塞主流程
+  }
+}
+
+/**
+ * 判断企查查响应是否命中反爬虫（验证码页/登录跳转/纯空检测页）。
+ */
+function isQccAntiSpider(html, statusCode) {
+  if (!html) return true;
+  // 非典型状态码直接判反爬
+  if (statusCode === 403 || statusCode === 405 || statusCode === 412) return true;
+  const lower = html.toLowerCase();
+  if (lower.includes('请输入验证码') || lower.includes('人机验证')) return true;
+  if (lower.includes('为了您的访问安全') || lower.includes('访问过于频繁')) return true;
+  if (/<title[^>]*>\s*(登录|验证|安全验证|访问验证)/i.test(html)) return true;
+  if (/window\.location(?:\.href)?\s*=\s*["'][^"']*\/(login|verify|user\/login)/i.test(html)) return true;
+  // 检测页通常结构极简：剥除脚本后正文极短
+  const stripped = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\s+/g, '');
+  if (stripped.length < 100) return true;
+  return false;
+}
+
+/**
+ * 企查查首页 warmup：访问主页以换取 antiparser 基础 cookie。
+ * 60 秒内只预热一次。
+ */
+async function warmupQcc() {
+  const now = Date.now();
+  if (now - qccWarmupAt < QCC_WARMUP_INTERVAL_MS) return;
+  qccWarmupAt = now;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    const headers = getHeaders();
+    headers['Referer'] = 'https://www.baidu.com/';
+    if (qccCookieJar) headers['Cookie'] = qccCookieJar;
+    const response = await fetch('https://www.qcc.com/', {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    updateQccCookies(response);
+  } catch {
+    // warmup 失败忽略，主请求会自行处理
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 请求企查查搜索页（带 cookie 处理与反爬重试）。
+ * 流程：
+ * 1. 先 warmup 首页换取基础 cookie（节流）
+ * 2. 带 cookie 访问搜索页；响应再更新 cookie
+ * 3. 命中反爬 → 再 warmup + 重试一次
+ * 4. 仍命中 → 放弃返回 []
+ */
+async function fetchQccResults(url, parser, companyName) {
+  await warmupQcc();
+  const tryFetch = async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    try {
+      const headers = getHeaders();
+      headers['Referer'] = 'https://www.qcc.com/';
+      if (qccCookieJar) headers['Cookie'] = qccCookieJar;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      updateQccCookies(response);
+      const statusCode = response.status;
+      if (!response.ok && statusCode !== 200) {
+        return { antiSpider: statusCode === 403 || statusCode === 405 || statusCode === 412, text: '' };
+      }
+      const text = await response.text();
+      return { antiSpider: isQccAntiSpider(text, statusCode), text };
+    } catch {
+      return { antiSpider: false, text: '' };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let result = await tryFetch();
+  if (result.antiSpider && !result.text) {
+    // 状态码命中反爬：强制重新 warmup 再重试一次
+    qccWarmupAt = 0;
+    await warmupQcc();
+    result = await tryFetch();
+  } else if (result.antiSpider && result.text) {
+    // 内容命中反爬：直接重试一次
+    result = await tryFetch();
+  }
+
+  if (!result.text || result.antiSpider) return [];
+  return parser(result.text, companyName);
+}
+
+// 爱企查 cookie jar：与企查查分开维护，避免不同站点 cookie 互窜
+let aiqichaCookieJar = '';
+let aiqichaWarmupAt = 0;
+
+function updateAiqichaCookies(response) {
+  try {
+    let setCookies = [];
+    if (typeof response.headers.getSetCookie === 'function') {
+      setCookies = response.headers.getSetCookie();
+    } else {
+      const raw = response.headers.get('set-cookie');
+      if (raw) setCookies = [raw];
+    }
+    if (!setCookies || setCookies.length === 0) return;
+    const map = new Map();
+    if (aiqichaCookieJar) {
+      for (const part of aiqichaCookieJar.split('; ').filter(Boolean)) {
+        const idx = part.indexOf('=');
+        if (idx > 0) map.set(part.slice(0, idx), part.slice(idx + 1));
+      }
+    }
+    for (const sc of setCookies) {
+      const pair = String(sc).split(';')[0];
+      const idx = pair.indexOf('=');
+      if (idx > 0) map.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
+    }
+    aiqichaCookieJar = Array.from(map, ([k, v]) => `${k}=${v}`).join('; ');
+  } catch {
+    // cookie 解析失败不阻塞
+  }
+}
+
+/**
+ * 爱企查反爬检测。复用 qcc 的通用反爬特征，并加 aiqicha.baidu.com 专属特征。
+ */
+function isAiqichaAntiSpider(html, statusCode) {
+  if (!html) return true;
+  if (statusCode === 403 || statusCode === 405 || statusCode === 412) return true;
+  const lower = html.toLowerCase();
+  if (lower.includes('请输入验证码') || lower.includes('人机验证')) return true;
+  if (lower.includes('为了您的访问安全') || lower.includes('访问过于频繁')) return true;
+  if (/<title[^>]*>\s*(登录|验证|安全验证|访问验证)/i.test(html)) return true;
+  // 爱企查未登录搜索页常跳到 /login 或返回极简登录引导页
+  if (/window\.location(?:\.href)?\s*=\s*["'][^"']*\/(login|user\/login)/i.test(html)) return true;
+  // 爱企查搜索结果靠 SPA 渲染时 SSR 极简：剥除脚本后正文极短视为反爬
+  const stripped = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\s+/g, '');
+  if (stripped.length < 100) return true;
+  return false;
+}
+
+/**
+ * 爱企查 warmup：访问百度首页拿 BAIDUID 等基础 cookie（爱企查是百度子站共享 BAIDUID）。
+ */
+async function warmupAiqicha() {
+  const now = Date.now();
+  if (now - aiqichaWarmupAt < QCC_WARMUP_INTERVAL_MS) return;
+  aiqichaWarmupAt = now;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    const headers = getHeaders();
+    headers['Referer'] = 'https://www.baidu.com/';
+    if (aiqichaCookieJar) headers['Cookie'] = aiqichaCookieJar;
+    const response = await fetch('https://www.baidu.com/', {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    updateAiqichaCookies(response);
+  } catch {
+    // warmup 失败忽略
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 请求爱企查搜索页（带 cookie 处理与反爬重试）。
+ * 复用 qcc 同样的重试策略：warmup → 带cookie请求 → 命中反爬则warmup+重试 → 仍失败返回[]
+ */
+async function fetchAiqichaResults(url, parser, companyName) {
+  await warmupAiqicha();
+  const tryFetch = async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    try {
+      const headers = getHeaders();
+      headers['Referer'] = 'https://aiqicha.baidu.com/';
+      if (aiqichaCookieJar) headers['Cookie'] = aiqichaCookieJar;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      updateAiqichaCookies(response);
+      const statusCode = response.status;
+      if (!response.ok && statusCode !== 200) {
+        return { antiSpider: statusCode === 403 || statusCode === 405 || statusCode === 412, text: '' };
+      }
+      const text = await response.text();
+      return { antiSpider: isAiqichaAntiSpider(text, statusCode), text };
+    } catch {
+      return { antiSpider: false, text: '' };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let result = await tryFetch();
+  if (result.antiSpider && !result.text) {
+    aiqichaWarmupAt = 0;
+    await warmupAiqicha();
+    result = await tryFetch();
+  } else if (result.antiSpider && result.text) {
+    result = await tryFetch();
+  }
+
+  if (!result.text || result.antiSpider) return [];
+  return parser(result.text, companyName);
 }
 
 /**
@@ -552,10 +889,11 @@ function createWebSearchService() {
         }
       }
 
-      // Bing + 企查查搜索：并行执行
+      // Bing + 企查查 + 爱企查：并行执行（聚合站带 cookie 处理与反爬重试）
       const bingTasks = keywords.map((keyword) => fetchSearchResults(buildBingUrl(keyword), parseBingResults));
-      const qccTask = fetchSearchResults(buildQccUrl(name), parseQccResults, name);
-      const parallelSettled = await Promise.allSettled([...bingTasks, qccTask]);
+      const qccTask = fetchQccResults(buildQccUrl(name), parseQccResults, name);
+      const aiqichaTask = fetchAiqichaResults(buildAiqichaUrl(name), parseAiqichaResults, name);
+      const parallelSettled = await Promise.allSettled([...bingTasks, qccTask, aiqichaTask]);
       for (const result of parallelSettled) {
         if (result.status === 'fulfilled' && Array.isArray(result.value)) {
           for (const item of result.value) {
@@ -585,7 +923,7 @@ function createWebSearchService() {
     }
 
     // 尝试抓取详情页补充字段（仅对缺失字段）
-    const missingFields = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
+    let missingFields = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
     if (missingFields.length > 0) {
       const detailUrls = [];
       for (const item of allItems) {
@@ -609,8 +947,78 @@ function createWebSearchService() {
       }
     }
 
+    // 渐进式兜底：主搜索字段缺失过半时，依次尝试
+    // 1) Bing site:gsxt.gov.cn 定向抓国家企业信用信息公示系统快照
+    // 2) 仍未补齐 → 宽松关键词（仅公司名）再搜一轮 Bing + 百度
     fields = validateFields(fields);
-    return { results: allItems, businessFields: fields };
+    let strategy = Object.keys(fields).length > 0 ? 'main' : 'none';
+
+    missingFields = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
+    const minFieldsThreshold = Math.ceil(Object.keys(FIELD_LABELS).length / 2);
+    if (missingFields.length >= minFieldsThreshold) {
+      // 兜底1：Bing site:gsxt.gov.cn
+      // gsxt.gov.cn 详情页有图形校验，不能直接 fetch；改用 Wayback Machine 历史快照，
+      // 无存档则退化为只用 Bing snippet
+      try {
+        const gsxtUrl = buildBingSiteUrl(name, 'gsxt.gov.cn');
+        const gsxtResults = await fetchSearchResults(gsxtUrl, parseBingResults);
+        const gsxtTexts = [];
+        for (const item of gsxtResults) {
+          allItems.push(item);
+          if (item.snippet && isCompanyRelated(item.snippet)) {
+            gsxtTexts.push(item.snippet);
+          }
+          // 通过 Wayback 抓历史快照（避免触发 gsxt 图形校验）
+          if (item.url && isCompanyRelated(item.snippet)) {
+            const pageText = await fetchWaybackPage(item.url);
+            if (pageText && isCompanyRelated(pageText)) {
+              gsxtTexts.push(stripHtmlTags(pageText));
+            }
+          }
+        }
+        if (gsxtTexts.length > 0) {
+          const gsxtFields = extractFieldsFromText(gsxtTexts.join(' \n '));
+          fields = mergeFields(fields, gsxtFields);
+          if (Object.keys(fields).length > 0) strategy = 'gsxt-fallback';
+        }
+      } catch {
+        // gsxt 兜底失败继续下一策略
+      }
+
+      // 兜底2：宽松关键词二次搜索（仅公司名 + 工商字段名）
+      const stillMissing = Object.keys(FIELD_LABELS).filter((k) => !fields[k]);
+      if (stillMissing.length > 0) {
+        try {
+          const relaxedKeywords = [
+            `${coreName || name} 工商注册信息 法定代表人 注册资本`,
+            `${coreName || name} 统一社会信用代码 注册地址 经营范围 企业类型`,
+          ];
+          const relaxedBingTasks = relaxedKeywords.map((kw) => fetchSearchResults(buildBingUrl(kw), parseBingResults));
+          const relaxedSettled = await Promise.allSettled(relaxedBingTasks);
+          const relaxedTexts = [];
+          for (const r of relaxedSettled) {
+            if (r.status !== 'fulfilled' || !Array.isArray(r.value)) continue;
+            for (const item of r.value) {
+              allItems.push(item);
+              if (item.snippet && isCompanyRelated(item.snippet)) {
+                relaxedTexts.push(item.snippet);
+              }
+            }
+          }
+          if (relaxedTexts.length > 0) {
+            const relaxedFields = extractFieldsFromText(relaxedTexts.join(' \n '));
+            fields = mergeFields(fields, relaxedFields);
+            if (Object.keys(fields).length > 0 && strategy === 'none') strategy = 'relaxed';
+          }
+        } catch {
+          // 宽松搜索失败不阻塞
+        }
+      }
+    }
+
+    fields = validateFields(fields);
+    if (Object.keys(fields).length === 0) strategy = 'none';
+    return { results: allItems, businessFields: fields, strategy };
   }
 
   /**
@@ -641,6 +1049,72 @@ function createWebSearchService() {
       return '';
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 通过 Wayback Machine 历史快照抓取页面 HTML。
+   *
+   * 用于 gsxt.gov.cn 等有图形校验/反爬的权威站点：不直接请求原 URL，
+   * 而是查询 archive.org 是否存档该页面，再抓存档快照内容。
+   * 流程：
+   * 1. 查询 availability API，获取最近存档快照 URL
+   * 2. 抓取快照页（archive.org 自身无图形校验）
+   * 3. 若无存档，返回空字符串，调用方按 snippet 兜底
+   *
+   * @param {string} originalUrl 原 gsxt 详情页 URL
+   * @returns {Promise<string>} 存档页面 HTML（无存档时返回 ''）
+   */
+  async function fetchWaybackPage(originalUrl) {
+    if (!originalUrl) return '';
+    const availabilityUrl = `https://archive.org/wayback/available?url=${encodeURIComponent(originalUrl)}`;
+    const availController = new AbortController();
+    const availTimer = setTimeout(() => availController.abort(), WAYBACK_TIMEOUT_MS);
+    let snapshotUrl = '';
+    try {
+      const response = await fetch(availabilityUrl, {
+        method: 'GET',
+        headers: getHeaders(),
+        signal: availController.signal,
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const closest = data?.archived_snapshots?.closest;
+        if (closest?.available && closest?.url) {
+          snapshotUrl = closest.url;
+        }
+      }
+    } catch {
+      // availability 查询失败直接放弃
+    } finally {
+      clearTimeout(availTimer);
+    }
+    if (!snapshotUrl) return '';
+
+    const snapController = new AbortController();
+    const snapTimer = setTimeout(() => snapController.abort(), PAGE_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(snapshotUrl, {
+        method: 'GET',
+        headers: getHeaders(),
+        signal: snapController.signal,
+      });
+      if (!response.ok) return '';
+      const buffer = await response.arrayBuffer();
+      let text;
+      try {
+        text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+        if (text.includes('\uFFFD\uFFFD\uFFFD')) {
+          text = new TextDecoder('gbk', { fatal: false }).decode(buffer);
+        }
+      } catch {
+        text = new TextDecoder('gbk', { fatal: false }).decode(buffer);
+      }
+      return text;
+    } catch {
+      return '';
+    } finally {
+      clearTimeout(snapTimer);
     }
   }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ChangeEvent } from 'react';
 import { useToast } from '../../../shared/ui';
-import type { GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportType } from '../types';
+import type { GreenProjectInfo, GreenReportState, GreenReportType } from '../types';
 import { GREEN_REPORT_TYPES, groupReportTypesByCategory, searchReportTypes, type GreenReportCategory } from '../reportTypes';
 
 interface CompanyInfoPageProps {
@@ -9,8 +9,6 @@ interface CompanyInfoPageProps {
   onDraftChange: (info: GreenProjectInfo) => void;
   onReportTypeChange: (type: GreenReportType) => void;
   onSaveProjectInfo: () => void;
-  onSearchKnowledge: (keyword: string) => Promise<GreenKnowledgeContext | null>;
-  onClearKnowledge: () => Promise<void>;
 }
 
 function CompanyInfoPage({
@@ -19,11 +17,8 @@ function CompanyInfoPage({
   onDraftChange,
   onReportTypeChange,
   onSaveProjectInfo,
-  onSearchKnowledge,
-  onClearKnowledge,
 }: CompanyInfoPageProps) {
   const { showToast } = useToast();
-  const [searching, setSearching] = useState(false);
   const [reportTypeSearch, setReportTypeSearch] = useState('');
   const [generatingCode, setGeneratingCode] = useState(false);
 
@@ -35,32 +30,6 @@ function CompanyInfoPage({
 
   const handleFieldChange = (field: keyof GreenProjectInfo) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onDraftChange({ ...draftProjectInfo, [field]: e.target.value });
-  };
-
-  const handleSearch = async () => {
-    const keyword = draftProjectInfo.companyName.trim();
-    if (!keyword) {
-      showToast('请先输入企业名称', 'error');
-      return;
-    }
-    setSearching(true);
-    try {
-      const result = await onSearchKnowledge(keyword);
-      if (result && result.items.length > 0) {
-        showToast(`找到 ${result.items.length} 条相关知识条目`, 'success');
-      } else {
-        showToast('未在知识库中找到相关企业信息', 'info');
-      }
-    } catch (error) {
-      showToast(`知识库检索失败：${error instanceof Error ? error.message : String(error)}`, 'error');
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleClearKnowledge = async () => {
-    await onClearKnowledge();
-    showToast('已清除知识库上下文', 'info');
   };
 
   const handleGenerateReportCode = async () => {
@@ -75,8 +44,6 @@ function CompanyInfoPage({
       setGeneratingCode(false);
     }
   };
-
-  const knowledgeItems = state.knowledgeContext?.items ?? [];
 
   return (
     <div className="green-report-section">
@@ -129,17 +96,8 @@ function CompanyInfoPage({
           <h2 className="green-report-title">企业基本信息</h2>
           <p className="green-report-subtitle">用于生成报告封面和正文背景描述</p>
           <div className="green-report-form">
-            <div className="green-report-field">
-              <div className="green-report-field-label">
-                <span>企业/组织名称</span>
-                <button
-                  className="green-report-btn-secondary"
-                  onClick={handleSearch}
-                  disabled={searching}
-                >
-                  {searching ? '检索中...' : '搜索知识库'}
-                </button>
-              </div>
+            <label className="green-report-field">
+              <span className="green-report-field-label">企业/组织名称 <span className="green-report-required">*</span></span>
               <input
                 type="text"
                 className="green-report-input"
@@ -147,48 +105,7 @@ function CompanyInfoPage({
                 onChange={handleFieldChange('companyName')}
                 placeholder="请输入企业全称"
               />
-            </div>
-
-            {knowledgeItems.length > 0 && (
-              <div className="green-report-knowledge">
-                <div className="green-report-knowledge-head">
-                  <span>知识库检索结果（{knowledgeItems.length} 条）</span>
-                  <button
-                    className="green-report-btn-secondary"
-                    onClick={handleClearKnowledge}
-                  >
-                    清除
-                  </button>
-                </div>
-                <div className="green-report-knowledge-list">
-                  {knowledgeItems.map((item, idx) => (
-                    <div
-                      key={item.itemId || idx}
-                      className="green-report-knowledge-item"
-                    >
-                      <div className="green-report-knowledge-item-title">
-                        {item.title || '（无标题）'}
-                      </div>
-                      {item.resume && (
-                        <div className="green-report-knowledge-item-resume">
-                          {item.resume}
-                        </div>
-                      )}
-                      {item.content && (
-                        <div className="green-report-knowledge-item-content">
-                          {item.content.slice(0, 200)}{item.content.length > 200 ? '...' : ''}
-                        </div>
-                      )}
-                      {item.documentName && (
-                        <div className="green-report-knowledge-item-source">
-                          来源：{item.documentName}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            </label>
 
             <label className="green-report-field">
               <span className="green-report-field-label">

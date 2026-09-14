@@ -10,7 +10,7 @@ import CompanyInfoPage from './CompanyInfoPage';
 import ReportConfigPage from './ReportConfigPage';
 import OutlinePage from './OutlinePage';
 import ContentPage from './ContentPage';
-import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType } from '../types';
+import type { GreenDocumentStyle, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType } from '../types';
 import { DEFAULT_GREEN_PROJECT_INFO, GREEN_STEPS, GREEN_STEP_LABELS } from '../types';
 import { findReportTypeById } from '../reportTypes';
 
@@ -124,30 +124,6 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     setState((prev) => ({ ...prev, step: nextStep }));
     void window.lvcert?.greenReport?.updateStep(nextStep).catch(() => undefined);
   }, [stepIndex]);
-
-  const handleSearchKnowledge = useCallback(async (keyword: string): Promise<GreenKnowledgeContext | null> => {
-    const result = await window.lvcert.knowledgeBase.searchItems(keyword, { limit: 20, contentExcerptChars: 800 });
-    const context: GreenKnowledgeContext = {
-      keyword,
-      items: result.items.map((item) => ({
-        documentId: item.documentId,
-        documentName: item.documentName,
-        itemId: item.itemId,
-        title: item.title,
-        resume: item.resume,
-        content: item.content,
-      })),
-      searchedAt: new Date().toISOString(),
-    };
-    setState((prev) => ({ ...prev, knowledgeContext: context }));
-    void window.lvcert?.greenReport?.saveKnowledgeContext(context).catch(() => undefined);
-    return context;
-  }, []);
-
-  const handleClearKnowledge = useCallback(async () => {
-    setState((prev) => ({ ...prev, knowledgeContext: null }));
-    void window.lvcert?.greenReport?.saveKnowledgeContext(null).catch(() => undefined);
-  }, []);
 
   const handleSaveReportConfig = useCallback(async () => {
     const patch = {
@@ -312,8 +288,6 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
                 showToast(`保存失败：${error instanceof Error ? error.message : String(error)}`, 'error');
               }
             }}
-            onSearchKnowledge={handleSearchKnowledge}
-            onClearKnowledge={handleClearKnowledge}
           />
         )}
         {state.step === 'report-config' && (
@@ -340,16 +314,20 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               void window.lvcert?.greenReport?.saveOutlineConfig(patch).catch(() => undefined);
             }}
             onGenerateOutline={async () => {
-              await window.lvcert.tasks.startGreenReportOutline({
-                reportType: state.reportType,
-                reportTypeName: findReportTypeById(state.reportType)?.name || '',
-                projectInfo: state.projectInfo,
-                targetWords: state.targetWords,
-                pageCount: state.pageCount,
-                documentStyle: state.documentStyle,
-                knowledgeContext: state.knowledgeContext,
-                userRequirements: state.outlineRequirements,
-              });
+              try {
+                await window.lvcert.tasks.startGreenReportOutline({
+                  reportType: state.reportType,
+                  reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                  projectInfo: state.projectInfo,
+                  targetWords: state.targetWords,
+                  pageCount: state.pageCount,
+                  documentStyle: state.documentStyle,
+                  knowledgeContext: state.knowledgeContext,
+                  userRequirements: state.outlineRequirements,
+                });
+              } catch (error) {
+                showToast(error instanceof Error ? error.message : String(error), 'error');
+              }
             }}
             onSaveOutline={async (request) => {
               setState((prev) => ({
@@ -370,17 +348,21 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             state={state}
             onContentRequirementsChange={(req) => setState((prev) => ({ ...prev, contentRequirements: req }))}
             onGenerate={async () => {
-              await window.lvcert.tasks.startGreenReportContent({
-                reportType: state.reportType,
-                reportTypeName: findReportTypeById(state.reportType)?.name || '',
-                projectInfo: state.projectInfo,
-                outlineData: state.outlineData,
-                targetWords: state.targetWords,
-                pageCount: state.pageCount,
-                documentStyle: state.documentStyle,
-                knowledgeContext: state.knowledgeContext,
-                userRequirements: state.contentRequirements,
-              });
+              try {
+                await window.lvcert.tasks.startGreenReportContent({
+                  reportType: state.reportType,
+                  reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                  projectInfo: state.projectInfo,
+                  outlineData: state.outlineData,
+                  targetWords: state.targetWords,
+                  pageCount: state.pageCount,
+                  documentStyle: state.documentStyle,
+                  knowledgeContext: state.knowledgeContext,
+                  userRequirements: state.contentRequirements,
+                });
+              } catch (error) {
+                showToast(error instanceof Error ? error.message : String(error), 'error');
+              }
             }}
             onSaveChapter={async (nodeId, content) => {
               setState((prev) => {

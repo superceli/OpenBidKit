@@ -212,6 +212,36 @@ function buildKnowledgeContextBlock(knowledgeContext) {
   return lines.join('\n');
 }
 
+/**
+ * 构建客户端预搜索到的企业工商信息块。
+ * 这些字段是通过搜索引擎实时抓取的真实数据，必须优先使用，严禁编造。
+ */
+function buildBusinessInfoBlock(businessInfo) {
+  const fields = businessInfo?.fields;
+  if (!fields || !Object.keys(fields).length) return '';
+  const FIELD_LABELS = {
+    legalRepresentative: '法定代表人',
+    registeredCapital: '注册资本',
+    establishedDate: '成立日期',
+    registeredAddress: '注册地址',
+    unifiedSocialCreditCode: '统一社会信用代码',
+    enterpriseType: '企业类型',
+    businessScope: '经营范围',
+    phone: '联系电话',
+  };
+  const lines = ['\n【企业工商信息（联网搜索获取，必须使用真实数据，禁止编造）】'];
+  for (const [key, label] of Object.entries(FIELD_LABELS)) {
+    if (fields[key]) {
+      lines.push(`- ${label}：${fields[key]}`);
+    }
+  }
+  lines.push('\n使用规则：');
+  lines.push('- 上述工商信息为联网搜索到的真实数据，在"企业概况/公司概况/企业简介"等章节中必须直接引用，不得编造或替换');
+  lines.push('- 若某字段未列出，说明搜索未获取到，可写"以工商登记信息为准"，不得编造虚假值');
+  lines.push('- 统一社会信用代码等无法从搜索结果提取的字段，禁止编造，写"以工商登记信息为准"');
+  return lines.join('\n');
+}
+
 function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
@@ -281,6 +311,9 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   const kbBlock = buildKnowledgeContextBlock(options.knowledgeContext);
   if (kbBlock) parts.push(kbBlock);
 
+  const businessBlock = buildBusinessInfoBlock(options.businessInfo);
+  if (businessBlock) parts.push(businessBlock);
+
   if (isEvaluationReport(reportType, reportTypeName)) {
     parts.push(`\n报告结构要求：本报告为绿色评价类报告，目录须严格按市面绿色评价报告标准流程组织，必须包含：评价依据、评价指标体系、自评价结果、第三方评价、综合评价结论（明确给出 A级/AA级/AAA级 综合评价等级，附评级依据、各维度评分、扣分项与改进建议）、改进建议；最后一章必须是"附录"（评价指标评分明细表、评价依据标准索引、第三方评价机构资质证明、企业自评表、关键佐证材料清单）`);
   } else if (isEnvironmentalImpactReport(reportType, reportTypeName)) {
@@ -334,14 +367,16 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
    - 正文内部如需细分小标题，**只能使用 Markdown 三级标题（###）或加粗短语**，严禁使用 # 或 ## 开头的标题（渲染层已降级但会丢失格式），不要手动添加"1.1""2.1"等数字编号
    - 若必须使用编号，须以前置给定的"本章编号"为前缀逐级递增（如本章编号为 1.1，则内部子项为 1.1.1、1.1.2），严禁每个章节都从 1.1 开始
 4. 信息来源策略（重要）：
-   - 优先级：知识库资料 > 模型联网查询结果 > AI 行业经验预估
+   - 优先级：联网搜索工商信息 > 知识库资料 > 模型联网查询结果 > AI 行业经验预估
+   - 如果下方提供了【企业工商信息】块，其中的法定代表人、注册资本、成立日期、注册地址、企业类型、经营范围、联系电话等字段是通过联网搜索获取的真实数据，在"企业概况/公司概况/企业简介"等章节中必须直接引用，严禁编造或替换为虚构内容
    - 如果下方提供了知识库资料，必须优先引用其中的真实数据、案例和表述，不得编造与资料冲突的内容
    - 对于资料中已有的具体数值（如排放量、营收、人数等），直接引用资料数据
    - 若知识库无相关数据且已启用联网搜索，调用联网工具核实企业基本信息（工商信息、行业地位、规模量级等），引用查询结果
-   - 若知识库与联网均无该数据，基于行业经验给出合理预估数值写入正文
+   - 若工商信息、知识库与联网均无该数据，基于行业经验给出合理预估数值写入正文
    - 严禁使用 [XX]、[待填]、XXX、xXX 等占位符或假占位文本
    - 严禁编造精确到个位数的具体数字伪装成真实数据；估算值应给出量级（如「约 5000 吨」）而非虚假精确值
-   - 对于企业联系方式（地址、电话、邮箱等），必须通过联网搜索查询真实信息后填入；若联网确实查不到，写出定性描述（如"可通过公司官方网站获取联系方式"），不得使用 XXX 或虚假占位
+   - 对于企业联系方式（地址、电话、邮箱等），若下方工商信息已提供则直接使用；否则必须通过联网搜索查询真实信息后填入；若联网确实查不到，写出定性描述（如"可通过公司官方网站获取联系方式"），不得使用 XXX 或虚假占位
+   - 对于统一社会信用代码等无法从搜索结果提取的字段，禁止编造，写"以工商登记信息为准"
 5. 字数控制：严格遵守"本章目标字数"和"本章字数上限"，不要为了凑字数堆砌废话，也不要因为字数限制而输出你的压缩策略分析——直接写出符合字数的内容即可
 6. 适当使用表格、列表增强可读性；如涉及指标对比、数据展示，优先用 Markdown 表格
 7. 如涉及标准引用，标注标准名称（如GRI 305、ISO 14064等）；如涉及行业议题，结合下方提供的行业议题说明进行展开
@@ -421,6 +456,9 @@ ${trailingContext || '  （本章是最后一章）'}`;
   if (industryTopicsBlock) parts.push(`\n${industryTopicsBlock}`);
   const kbBlock = buildKnowledgeContextBlock(options.knowledgeContext);
   if (kbBlock) parts.push(kbBlock);
+
+  const businessBlock = buildBusinessInfoBlock(options.businessInfo);
+  if (businessBlock) parts.push(businessBlock);
 
   // 评价结论/环评结论章节的明确指引
   const nodeTitle = String(node.title || '');

@@ -82,10 +82,41 @@ async function resolveKnowledgeContext({ payload, knowledgeBaseService, publish 
   return null;
 }
 
+/**
+ * 客户端预搜索企业工商信息。
+ * 仅对 DeepSeek 等不支持原生 web_search 的模型生效，
+ * 避免 AI 凭空编造企业注册信息。
+ */
+async function resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish }) {
+  if (!webSearchService?.searchForBusinessInfo) return null;
+  const companyName = projectInfo?.companyName || '';
+  if (!companyName) return null;
+
+  const config = aiService?.getConfig ? aiService.getConfig() : null;
+  const modelName = config?.model_name || '';
+  if (!webSearchService.needsClientSideSearch(modelName)) return null;
+
+  try {
+    publish?.(`正在联网查询「${companyName}」工商信息...`, 16);
+    const result = await webSearchService.searchForBusinessInfo(companyName);
+    const fields = result?.businessFields || {};
+    const fieldCount = Object.keys(fields).length;
+    if (fieldCount > 0) {
+      publish?.(`已获取企业工商信息（${fieldCount} 项）`, 18);
+      return { fields, rawResults: result?.results || [] };
+    }
+    publish?.('未检索到可用的工商信息，将基于行业经验生成', 18);
+  } catch {
+    // 联网搜索失败不阻塞生成流程
+  }
+  return null;
+}
+
 async function runGreenReportOutlineTask({
   aiService,
   workspaceStore,
   knowledgeBaseService,
+  webSearchService,
   payload,
   updateTask,
   checkpointTask,
@@ -113,6 +144,9 @@ async function runGreenReportOutlineTask({
     publish('未检索到知识库资料，将基于通用模板生成', 15);
   }
 
+  // DeepSeek 等不支持原生 web_search 的模型：客户端预搜索工商信息
+  const businessInfo = await resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish });
+
   publish('正在调用AI生成目录...', 20);
 
   const systemPrompt = buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName);
@@ -121,6 +155,7 @@ async function runGreenReportOutlineTask({
     documentStyle,
     targetWords,
     knowledgeContext,
+    businessInfo,
     userRequirements,
   }, reportTypeName);
 
@@ -176,6 +211,7 @@ async function runGreenReportContentTask({
   aiService,
   workspaceStore,
   knowledgeBaseService,
+  webSearchService,
   payload,
   updateTask,
   checkpointTask,
@@ -213,6 +249,9 @@ async function runGreenReportContentTask({
   } else {
     publish('未检索到知识库资料，将基于行业经验预估生成内容', 5);
   }
+
+  // DeepSeek 等不支持原生 web_search 的模型：客户端预搜索工商信息
+  const businessInfo = await resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish });
 
   // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，同时计算上下限
   // 上限 = 摊分 * 1.1（允许小幅浮动），下限 = max(300, 摊分 * 0.7)（给低篇幅章节留空间）
@@ -285,6 +324,7 @@ async function runGreenReportContentTask({
     const userPrompt = buildContentUserInstruction(leaf, projectInfo, reportType, {
       documentStyle,
       knowledgeContext,
+      businessInfo,
       pageCount,
       targetWords,
       chapterTargetWords: basePerChapter,

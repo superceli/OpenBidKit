@@ -108,7 +108,7 @@ export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   keyTopics: '',
   clientUnit: '',
   compileUnit: '',
-  compileDate: '',
+  compileDate: new Date().toISOString().slice(0, 10),
   reportCode: '',
 };
 

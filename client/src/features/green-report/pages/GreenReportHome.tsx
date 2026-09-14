@@ -64,7 +64,12 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     }
     greenReport.loadState().then((s) => {
       setState(s);
-      setDraftProjectInfo(s.projectInfo || DEFAULT_GREEN_PROJECT_INFO);
+      const loadedProjectInfo = s.projectInfo || DEFAULT_GREEN_PROJECT_INFO;
+      // 老数据可能没有 compileDate，回退为今天
+      if (!loadedProjectInfo.compileDate) {
+        loadedProjectInfo.compileDate = new Date().toISOString().slice(0, 10);
+      }
+      setDraftProjectInfo(loadedProjectInfo);
       setDraftPageCount(s.pageCount ?? 30);
       setDraftDocumentStyle(s.documentStyle ?? 'standard');
       setDraftTargetWords(s.targetWords ?? 20000);
@@ -287,8 +292,16 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               void window.lvcert?.greenReport?.saveReportType(reportType).catch(() => undefined);
             }}
             onSaveProjectInfo={async () => {
+              if (!draftProjectInfo.companyName?.trim()) {
+                showToast('请填写企业/组织名称（必填）', 'error');
+                return;
+              }
               if (!draftProjectInfo.compileUnit?.trim()) {
                 showToast('请填写编制单位（必填）', 'error');
+                return;
+              }
+              if (!draftProjectInfo.compileDate) {
+                showToast('请选择编制日期（必填）', 'error');
                 return;
               }
               setState((prev) => ({ ...prev, projectInfo: draftProjectInfo }));

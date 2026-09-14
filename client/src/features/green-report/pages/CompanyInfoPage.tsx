@@ -191,7 +191,9 @@ function CompanyInfoPage({
             )}
 
             <label className="green-report-field">
-              <span className="green-report-field-label">所属行业</span>
+              <span className="green-report-field-label">
+                所属行业 <span className="green-report-field-optional">（可选）</span>
+              </span>
               <input
                 type="text"
                 className="green-report-input"
@@ -201,7 +203,9 @@ function CompanyInfoPage({
               />
             </label>
             <label className="green-report-field">
-              <span className="green-report-field-label">报告期</span>
+              <span className="green-report-field-label">
+                报告期 <span className="green-report-field-optional">（可选）</span>
+              </span>
               <input
                 type="text"
                 className="green-report-input"
@@ -243,7 +247,9 @@ function CompanyInfoPage({
           <div className="green-report-form">
             <div className="green-report-field">
               <div className="green-report-field-label">
-                <span>报告编号</span>
+                <span>
+                  报告编号 <span className="green-report-field-optional">（可选）</span>
+                </span>
                 <button
                   className="green-report-btn-secondary"
                   onClick={handleGenerateReportCode}
@@ -261,16 +267,6 @@ function CompanyInfoPage({
               />
             </div>
             <label className="green-report-field">
-              <span className="green-report-field-label">委托单位</span>
-              <input
-                type="text"
-                className="green-report-input"
-                value={draftProjectInfo.clientUnit}
-                onChange={handleFieldChange('clientUnit')}
-                placeholder="例如：XX 集团有限公司"
-              />
-            </label>
-            <label className="green-report-field">
               <span className="green-report-field-label">编制单位 <span className="green-report-required">*</span></span>
               <input
                 type="text"
@@ -281,7 +277,7 @@ function CompanyInfoPage({
               />
             </label>
             <label className="green-report-field">
-              <span className="green-report-field-label">编制日期</span>
+              <span className="green-report-field-label">编制日期 <span className="green-report-required">*</span></span>
               <input
                 type="date"
                 className="green-report-input"

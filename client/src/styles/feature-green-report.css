@@ -151,7 +151,7 @@
 }
 
 .green-report-type-list {
-  max-height: 480px;
+  max-height: 360px;
   overflow-y: auto;
   padding-right: 4px;
   display: flex;

@@ -9,9 +9,10 @@
  *
  * 策略：
  * 1. 多组关键词在 Bing + 百度并行搜索
- * 2. 从百度搜索结果的 JSON 嵌入数据（abstract 字段）提取工商信息摘要
- * 3. 从搜索结果详情页全文中提取字段
- * 4. 多来源合并 + 合法性校验
+ * 2. 直接搜索企查查（qcc.com），扩展工商信息参考来源
+ * 3. 从百度搜索结果的 JSON 嵌入数据（abstract 字段）提取工商信息摘要
+ * 4. 从搜索结果详情页全文中提取字段
+ * 5. 多来源合并 + 合法性校验
  */
 
 const SEARCH_TIMEOUT_MS = 15000;
@@ -22,8 +23,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 过滤掉内容多为截断摘要的聚合站
-const BLOCKED_DOMAINS = ['aiqicha.baidu.com', 'aiqicha.com', 'tianyancha.com', 'qcc.com', 'qixin.com'];
+// 过滤掉内容多为截断摘要的聚合站（企查查已作为直接搜索源，不再屏蔽）
+const BLOCKED_DOMAINS = ['aiqicha.baidu.com', 'aiqicha.com', 'tianyancha.com', 'qixin.com'];
 
 function buildBingUrl(keyword) {
   const q = encodeURIComponent(keyword);
@@ -33,6 +34,11 @@ function buildBingUrl(keyword) {
 function buildBaiduUrl(keyword) {
   const q = encodeURIComponent(keyword);
   return `https://www.baidu.com/s?wd=${q}`;
+}
+
+function buildQccUrl(keyword) {
+  const q = encodeURIComponent(keyword);
+  return `https://www.qcc.com/web/search?key=${q}`;
 }
 
 function getHeaders() {
@@ -88,6 +94,71 @@ function parseBingResults(html) {
       results.push({ title, snippet, url });
     }
   }
+  return results;
+}
+
+/**
+ * 从企查查搜索结果页提取条目。
+ * 企查查（qcc.com）搜索页可能包含 SSR 嵌入的 JSON 结构化数据或 HTML 文本块，
+ * 均从中提取工商字段值，扩展可参考的网页来源。
+ * @param {string} html
+ * @param {string} [companyName] 传入时做页面级公司名校验，页面提及公司则所有片段都可使用
+ */
+function parseQccResults(html, companyName) {
+  const results = [];
+  const coreName2 = companyName ? companyName.replace(/(有限责任公司|股份有限公司|有限公司)$/, '') : '';
+  const pageMentionsCompany = companyName
+    ? html.includes(companyName) || (coreName2 && html.includes(coreName2))
+    : false;
+
+  // 方法1：从 JSON 数据中提取工商字段值
+  // 企查查可能在 SSR 或 window.__INITIAL_STATE__ 中嵌入结构化数据
+  // 字段名可能为驼峰命名：legalPerson、regCapital、startDate、address、creditNo 等
+  const jsonFieldPatterns = [
+    { regex: /"(?:legalPerson|legalRepresentative|operName|legalName|legal)"\s*:\s*"([^"]{1,50})"/g, label: '法定代表人' },
+    { regex: /"(?:regCap|regCapital|capital|registeredCapital|regCapitalStr)"\s*:\s*"([^"]{1,100})"/g, label: '注册资本' },
+    { regex: /"(?:startDate|estiblishTime|foundDate|establishDate)"\s*:\s*"([^"]{1,30})"/g, label: '成立日期' },
+    { regex: /"(?:address|regAddress|regLocation|companyAddress)"\s*:\s*"([^"]{1,200})"/g, label: '注册地址' },
+    { regex: /"(?:creditNo|unifiedSocialCreditCode|creditCode|creditNoStr)"\s*:\s*"([0-9A-HJ-NPQRTUWXY]{18})"/g, label: '统一社会信用代码' },
+    { regex: /"(?:companyType|entType|econType|companyOrgType)"\s*:\s*"([^"]{1,50})"/g, label: '企业类型' },
+    { regex: /"(?:businessScope|scope|opsScope|opScope|businessScopeStr)"\s*:\s*"([^"]{1,500})"/g, label: '经营范围' },
+    { regex: /"(?:phoneNumber|tel|phone|contactPhone)"\s*:\s*"([^"]{1,30})"/g, label: '联系电话' },
+  ];
+  for (const { regex, label } of jsonFieldPatterns) {
+    let fieldMatch;
+    while ((fieldMatch = regex.exec(html)) !== null) {
+      const value = fieldMatch[1]
+        .replace(/\\u003C/g, '<')
+        .replace(/\\u003E/g, '>')
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, ' ')
+        .replace(/\\t/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (value && value.length > 1) {
+        results.push({ title: '', snippet: `${label}：${value}`, url: '', pageMentionsCompany: true });
+      }
+    }
+  }
+
+  // 方法2：从 HTML 文本中提取包含工商字段关键词的文本块
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const rawMatches = text.match(/[^<>]{0,100}(?:法定代表人|注册资本|成立[日期时间]|注册地址|统一社会信用代码|企业类型|经营范围|联系电话)[^<>]{0,200}/g);
+  if (rawMatches) {
+    for (const raw of rawMatches) {
+      const cleaned = raw
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (cleaned.length <= 15) continue;
+      if (companyName && !cleaned.includes(companyName) && !(coreName2 && cleaned.includes(coreName2))) {
+        continue;
+      }
+      results.push({ title: '', snippet: cleaned, url: '', pageMentionsCompany: true });
+    }
+  }
+
   return results;
 }
 
@@ -481,10 +552,11 @@ function createWebSearchService() {
         }
       }
 
-      // Bing 搜索：并行执行
+      // Bing + 企查查搜索：并行执行
       const bingTasks = keywords.map((keyword) => fetchSearchResults(buildBingUrl(keyword), parseBingResults));
-      const bingSettled = await Promise.allSettled(bingTasks);
-      for (const result of bingSettled) {
+      const qccTask = fetchSearchResults(buildQccUrl(name), parseQccResults, name);
+      const parallelSettled = await Promise.allSettled([...bingTasks, qccTask]);
+      for (const result of parallelSettled) {
         if (result.status === 'fulfilled' && Array.isArray(result.value)) {
           for (const item of result.value) {
             allItems.push(item);

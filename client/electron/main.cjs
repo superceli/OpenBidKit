@@ -12,7 +12,7 @@ if (process.env.LVCERT_USER_DATA_DIR) {
 } else if (app.isPackaged) {
   // 打包版显式设置产品名（避免 Electron 退回到 package.json.name = "lvcert-client"）
   // 这里硬编码，避免 asar 内相对路径 require/package.json 不可靠的问题
-  app.setName('哲元绿证报告工具箱');
+  app.setName('哲元绿色报告工具箱');
 }
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
@@ -345,7 +345,7 @@ function createMainWindow() {
     minWidth: 1040,
     minHeight: 720,
     backgroundColor: '#f8fafd',
-    title: '哲元绿证报告工具箱',
+    title: '哲元绿色报告工具箱',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

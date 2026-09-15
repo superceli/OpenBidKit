@@ -68,7 +68,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
           <img src={logoUrl} alt="" />
         </div>
         <div className="brand-copy">
-          <span>哲元绿证</span>
+          <span>哲元绿色</span>
           <strong>报告工具箱</strong>
         </div>
       </div>
@@ -127,7 +127,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
         cardClassName="group-chat-dialog"
         actions={<button type="button" className="secondary-action" onClick={() => setGroupChatOpen(false)}>关闭</button>}
       >
-        <img className="group-chat-qr" src={groupChatQrUrl} alt="哲元绿证用户交流群二维码" />
+        <img className="group-chat-qr" src={groupChatQrUrl} alt="哲元绿色用户交流群二维码" />
       </AppDialog>
     </aside>
   );

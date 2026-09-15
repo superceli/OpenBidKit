@@ -66,7 +66,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }) {
         columnNumber: 9
       }, this),
       /* @__PURE__ */ jsxDEV("div", { className: "brand-copy", children: [
-        /* @__PURE__ */ jsxDEV("span", { children: "哲元绿证" }, void 0, false, {
+        /* @__PURE__ */ jsxDEV("span", { children: "哲元绿色" }, void 0, false, {
           fileName: "D:/develop/OpenBidKit/client/src/components/Sidebar.tsx",
           lineNumber: 71,
           columnNumber: 11
@@ -191,7 +191,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }) {
           lineNumber: 127,
           columnNumber: 18
         }, this),
-        children: /* @__PURE__ */ jsxDEV("img", { className: "group-chat-qr", src: groupChatQrUrl, alt: "绿证用户交流群二维码" }, void 0, false, {
+        children: /* @__PURE__ */ jsxDEV("img", { className: "group-chat-qr", src: groupChatQrUrl, alt: "绿色用户交流群二维码" }, void 0, false, {
           fileName: "D:/develop/OpenBidKit/client/src/components/Sidebar.tsx",
           lineNumber: 129,
           columnNumber: 9

@@ -128,7 +128,7 @@ async function main() {
   const code = CODE_PREFIX + base64UrlEncode(Buffer.from(JSON.stringify(envelope), 'utf-8'));
 
   console.log('╔══════════════════════════════════════════════════════════╗');
-  console.log('║           哲元绿证报告工具箱 · 离线授权码                      ║');
+  console.log('║           哲元绿色报告工具箱 · 离线授权码                      ║');
   console.log('╠══════════════════════════════════════════════════════════╣');
   console.log('║');
   console.log(`║  有效期  ：${days} 天（至 ${payload.expiresAt.slice(0, 10)}）`);

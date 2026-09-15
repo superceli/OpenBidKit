@@ -168,7 +168,7 @@ function LicenseGate({ licenseStatus, onActivated }: LicenseGateProps) {
           <span style={styles.logoIcon}>🌿</span>
         </div>
 
-        <div style={styles.brandName}>哲元绿证报告工具箱</div>
+        <div style={styles.brandName}>哲元绿色报告工具箱</div>
 
         <h1 style={styles.title}>需要激活</h1>
         <p style={styles.desc}>

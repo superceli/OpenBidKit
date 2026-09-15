@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM  哲元绿证报告工具箱 · Windows 一键打包
+REM  哲元绿色报告工具箱 · Windows 一键打包
 REM  用法：双击运行，或 CMD 里执行 build-release.bat
 REM  依赖：client/scripts/license-private-key.json 必须存在
 REM ============================================================

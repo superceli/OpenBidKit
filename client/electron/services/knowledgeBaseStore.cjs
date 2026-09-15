@@ -1109,18 +1109,34 @@ function createKnowledgeBaseStore({ app, db }) {
     const contentExcerptChars = Number(options.contentExcerptChars) || 800;
     const escaped = kw.replace(/[%_]/g, (m) => `\\${m}`);
     const likePattern = `%${escaped}%`;
+
+    // 先找命中的文档（只要文档下任意条目匹配就算命中文档）
+    // 因为一个企业上传的全部条目都属于同一份资料，应该整体返回
+    const matchedDocRows = db.prepare(`
+      SELECT DISTINCT kd.document_id, kd.file_name
+      FROM knowledge_documents kd
+      JOIN knowledge_items ki ON ki.document_id = kd.document_id
+      WHERE kd.status = 'success'
+        AND (ki.title LIKE ? ESCAPE '\\' OR ki.resume LIKE ? ESCAPE '\\' OR ki.content LIKE ? ESCAPE '\\')
+      ORDER BY kd.created_at DESC
+      LIMIT ?
+    `).all(likePattern, likePattern, likePattern, limit);
+
+    if (!matchedDocRows.length) return { keyword: kw, items: [] };
+
+    // 把命中文档下的全部条目都拉出来
+    const docIds = matchedDocRows.map((d) => d.document_id);
+    const docPlaceholders = docIds.map(() => '?').join(', ');
     const rows = db.prepare(`
       SELECT ki.item_id, ki.title, ki.resume, ki.content, ki.source_file,
              kd.document_id, kd.file_name
       FROM knowledge_items ki
       JOIN knowledge_documents kd ON kd.document_id = ki.document_id
       WHERE kd.status = 'success'
-        AND (ki.title LIKE ? ESCAPE '\\' OR ki.resume LIKE ? ESCAPE '\\' OR ki.content LIKE ? ESCAPE '\\')
-      ORDER BY
-        CASE WHEN ki.title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
-        ki.sort_order ASC, ki.id ASC
-      LIMIT ?
-    `).all(likePattern, likePattern, likePattern, likePattern, limit);
+        AND kd.document_id IN (${docPlaceholders})
+      ORDER BY kd.created_at DESC, ki.sort_order ASC, ki.id ASC
+    `).all(...docIds);
+
     const items = rows.map((row) => ({
       documentId: row.document_id,
       documentName: row.file_name,

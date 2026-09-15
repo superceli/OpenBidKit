@@ -7,6 +7,7 @@ const { getKnowledgeBaseDir } = require('../utils/paths.cjs');
 const { deleteImportedImageBatches } = require('../utils/importedImages.cjs');
 const { enqueueJsonLine, enqueueLogRemoval } = require('../utils/silentFileLog.cjs');
 const { splitUserTextByContextLimit } = require('../utils/userTextSplitter.cjs');
+const { forceRemoveSync } = require('../utils/forceRemove.cjs');
 const { parseDocumentWithConfig } = require('./fileService.cjs');
 
 const supportedExtensions = new Set(['.doc', '.docx', '.wps', '.pdf', '.md', '.markdown', '.xls', '.xlsx']);
@@ -2107,10 +2108,18 @@ function createKnowledgeBaseService({ app, aiService, configStore, knowledgeBase
 
       for (const document of documentsToDelete) {
         deleteImportedImageBatches(app, `knowledge-${document.id}`);
-        fs.rmSync(fromRelative(baseDir, document.document_dir), { recursive: true, force: true });
+        // Windows 下文档目录可能被杀毒/搜索索引或上次解析遗留句柄占用导致 EPERM，
+        // 使用 forceRemoveSync 自带重试 + 清只读 + 句柄排查 + 延迟删除兜底
+        try {
+          forceRemoveSync(fromRelative(baseDir, document.document_dir), { deferOnFailure: true });
+        } catch (_err) { /* EPERM 时已登记延迟删除，继续推进索引清理 */
+        }
         enqueueLogRemoval(getDebugLogPath(app, document.id));
       }
-      fs.rmSync(fromRelative(baseDir, path.join('folders', folderId)), { recursive: true, force: true });
+      try {
+        forceRemoveSync(fromRelative(baseDir, path.join('folders', folderId)), { deferOnFailure: true });
+      } catch (_err) { /* 同上 */
+      }
       knowledgeBaseStore.deleteFolder(folderId);
       return { success: true, message: `已删除文件夹“${folder.name}”及 ${documentsToDelete.length} 个文档` };
     },
@@ -2122,7 +2131,11 @@ function createKnowledgeBaseService({ app, aiService, configStore, knowledgeBase
       }
 
       deleteImportedImageBatches(app, `knowledge-${documentId}`);
-      fs.rmSync(fromRelative(baseDir, document.document_dir), { recursive: true, force: true });
+      // Windows 下文档目录可能被占用导致 EPERM，使用 forceRemoveSync 自带兜底
+      try {
+        forceRemoveSync(fromRelative(baseDir, document.document_dir), { deferOnFailure: true });
+      } catch (_err) { /* EPERM 时已登记延迟删除，继续推进索引清理 */
+      }
       enqueueLogRemoval(getDebugLogPath(app, documentId));
       knowledgeBaseStore.deleteDocument(documentId);
       return { success: true, message: `已删除文档“${document.file_name}”` };

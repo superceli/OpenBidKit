@@ -116,6 +116,26 @@ function isWebSearchUnsupported(message) {
   return hasToken && hasMarker;
 }
 
+// 识别 "Web Search cannot be used with JSON mode" 类冲突：
+// 上游同时支持 web_search 与 response_format 但禁止组合使用
+// 命中后保留 web_search（用户主动开启）改为剥掉 response_format
+function isWebSearchJsonConflict(message) {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized.includes('web search')) return false;
+  return [
+    'cannot be used',
+    'cannot be combined',
+    'cannot combine',
+    'not be used together',
+    'mutually exclusive',
+    'incompatible',
+    'not allowed',
+    'json mode',
+    'response_format',
+    'json_object',
+  ].some((marker) => normalized.includes(marker));
+}
+
 function createModuleDeveloperLogger(app, config, moduleName, request = {}) {
   return createDeveloperLogger({
     app,
@@ -917,7 +937,12 @@ function createChatRequestBody(config, request, options = {}) {
   }
 
   // 联网搜索：智谱/方舟等识别 tools，通义识别 enable_search；不兼容上游会 400 由降级重试兜底
-  if (config.web_search_enabled && !options.omitWebSearch) {
+  // DeepSeek（官方或中转）不支持原生 web_search，即使开关开了也不注入，避免上游 400
+  // 同时检查 provider 与 model_name，覆盖金龙等中转站调用 deepseek-* 模型的场景
+  const modelNameLower = String(config.model_name || '').toLowerCase();
+  const isDeepSeekModel = config.text_model_provider === 'deepseek' || modelNameLower.includes('deepseek');
+  const supportsNativeWebSearch = !isDeepSeekModel;
+  if (config.web_search_enabled && supportsNativeWebSearch && !options.omitWebSearch) {
     body.tools = [{ type: 'web_search' }];
     body.enable_search = true;
   }
@@ -987,6 +1012,7 @@ async function ensureTextAiResponseOk(response, fallbackMessage) {
     source: 'text-model',
     responseFormatUnsupportedChecker: isResponseFormatUnsupported,
     webSearchUnsupportedChecker: isWebSearchUnsupported,
+    webSearchJsonConflictChecker: isWebSearchJsonConflict,
   });
 }
 
@@ -1022,6 +1048,59 @@ function normalizeStreamPayloadError(error, fallbackMessage) {
   return error.message || error.code || fallbackMessage;
 }
 
+// 在可能拼接了多个对象/数组的字符串里，从首个 { 或 [ 开始扫描，
+// 跳过字符串字面量内的引号转义，定位首个完整对象/数组的结束下标。
+// 仅在能找到匹配括号时返回 >=0 的下标；找不到返回 -1。
+function findFirstJsonLikeEnd(data) {
+  const str = String(data || '');
+  const start = str.search(/[{[]/);
+  if (start < 0) {
+    return -1;
+  }
+
+  const open = str.charAt(start);
+  const close = open === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < str.length; i += 1) {
+    const ch = str.charAt(i);
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === open) {
+      depth += 1;
+    } else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
 async function readSseJsonDataLine(line, state, options) {
   const trimmed = String(line || '').trim();
   if (!trimmed || trimmed.startsWith(':') || !trimmed.startsWith('data:')) {
@@ -1042,15 +1121,52 @@ async function readSseJsonDataLine(line, state, options) {
   try {
     payload = JSON.parse(data);
   } catch (error) {
-    const parseError = new Error(`${options.parseErrorMessage || 'AI 流式响应解析失败'}：${error.message}`);
-    parseError.raw_response_body = data;
-    throw markAiRequestError(parseError, { retryable: true });
+    // 容忍金龙等中转站返回的 JS 对象字面量（字段名缺双引号，如 {"delta":{content:"hi"}}）。
+    // 仅当数据看起来是对象/数组字面量时，才用 Function 构造器作为 fallback 解析。
+    const firstChar = data.charAt(0);
+    if (firstChar === '{' || firstChar === '[') {
+      // 截取多 JSON 拼接的第一个对象/数组，金龙偶发把多个 chunk 拼在一行。
+      const trimmedForScan = data.slice(0, 200);
+      let fallbackChunk = data;
+      try {
+        // 先用 Function 解析整体
+        payload = (new Function(`"use strict"; return (${data});`))();
+      } catch (fallbackError) {
+        try {
+          // 尝试从第一个字符开始扫描匹配的括号，只取首个完整对象/数组
+          const end = findFirstJsonLikeEnd(data);
+          if (end > 0) {
+            fallbackChunk = data.slice(0, end + 1);
+            payload = (new Function(`"use strict"; return (${fallbackChunk});`))();
+          } else {
+            throw fallbackError;
+          }
+        } catch (secondError) {
+          const preview = data.length > 200 ? `${data.slice(0, 200)}...` : data;
+          const parseError = new Error(`${options.parseErrorMessage || 'AI 流式响应解析失败'}：${error.message}；原始数据：${preview}`);
+          parseError.raw_response_body = data;
+          throw markAiRequestError(parseError, { retryable: true });
+        }
+      }
+      void trimmedForScan;
+    } else {
+      const preview = data.length > 200 ? `${data.slice(0, 200)}...` : data;
+      const parseError = new Error(`${options.parseErrorMessage || 'AI 流式响应解析失败'}：${error.message}；原始数据：${preview}`);
+      parseError.raw_response_body = data;
+      throw markAiRequestError(parseError, { retryable: true });
+    }
   }
 
   if (payload?.error && options.throwOnPayloadError !== false) {
-    const streamError = new Error(normalizeStreamPayloadError(payload.error, options.failureMessage || 'AI 流式请求失败'));
+    const errorMessage = normalizeStreamPayloadError(payload.error, options.failureMessage || 'AI 流式请求失败');
+    const streamError = new Error(errorMessage);
     streamError.raw_response_payload = payload;
     streamError.raw_sse_data = data;
+    // SSE 流中返回的错误（如金龙 HTTP 200 + SSE error: "Unknown parameter: 'tools[0].function'"）
+    // 也需要运行 web_search/response_format 检测器，让 chatWithConfig 的降级重试逻辑能识别
+    streamError.webSearchUnsupported = isWebSearchUnsupported(errorMessage);
+    streamError.responseFormatUnsupported = isResponseFormatUnsupported(errorMessage);
+    streamError.webSearchJsonConflict = isWebSearchJsonConflict(errorMessage);
     throw markAiRequestError(streamError, { retryable: true });
   }
 
@@ -1425,10 +1541,18 @@ async function chatWithConfig(app, config, request) {
       try {
         return await requestTextAi(app, config, requestBody, { signal, requestMode });
       } catch (error) {
-        const stripWebSearch = !webSearchOmitted && error.webSearchUnsupported;
+        // 兜底文本检测：SSE JSON.parse 失败时（如金龙分片/格式问题导致原始数据截断），
+        // 错误消息里会带原始数据预览，从中识别 web_search/tools/enable_search 相关错误
+        const errorText = `${error.message || ''} ${error.raw_sse_data || ''} ${error.raw_response_body || ''}`;
+        const webSearchUnsupported = error.webSearchUnsupported || isWebSearchUnsupported(errorText);
+        const responseFormatUnsupported = error.responseFormatUnsupported || isResponseFormatUnsupported(errorText);
+        const webSearchJsonConflict = error.webSearchJsonConflict || isWebSearchJsonConflict(errorText);
+        // web_search 与 response_format 同时启用但上游拒绝组合（如金龙 "Web Search cannot be used with JSON mode"）：
+        // 优先剥 response_format 保留 web_search（用户主动开启的功能更宝贵），后续 repair 流程从文本里解析 JSON
+        const stripWebSearch = !webSearchOmitted && webSearchUnsupported && !webSearchJsonConflict;
         const stripResponseFormat = !responseFormatOmitted
           && preparedRequest.response_format
-          && error.responseFormatUnsupported;
+          && (responseFormatUnsupported || webSearchJsonConflict);
         if (!stripWebSearch && !stripResponseFormat) {
           throw error;
         }

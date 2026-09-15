@@ -73,6 +73,11 @@ async function createAiHttpErrorFromResponse(response, fallbackMessage = 'AI 请
   if (typeof options.webSearchUnsupportedChecker === 'function') {
     error.webSearchUnsupported = options.webSearchUnsupportedChecker(detail || rawText);
   }
+  // 检测 "Web Search cannot be used with JSON mode" 类冲突：
+  // 上游同时支持两者但不允许组合使用，需要主动剥掉 response_format 保留 web_search
+  if (typeof options.webSearchJsonConflictChecker === 'function') {
+    error.webSearchJsonConflict = options.webSearchJsonConflictChecker(detail || rawText);
+  }
 
   return markAiRequestError(error, { retryable: isRetryableHttpStatus(payload.status) });
 }

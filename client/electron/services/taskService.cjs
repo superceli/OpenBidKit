@@ -2,7 +2,6 @@
 
 const crypto = require('node:crypto');
 const { runGreenReportOutlineTask, runGreenReportContentTask } = require('./greenReportTasks.cjs');
-const { createWebSearchService } = require('./webSearchService.cjs');
 const { normalizeLogs } = require('./taskLogStore.cjs');
 
 const taskDefinitions = {
@@ -84,7 +83,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
   const callbackSubscribers = new Set();
   const activeTasks = new Map();
   const activeTaskControls = new Map();
-  const webSearchService = createWebSearchService();
 
   function emit(task, snapshot) {
     const event = { task, ...snapshot };
@@ -345,7 +343,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
         signal: taskControl.signal,
       },
     );
-    runner({ aiService: runnerAiService, agentService: runnerAgentService, ordinaryAgentService: runnerOrdinaryAgentService, workspaceStore: runnerWorkspaceStore, knowledgeBaseService, webSearchService, openXmlHelperService, updateTask, checkpointTask, payload, taskControl, previousState }).catch((error) => {
+    runner({ aiService: runnerAiService, agentService: runnerAgentService, ordinaryAgentService: runnerOrdinaryAgentService, workspaceStore: runnerWorkspaceStore, knowledgeBaseService, openXmlHelperService, updateTask, checkpointTask, payload, taskControl, previousState }).catch((error) => {
       if (!taskControl.signal.aborted) {
         checkpointTask({ status: 'error', error: error.message || '任务执行失败' });
       }

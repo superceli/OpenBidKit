@@ -82,67 +82,10 @@ async function resolveKnowledgeContext({ payload, knowledgeBaseService, publish 
   return null;
 }
 
-/**
- * 客户端预搜索企业工商信息。
- * 只要用户开启联网开关即执行（无论模型是否支持原生 web_search），
- * 通过多源验证提取结构化工商字段注入 Prompt，避免 AI 凭空编造企业注册信息。
- * 支持原生联网的模型也可受益：客户端预搜索结果作为权威上下文，AI 仍可自行联网补充。
- */
-async function resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish }) {
-  if (!webSearchService?.searchForBusinessInfo) return null;
-  const companyName = projectInfo?.companyName || '';
-  if (!companyName) return null;
-
-  // 门禁：用户未开启联网时不预搜索，让 Prompt 走"不展示工商信息"分支
-  if (!aiService.isWebSearchEnabled?.()) return null;
-
-  try {
-    publish?.(`正在联网查询「${companyName}」工商信息...`, 16);
-    const result = await webSearchService.searchForBusinessInfo(companyName);
-    const fields = result?.businessFields || {};
-    const fieldCount = Object.keys(fields).length;
-    const strategy = result?.strategy || 'none';
-    const sourceStats = result?.sourceStats || {};
-
-    // 输出每个搜索源的状态，让用户/调试者看到具体哪个源挂了
-    const sourceLabels = { baidu: '百度', bing: 'Bing', qcc: '企查查', aiqicha: '爱企查', gsxt: '公示系统' };
-    const sourceStatus = Object.entries(sourceStats)
-      .filter(([, s]) => s !== 'pending')
-      .map(([k, s]) => {
-        const label = sourceLabels[k] || k;
-        if (s === 'ok') return `${label}:✓`;
-        if (s === 'empty') return `${label}:空`;
-        if (s === 'fail') return `${label}:×`;
-        return `${label}:${s}`;
-      })
-      .join(' ');
-    if (sourceStatus) {
-      publish?.(`搜索源状态 ${sourceStatus}`, 17);
-    }
-
-    if (fieldCount > 0) {
-      const hint = strategy === 'main'
-        ? `已获取企业工商信息（${fieldCount} 项）`
-        : strategy === 'gsxt-fallback'
-          ? `已通过国家企业信用信息公示系统补充工商信息（${fieldCount} 项）`
-          : `已通过宽松搜索补充工商信息（${fieldCount} 项）`;
-      publish?.(hint, 18);
-      return { fields, rawResults: result?.results || [] };
-    }
-    // 已联网搜索但未获取到工商字段，返回显式标记，让正文 Prompt 走"不展示工商信息"分支
-    publish?.('未检索到可用的工商信息，正文中将不展示工商登记字段', 18);
-    return { fields: {}, rawResults: result?.results || [], searchedButEmpty: true };
-  } catch {
-    // 联网搜索失败不阻塞生成流程
-  }
-  return null;
-}
-
 async function runGreenReportOutlineTask({
   aiService,
   workspaceStore,
   knowledgeBaseService,
-  webSearchService,
   payload,
   updateTask,
   checkpointTask,
@@ -165,25 +108,16 @@ async function runGreenReportOutlineTask({
   if (knowledgeContext?.items?.length) {
     publish(`已从知识库匹配 ${knowledgeContext.items.length} 条资料`, 15);
   } else {
-    // 区分三种场景给出准确提示：
+    // 区分两种场景给出准确提示：
     // 1) 模型支持原生 web_search（如 Kimi/文心/GPT-4）+ 用户开启联网 → AI 自行联网查询
-    // 2) 模型不支持原生 web_search（如 DeepSeek/doubao）+ 用户开启联网 → 仅客户端预搜索工商信息，其余内容无联网能力
-    // 3) 用户未开启联网 → 基于模型知识和行业经验生成
-    const config = aiService?.getConfig ? aiService.getConfig() : null;
-    const modelName = config?.model_name || '';
+    // 2) 用户未开启联网或模型不支持原生联网 → 基于模型知识和行业经验生成
     const webSearchEnabled = aiService.isWebSearchEnabled?.();
-    const needsClientSearch = webSearchService?.needsClientSideSearch?.(modelName);
-    if (webSearchEnabled && !needsClientSearch) {
+    if (webSearchEnabled) {
       publish('未检索到知识库资料，AI 将联网查询相关资料', 15);
-    } else if (webSearchEnabled && needsClientSearch) {
-      publish('未检索到知识库资料，将基于工商信息和模型知识生成（当前模型不支持原生联网）', 15);
     } else {
       publish('未检索到知识库资料，将基于模型知识和行业经验生成', 15);
     }
   }
-
-  // 用户开启联网时：客户端预搜索工商信息，注入 Prompt 防止 AI 编造
-  const businessInfo = await resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish });
 
   publish('正在调用AI生成目录...', 20);
 
@@ -193,7 +127,6 @@ async function runGreenReportOutlineTask({
     documentStyle,
     targetWords,
     knowledgeContext,
-    businessInfo,
     userRequirements,
   }, reportTypeName);
 
@@ -214,18 +147,21 @@ async function runGreenReportOutlineTask({
   };
   startSimulatedProgress();
 
-  const outlineData = await aiService.requestJson({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    progressLabel: '绿色报告目录',
-  });
-
-  // AI 返回后清除模拟进度
-  if (aiProgressTimer) {
-    clearInterval(aiProgressTimer);
-    aiProgressTimer = null;
+  let outlineData;
+  try {
+    outlineData = await aiService.requestJson({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      progressLabel: '绿色报告目录',
+    });
+  } finally {
+    // AI 返回或抛错都必须清掉模拟进度，否则失败后计时器仍会持续把 status 改回 running
+    if (aiProgressTimer) {
+      clearInterval(aiProgressTimer);
+      aiProgressTimer = null;
+    }
   }
 
   if (taskControl.signal.aborted) {
@@ -249,7 +185,6 @@ async function runGreenReportContentTask({
   aiService,
   workspaceStore,
   knowledgeBaseService,
-  webSearchService,
   payload,
   updateTask,
   checkpointTask,
@@ -283,25 +218,16 @@ async function runGreenReportContentTask({
   if (knowledgeContext?.items?.length) {
     publish(`已从知识库匹配 ${knowledgeContext.items.length} 条资料`, 5);
   } else {
-    // 区分三种场景给出准确提示：
+    // 区分两种场景给出准确提示：
     // 1) 模型支持原生 web_search（如 Kimi/文心/GPT-4）+ 用户开启联网 → AI 自行联网查询新闻、政策、行业数据等
-    // 2) 模型不支持原生 web_search（如 DeepSeek/doubao）+ 用户开启联网 → 仅客户端预搜索工商信息，其余内容无联网能力
-    // 3) 用户未开启联网 → 基于模型知识和行业经验生成
-    const config = aiService?.getConfig ? aiService.getConfig() : null;
-    const modelName = config?.model_name || '';
+    // 2) 用户未开启联网或模型不支持原生联网 → 基于模型知识和行业经验生成
     const webSearchEnabled = aiService.isWebSearchEnabled?.();
-    const needsClientSearch = webSearchService?.needsClientSideSearch?.(modelName);
-    if (webSearchEnabled && !needsClientSearch) {
+    if (webSearchEnabled) {
       publish('未检索到知识库资料，AI 将联网查询相关资料', 5);
-    } else if (webSearchEnabled && needsClientSearch) {
-      publish('未检索到知识库资料，将基于工商信息和模型知识生成（当前模型不支持原生联网）', 5);
     } else {
       publish('未检索到知识库资料，将基于模型知识和行业经验生成', 5);
     }
   }
-
-  // 用户开启联网时：客户端预搜索工商信息，注入 Prompt 防止 AI 编造
-  const businessInfo = await resolveBusinessInfo({ aiService, webSearchService, projectInfo, publish });
 
   // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，同时计算上下限
   // 上限 = 摊分 * 1.1（允许小幅浮动），下限 = max(300, 摊分 * 0.7)（给低篇幅章节留空间）
@@ -374,7 +300,6 @@ async function runGreenReportContentTask({
     const userPrompt = buildContentUserInstruction(leaf, projectInfo, reportType, {
       documentStyle,
       knowledgeContext,
-      businessInfo,
       pageCount,
       targetWords,
       chapterTargetWords: basePerChapter,

@@ -2841,7 +2841,7 @@ async function generateFrontMatterByAi(aiService, payload) {
 }
 
 【要求】
-1. signingPreamble 用实际的委托单位和编制单位名称，2-3句正式声明
+1. signingPreamble 用实际的委托单位和编制单位名称，**2 句话、120-150 字左右**，可在模板基础上补充：报告数据来源为委托方提供的企业资料和公开信息、编制单位对数据合法性负责等，但不要写用途限制或披露限制类内容
 2. 只返回 JSON，不要任何解释文字或 Markdown 代码块`;
 
   let aiResult = {};

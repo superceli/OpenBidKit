@@ -681,11 +681,20 @@ static class MergeDocumentsAction
         var templateBody = template.MainDocumentPart?.Document.Body;
         if (templateBody is null) return BuildSigningPage(signing);
 
-        // 克隆模板所有段落和表格
+        // 克隆模板所有段落和表格，**跳过分页符、节属性和尾部空段落**（外面会统一加分页）
         var blocks = new List<OpenXmlElement>();
         foreach (var child in templateBody.ChildElements)
         {
+            // 跳过 sectPr（节属性由调用方在文末统一处理）
+            if (child is Wp.SectionProperties) continue;
+            // 跳过分页符段落
+            if (child is Wp.Paragraph p && p.Elements<Wp.Run>().Any(r => r.Elements<Wp.Break>().Any(b => b.Type?.Value == Wp.BreakValues.Page))) continue;
             blocks.Add((OpenXmlElement)child.CloneNode(true));
+        }
+        // 过滤尾部连续空段落（模板里签章表后常有多个空段落撑出空白页）
+        while (blocks.Count > 0 && blocks[^1] is Wp.Paragraph lastP && string.IsNullOrWhiteSpace(ReadDirectRunText(lastP)))
+        {
+            blocks.RemoveAt(blocks.Count - 1);
         }
 
         // 覆盖表格样式（边框色、表头背景）

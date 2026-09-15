@@ -2775,7 +2775,7 @@ function buildGreenReportFrontMatter(payload) {
         { label: '报告编号', value: reportCode },
         { label: '编制日期', value: compileDate },
         { label: '编制单位', value: compileUnit },
-        { label: '公示平台', value: '蔚碳环保官网（https://www.weitanhuanbao.com/）' },
+        { label: '公示平台', value: '蔚碳环保官网（www.weitanhuanbao.com）\n绿色低碳投标网（www.tanshuangbiao.com）\n招标与采购网（www.gc-zb.com）\n采购招标网（www.chinabidding.cc）' },
       ],
     },
     toc: { title: '目录', entries: addTocNumbering(flatTitles) },
@@ -2876,7 +2876,7 @@ async function generateFrontMatterByAi(aiService, payload) {
       { label: '报告编号', value: reportCode },
       { label: '编制日期', value: compileDate },
       { label: '编制单位', value: compileUnit },
-      { label: '公示平台', value: '蔚碳环保官网（https://www.weitanhuanbao.com/）' },
+      { label: '公示平台', value: '蔚碳环保官网（www.weitanhuanbao.com）\n绿色低碳投标网（www.tanshuangbiao.com）\n招标与采购网（www.gc-zb.com）\n采购招标网（www.chinabidding.cc）' },
     ],
   };
 

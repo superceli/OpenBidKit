@@ -339,13 +339,13 @@ static class MergeDocumentsAction
         foreach (var child in settings!.ChildElements.ToList())
         {
             var local = child.LocalName;
-            if (local == "updateFields" || local == "doNotPromptForUpdateFields")
+            if (local == "updateFields" || local == "doNotPromptForUpdateFields" || local == "doNotAutoHyperlinks")
             {
                 child.Remove();
             }
         }
-        // 直接在 settings 根节点注入两个开关元素（OpenXML SDK 3.x 无对应强类型）
-        settings.InnerXml = $"<w:updateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/><w:doNotPromptForUpdateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/>" + settings.InnerXml;
+        // 注入三个开关：自动更新目录域 / 不弹更新提示 / 不自动把 URL 转超链接（保持宋体纯文本）
+        settings.InnerXml = $"<w:updateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/><w:doNotPromptForUpdateFields w:val=\"true\" xmlns:w=\"{W_NS}\"/><w:doNotAutoHyperlinks w:val=\"true\" xmlns:w=\"{W_NS}\"/>" + settings.InnerXml;
         if (isNew)
         {
             // 新建的 Settings 才需要关联到 Part；已有 Settings 重新赋值会报"已关联到其他 Part"
@@ -1305,10 +1305,8 @@ static class MergeDocumentsAction
     static Wp.Paragraph MakeParagraph(string text, bool centered = false, bool bold = false, int sizeHalfPt = 24, int? firstLineIndent = null, int? lineSpacing = null, string? indentation = null, string? rightIndentation = null, string? spacingBefore = null, string? spacingAfter = null)
     {
         var pPr = new Wp.ParagraphProperties();
-        if (centered)
-        {
-            pPr.AppendChild(new Wp.Justification { Val = Wp.JustificationValues.Center });
-        }
+        // 显式设对齐：居中 or 左对齐（默认），不要留空让 Word/WPS 自己决定（会变两端对齐分散拉开字距）
+        pPr.AppendChild(new Wp.Justification { Val = centered ? Wp.JustificationValues.Center : Wp.JustificationValues.Start });
         if (firstLineIndent is not null)
         {
             pPr.AppendChild(new Wp.Indentation { FirstLine = new StringValue(firstLineIndent.Value.ToString()) });
@@ -1332,9 +1330,15 @@ static class MergeDocumentsAction
             if (spacingAfter is not null) spacing.After = spacingAfter;
             pPr.AppendChild(spacing);
         }
-        var run = MakeRun(text, sizeHalfPt, bold);
+        var runs = new List<Wp.Run>();
+        var segments = text.Split('\n');
+        for (int i = 0; i < segments.Length; i++)
+        {
+            if (i > 0) runs.Add(new Wp.Run(new Wp.Break { Type = Wp.BreakValues.TextWrapping }));
+            runs.Add(MakeRun(segments[i], sizeHalfPt, bold));
+        }
         var para = new Wp.Paragraph(pPr);
-        para.AppendChild(run);
+        foreach (var r in runs) para.AppendChild(r);
         return para;
     }
 

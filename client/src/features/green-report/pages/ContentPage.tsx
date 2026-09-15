@@ -49,6 +49,19 @@ function ContentPage({
     }
   };
 
+  const handleCancelGenerate = async () => {
+    try {
+      const res = await window.lvcert.tasks.cancelGreenReportContent();
+      if (res.success) {
+        showToast('正文生成已取消', 'success');
+      } else {
+        showToast(res.message || '取消失败', 'error');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  };
+
   const handleStartEdit = (item: OutlineItem) => {
     setDraft(item.content || '');
     setEditing(true);
@@ -87,7 +100,7 @@ function ContentPage({
               {contentTaskRunning ? '生成中...' : '生成正文'}
             </button>
           </div>
-          {(contentTaskRunning || state.contentTask?.status === 'error') && (
+          {(contentTaskRunning || state.contentTask?.status === 'error' || state.contentTask?.status === 'cancelled') && (
             <div style={{ padding: '4px 8px' }}>
               <ProgressBar
                 value={state.contentTask?.progress ?? 0}
@@ -95,11 +108,27 @@ function ContentPage({
                 showPercentage
                 active={contentTaskRunning}
               />
-              {state.contentTask?.status === 'error' && (
-                <div className="green-report-error-text">
-                  正文生成失败: {state.contentTask.error}
-                </div>
-              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                {state.contentTask?.status === 'error' && (
+                  <div className="green-report-error-text">
+                    正文生成失败: {state.contentTask.error}
+                  </div>
+                )}
+                {state.contentTask?.status === 'cancelled' && (
+                  <div className="green-report-error-text" style={{ color: 'var(--yb-text-muted)' }}>
+                    已取消
+                  </div>
+                )}
+                {contentTaskRunning && (
+                  <button
+                    className="green-report-btn-secondary"
+                    style={{ marginLeft: 'auto', color: 'var(--yb-danger, #e5484d)', borderColor: 'var(--yb-danger, #e5484d)' }}
+                    onClick={handleCancelGenerate}
+                  >
+                    取消生成
+                  </button>
+                )}
+              </div>
             </div>
           )}
           <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--yb-border-soft)' }}>

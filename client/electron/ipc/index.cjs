@@ -14,6 +14,9 @@ const { registerGreenReportIpc } = require('./greenReportIpc.cjs');
 const { registerTemplateIpc } = require('./templateIpc.cjs');
 const { registerSystemFontIpc } = require('./systemFontIpc.cjs');
 const { registerPluginIpc } = require('./pluginIpc.cjs');
+const { registerGreenNewsIpc } = require('./greenNewsIpc.cjs');
+const { createGreenNewsStore } = require('../services/greenNewsStore.cjs');
+const { createGreenNewsSpiderService } = require('../services/greenNewsSpiderService.cjs');
 const pluginService = require('../services/pluginService.cjs');
 const { createAgentService } = require('../services/agentService.cjs');
 const { createAiService } = require('../services/aiService.cjs');
@@ -128,6 +131,13 @@ const workspaceDatabaseChannels = [
   'templates:create',
   'templates:update',
   'templates:delete',
+  'green-news:list',
+  'green-news:count',
+  'green-news:detail',
+  'green-news:delete',
+  'green-news:clear-all',
+  'green-news:crawl',
+  'green-news:status',
 ];
 
 function clearWorkspaceDatabaseIpc() {
@@ -198,12 +208,15 @@ function registerWorkspaceDatabaseServices({ app, configStore, aiService, agentS
   const knowledgeBaseService = createKnowledgeBaseService({ app, aiService, configStore, knowledgeBaseStore });
   const greenReportStore = createGreenReportStore({ app, db: sqliteDatabase.db, taskLogStore });
   const templateStore = createTemplateStore({ db: sqliteDatabase.db });
+  const greenNewsStore = createGreenNewsStore({ db: sqliteDatabase.db });
+  const greenNewsSpiderService = createGreenNewsSpiderService({ app, store: greenNewsStore });
   const taskService = createTaskService({ aiService, agentService, autoConfirmationService, knowledgeBaseService, openXmlHelperService, greenReportStore });
 
   clearWorkspaceDatabaseIpc();
   registerKnowledgeBaseIpc({ knowledgeBaseService });
   registerGreenReportIpc({ greenReportStore, taskService });
   registerTemplateIpc({ templateStore });
+  registerGreenNewsIpc({ greenNewsStore, greenNewsSpiderService });
   registerTaskIpc({ taskService });
   updateStatus({ phase: 'ready', ready: true, message: '本地数据库已就绪' });
 

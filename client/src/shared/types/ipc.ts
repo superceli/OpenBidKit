@@ -618,6 +618,8 @@ export interface LvcertBridge {
   tasks: {
     startGreenReportOutline: (payload?: unknown) => Promise<unknown>;
     startGreenReportContent: (payload?: unknown) => Promise<unknown>;
+    cancelGreenReportOutline: () => Promise<{ success: boolean; message?: string }>;
+    cancelGreenReportContent: () => Promise<{ success: boolean; message?: string }>;
     getActiveTasks: () => Promise<TaskEventTask[]>;
     onTaskEvent: <TState = unknown>(callback: (event: TaskEvent<TState>) => void) => () => void;
   };
@@ -645,6 +647,15 @@ export interface LvcertBridge {
     refreshMarket: () => Promise<void>;
     clearUpdateFailedState: (pluginId: string) => Promise<boolean>;
     notifyEvent: (pluginId: string, event: string, payload?: unknown) => Promise<void>;
+  };
+  greenNews: {
+    list: (payload?: GreenNewsListPayload) => Promise<GreenNewsItem[]>;
+    count: (payload?: GreenNewsListPayload) => Promise<number>;
+    detail: (newsId: string) => Promise<GreenNewsItem | null>;
+    delete: (newsId: string) => Promise<GreenNewsMutationResult>;
+    clearAll: () => Promise<GreenNewsMutationResult>;
+    crawl: (payload?: { perSourceLimit?: number }) => Promise<GreenNewsCrawlResult>;
+    getStatus: () => Promise<GreenNewsStatus>;
   };
 }
 
@@ -681,4 +692,40 @@ export interface AvailablePlugin {
     stage: string;
     message: string;
   };
+}
+
+export interface GreenNewsItem {
+  news_id: string;
+  title: string;
+  source: string;
+  url: string;
+  summary: string;
+  content: string;
+  category: string;
+  published_at: string;
+  crawled_at: string;
+}
+
+export interface GreenNewsListPayload {
+  keyword?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface GreenNewsCrawlResult {
+  success: boolean;
+  message: string;
+  total?: number;
+  inserted?: number;
+  skipped?: number;
+}
+
+export interface GreenNewsStatus {
+  running: boolean;
+  pythonAvailable: boolean;
+}
+
+export interface GreenNewsMutationResult {
+  success: boolean;
+  message: string;
 }

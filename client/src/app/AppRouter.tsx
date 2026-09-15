@@ -12,6 +12,7 @@ import ResourcesPage from '../features/resources/pages/ResourcesPage';
 import PluginsPage from '../features/plugins/pages/PluginsPage';
 import SettingsPage from '../features/settings/pages/SettingsPage';
 import GreenReportHome from '../features/green-report/pages/GreenReportHome';
+import GreenNewsPage from '../features/green-news/pages/GreenNewsPage';
 import SecondaryMenuPage from '../shared/ui/SecondaryMenuPage';
 
 interface AppRouterProps {
@@ -43,6 +44,8 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
   switch (activeSection) {
     case 'green-report':
       return <GreenReportHome registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
+    case 'green-news':
+      return <GreenNewsPage />;
     case 'document-knowledge-base':
       return <KnowledgeBasePage />;
     case 'resources':

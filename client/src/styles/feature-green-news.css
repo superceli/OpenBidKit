@@ -1,0 +1,385 @@
+/* ==========================================================================
+   绿色新闻 green-news —— 对齐项目 tokens.css CSS 变量
+   ========================================================================== */
+
+.green-news-page {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.green-news-panel {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 18px;
+  padding: 2px 4px 0;
+  overflow: hidden;
+}
+
+/* ---------- 标题区 ---------- */
+.green-news-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.green-news-head-title h3 {
+  margin: 7px 0 0;
+  color: var(--yb-text);
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.green-news-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.green-news-count {
+  font-size: 13px;
+  color: var(--yb-text-soft);
+  white-space: nowrap;
+  padding: 4px 10px;
+  background: var(--yb-border-soft);
+  border-radius: var(--yb-radius-pill);
+}
+
+.green-news-count strong {
+  color: var(--yb-primary);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.green-news-search {
+  width: 260px;
+  padding: 7px 12px;
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-sm);
+  font-size: 13px;
+  background: var(--yb-surface);
+  color: var(--yb-text);
+  outline: none;
+  transition: border-color var(--yb-duration-fast) var(--yb-ease),
+              box-shadow var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-news-search::placeholder {
+  color: var(--yb-text-muted);
+}
+
+.green-news-search:focus {
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-focus-ring);
+}
+
+.green-news-limit-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.green-news-limit-label {
+  font-size: 12px;
+  color: var(--yb-text-soft);
+  white-space: nowrap;
+}
+
+.green-news-limit-input {
+  width: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--yb-text);
+  background: var(--yb-bg);
+  outline: none;
+  text-align: center;
+  transition: border-color var(--yb-duration-fast) var(--yb-ease),
+              box-shadow var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-news-limit-input:focus {
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-focus-ring);
+}
+
+/* 隐藏 number input 的上下箭头 */
+.green-news-limit-input::-webkit-inner-spin-button,
+.green-news-limit-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.green-news-limit-input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* ---------- 分类筛选 ---------- */
+.green-news-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.green-news-chip {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-pill);
+  background: var(--yb-surface);
+  color: var(--yb-text-soft);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-news-chip:hover {
+  border-color: var(--yb-primary);
+  color: var(--yb-primary);
+}
+
+.green-news-chip.is-active {
+  background: var(--yb-primary);
+  border-color: var(--yb-primary);
+  color: #fff;
+  box-shadow: var(--yb-shadow-xs);
+}
+
+.green-news-python-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--yb-warning-deep);
+  background: var(--yb-warning-soft);
+  border: 1px solid var(--yb-warning-border);
+  border-radius: var(--yb-radius-pill);
+  padding: 4px 10px;
+}
+
+.green-news-python-hint code {
+  background: transparent;
+  font-size: 11px;
+  color: inherit;
+}
+
+/* ---------- 列表区 ---------- */
+.green-news-list-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+}
+
+.green-news-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 80px 0;
+  color: var(--yb-text-muted);
+  font-size: 13px;
+}
+
+.green-news-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.green-news-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--yb-surface);
+  border: 1px solid var(--yb-border);
+  border-radius: var(--yb-radius-md);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+}
+
+.green-news-row:hover {
+  border-color: var(--yb-primary);
+  box-shadow: var(--yb-shadow-sm);
+  transform: translateY(-1px);
+}
+
+.green-news-row:focus-visible {
+  outline: 2px solid var(--yb-primary);
+  outline-offset: 1px;
+}
+
+.green-news-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.green-news-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--yb-text);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.green-news-row-summary {
+  font-size: 12px;
+  color: var(--yb-text-soft);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.green-news-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  margin-top: 2px;
+}
+
+.green-news-row-meta .dot {
+  color: var(--yb-border);
+}
+
+.green-news-tag {
+  flex-shrink: 0;
+  min-width: 68px;
+  text-align: center;
+  padding: 3px 10px;
+  border-radius: var(--yb-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: var(--yb-border-soft);
+  color: var(--yb-text-soft);
+  align-self: center;
+  white-space: nowrap;
+}
+
+.green-news-tag.cat-国务院    { background: #e6f4ff; color: #0958d9; }
+.green-news-tag.cat-国家能源局  { background: #fff7e6; color: #d46b08; }
+.green-news-tag.cat-生态环境部  { background: #e6fffb; color: #08979c; }
+
+.green-news-row-del {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: var(--yb-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  cursor: pointer;
+  transition: all var(--yb-duration-fast) var(--yb-ease);
+  align-self: center;
+  opacity: 0;
+}
+
+.green-news-row:hover .green-news-row-del {
+  opacity: 1;
+}
+
+.green-news-row-del:hover {
+  background: var(--yb-danger-soft);
+  color: var(--yb-danger);
+  border-color: var(--yb-danger-border);
+}
+
+/* ---------- 分页 ---------- */
+.green-news-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 18px 0 10px;
+}
+
+.green-news-pager-info {
+  font-size: 12px;
+  color: var(--yb-text-muted);
+}
+
+/* ---------- 详情弹窗 ---------- */
+.green-news-detail-dialog {
+  width: min(96vw, 860px);
+  max-width: none;
+}
+
+.green-news-detail-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.green-news-detail-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--yb-radius-md);
+}
+
+.green-news-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--yb-border);
+  font-size: 12px;
+  color: var(--yb-text-muted);
+}
+
+.green-news-detail-summary {
+  font-size: 13px;
+  color: var(--yb-text-soft);
+  background: var(--yb-border-soft);
+  padding: 12px 16px;
+  border-radius: var(--yb-radius-sm);
+  border-left: 3px solid var(--yb-primary);
+  line-height: 1.7;
+  margin-bottom: 18px;
+}
+
+.green-news-detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  padding: 40px 0;
+  color: var(--yb-text-muted);
+  font-size: 13px;
+}
+
+.green-news-no-content {
+  color: var(--yb-text-muted);
+  font-size: 13px;
+  padding: 30px 0;
+  text-align: center;
+}
+
+.green-news-ext-link {
+  display: inline-flex;
+  align-items: center;
+}
+
+.green-news-confirm-dialog {
+  max-width: 420px;
+}

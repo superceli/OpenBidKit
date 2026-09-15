@@ -140,9 +140,8 @@ export const GREEN_REPORT_TYPES: GreenReportTypeItem[] = [
   { id: 'harmless-disposal', name: '无害化处置报告', category: '能源与资源' },
 
   // ============ 环保与三废 ============
-  { id: 'waste-gas-water-solid-eval', name: '废气、废水、固废评价报告', category: '环保与三废' },
+  { id: 'gtr-waste-eval', name: '废水、废气、固废评价报告', category: '环保与三废' },
   { id: 'three-wastes', name: '三废报告', category: '环保与三废' },
-  { id: 'gtr-waste-eval', name: 'GTR废水、废气、固废评价报告', category: '环保与三废' },
   { id: 'four-wastes-eval', name: '四废（废水、废气、固废、噪声）评价报告', category: '环保与三废' },
   { id: 'waste-gas-water-solid-compliance', name: '废气、废水和废固合规报告', category: '环保与三废' },
   { id: 'pollutant-discharge', name: '污染物排放报告', category: '环保与三废' },

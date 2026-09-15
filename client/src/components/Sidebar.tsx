@@ -14,6 +14,7 @@ interface SidebarProps {
 
 const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>> = {
   'green-report': DocumentIcon,
+  'green-news': RadarIcon,
   'knowledge-base': ArchiveIcon,
   'document-knowledge-base': ArchiveIcon,
   resources: ResourcesIcon,

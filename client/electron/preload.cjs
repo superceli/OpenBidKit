@@ -188,6 +188,8 @@ const bridge = {
   tasks: {
     startGreenReportOutline: (payload) => ipcRenderer.invoke('tasks:start-green-report-outline', payload),
     startGreenReportContent: (payload) => ipcRenderer.invoke('tasks:start-green-report-content', payload),
+    cancelGreenReportOutline: () => ipcRenderer.invoke('tasks:cancel-green-report-outline'),
+    cancelGreenReportContent: () => ipcRenderer.invoke('tasks:cancel-green-report-content'),
     getActiveTasks: () => ipcRenderer.invoke('tasks:get-active'),
     onTaskEvent: (callback) => {
       ipcRenderer.send('tasks:subscribe');
@@ -228,6 +230,15 @@ const bridge = {
     refreshMarket: () => ipcRenderer.invoke('plugins:refreshMarket'),
     clearUpdateFailedState: (pluginId) => ipcRenderer.invoke('plugins:clearUpdateFailedState', pluginId),
     notifyEvent: (pluginId, event, payload) => ipcRenderer.invoke('plugins:notify-event', pluginId, event, payload),
+  },
+  greenNews: {
+    list: (payload) => ipcRenderer.invoke('green-news:list', payload),
+    count: (payload) => ipcRenderer.invoke('green-news:count', payload),
+    detail: (newsId) => ipcRenderer.invoke('green-news:detail', newsId),
+    delete: (newsId) => ipcRenderer.invoke('green-news:delete', newsId),
+    clearAll: () => ipcRenderer.invoke('green-news:clear-all'),
+    crawl: (payload) => ipcRenderer.invoke('green-news:crawl', payload),
+    getStatus: () => ipcRenderer.invoke('green-news:status'),
   },
 };
 

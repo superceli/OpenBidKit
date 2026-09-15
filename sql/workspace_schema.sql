@@ -7,6 +7,8 @@
 -- 4. 当前运行代码已落地 knowledge_* v3、export_templates v15、task_logs v20、green_report_* v24 目标结构；
 --    v25 已清理 technical_plan_*、duplicate_check_*、rejection_check_*、feasibility_report_* 等投标相关表；
 --    v26 绿色报告新增导出模板 ID 字段 template_id，关联 export_templates.template_id。
+--    v27 绿色报告新增报告编号自增顺序号 report_seq。
+--    v28 新增 green_news 绿色新闻表，用于存储行业新闻爬取结果。
 -- 5. 每次表结构调整后，需要同步更新本文件和 runtime migration 版本。
 -- 6. 本文件不保存历史版本，每次更新都写入最新目标完整结构。
 
@@ -16,7 +18,7 @@ PRAGMA busy_timeout = 5000;
 
 -- 目标完整结构版本。
 -- 运行时代码应通过 PRAGMA user_version 判断是否需要自动升级。
-PRAGMA user_version = 26;
+PRAGMA user_version = 28;
 
 -- ============================================================================
 -- 任务日志 task_logs（v20 目标设计）
@@ -308,3 +310,31 @@ ON green_report_outline_nodes(parent_node_id, sort_order);
 
 CREATE INDEX IF NOT EXISTS idx_green_report_outline_level
 ON green_report_outline_nodes(level);
+
+-- ============================================================================
+-- 绿色新闻 green_news（v28 目标设计）
+-- ============================================================================
+
+-- 存储从外部网站爬取的绿色低碳、十五五、ESG 等行业新闻。
+-- UNIQUE(url) 约束保证同一条新闻不会重复入库。
+CREATE TABLE IF NOT EXISTS green_news (
+  news_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '绿色低碳',
+  published_at TEXT NOT NULL DEFAULT '',
+  crawled_at TEXT NOT NULL,
+  UNIQUE(url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_green_news_crawled
+ON green_news(crawled_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_green_news_published
+ON green_news(published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_green_news_category
+ON green_news(category);

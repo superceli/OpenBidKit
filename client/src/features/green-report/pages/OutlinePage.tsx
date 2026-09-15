@@ -38,6 +38,19 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
     }
   };
 
+  const handleCancelGenerate = async () => {
+    try {
+      const res = await window.lvcert.tasks.cancelGreenReportOutline();
+      if (res.success) {
+        showToast('目录生成已取消', 'success');
+      } else {
+        showToast(res.message || '取消失败', 'error');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  };
+
   const handleSaveEdit = async (item: OutlineItem) => {
     const newOutline = updateOutlineItem(outline, item);
     const request: GreenSaveOutlineRequest = {
@@ -112,7 +125,7 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
           </div>
         </div>
 
-        {(outlineTaskRunning || state.outlineTask?.status === 'error') && (
+        {(outlineTaskRunning || state.outlineTask?.status === 'error' || state.outlineTask?.status === 'cancelled') && (
           <div style={{ marginBottom: '16px' }}>
             <ProgressBar
               value={state.outlineTask?.progress ?? 0}
@@ -120,11 +133,27 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
               showPercentage
               active={outlineTaskRunning}
             />
-            {state.outlineTask?.status === 'error' && (
-              <div className="green-report-error-text">
-                目录生成失败: {state.outlineTask.error}
-              </div>
-            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+              {state.outlineTask?.status === 'error' && (
+                <div className="green-report-error-text">
+                  目录生成失败: {state.outlineTask.error}
+                </div>
+              )}
+              {state.outlineTask?.status === 'cancelled' && (
+                <div className="green-report-error-text" style={{ color: 'var(--yb-text-muted)' }}>
+                  已取消
+                </div>
+              )}
+              {outlineTaskRunning && (
+                <button
+                  className="green-report-btn-secondary"
+                  style={{ marginLeft: 'auto', color: 'var(--yb-danger, #e5484d)', borderColor: 'var(--yb-danger, #e5484d)' }}
+                  onClick={handleCancelGenerate}
+                >
+                  取消生成
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -7,6 +7,11 @@ export const appMenuItems: AppMenuItem[] = [
     description: 'ESG报告、可持续发展报告、社会责任报告等绿色报告智能生成',
   },
   {
+    id: 'green-news',
+    label: '绿色新闻',
+    description: '绿色低碳、可持续发展、十五五等行业资讯与新闻资讯',
+  },
+  {
     id: 'knowledge-base',
     label: '知识库',
     description: '企业资料、行业素材和可复用知识条目',

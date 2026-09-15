@@ -11,7 +11,7 @@ export type GreenTaskType =
   | 'green-report-outline'
   | 'green-report-content';
 
-export type GreenTaskStatus = 'running' | 'paused' | 'success' | 'error';
+export type GreenTaskStatus = 'running' | 'paused' | 'success' | 'error' | 'cancelled';
 
 export type GreenSaveOutlineReason = 'sort' | 'edit' | 'delete' | 'add-root' | 'add-child' | 'replace';
 

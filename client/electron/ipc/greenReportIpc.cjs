@@ -56,6 +56,16 @@ function registerGreenReportIpc({ greenReportStore, taskService }) {
     taskService.subscribe(event.sender);
     return taskService.startGreenReportContent(payload);
   });
+
+  ipcMain.handle('tasks:cancel-green-report-outline', (event) => {
+    taskService.subscribe(event.sender);
+    return taskService.cancelGreenReportOutline();
+  });
+
+  ipcMain.handle('tasks:cancel-green-report-content', (event) => {
+    taskService.subscribe(event.sender);
+    return taskService.cancelGreenReportContent();
+  });
 }
 
 module.exports = { registerGreenReportIpc };

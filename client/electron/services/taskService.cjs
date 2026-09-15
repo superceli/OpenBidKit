@@ -385,7 +385,50 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     }
   }
 
+  function recoverInterruptedGreenReportTasks() {
+    const state = greenReportStore.loadState() || {};
+    const partial = {};
+    if (!activeTasks.has('green-report-outline') && isActiveTaskStatus(state.outlineTask?.status)) {
+      partial.outlineTask = {
+        ...state.outlineTask,
+        status: 'error',
+        error: '上次任务因应用关闭而中断，请重新生成。',
+        updated_at: now(),
+      };
+    }
+    if (!activeTasks.has('green-report-content') && isActiveTaskStatus(state.contentTask?.status)) {
+      partial.contentTask = {
+        ...state.contentTask,
+        status: 'error',
+        error: '上次任务因应用关闭而中断，请重新生成。',
+        updated_at: now(),
+      };
+    }
+    if (Object.keys(partial).length) {
+      greenReportStore.updateGreenReportWithoutReload(partial);
+    }
+  }
+
   recoverInterruptedGreenReportTasks();
+
+  function cancelTask(type) {
+    const control = activeTaskControls.get(type);
+    if (!control) return { success: false, message: '当前没有正在执行的任务' };
+    const task = activeTasks.get(type);
+    if (task) {
+      const nextStatus = { ...task, status: 'cancelled', error: '任务已被用户取消', updated_at: now() };
+      activeTasks.set(type, nextStatus);
+      const definition = getTaskDefinition(type);
+      const taskField = getTaskField(type);
+      const persistedPatch = { [taskField]: nextStatus };
+      if (definition.stateKey === 'greenReport') {
+        greenReportStore.updateGreenReportWithoutReload(persistedPatch);
+      }
+      emit(nextStatus, buildSnapshot(definition, persistedPatch));
+    }
+    control.cancel();
+    return { success: true };
+  }
 
   return {
     subscribe,
@@ -396,6 +439,8 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     startGreenReportContent(payload) {
       return startManagedTask('green-report-content', payload, runGreenReportContentTask);
     },
+    cancelGreenReportOutline() { return cancelTask('green-report-outline'); },
+    cancelGreenReportContent() { return cancelTask('green-report-content'); },
     getActiveTasks() {
       return Array.from(activeTasks.values());
     },

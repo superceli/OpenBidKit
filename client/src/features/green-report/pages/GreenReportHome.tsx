@@ -266,6 +266,12 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             onReportTypeChange={(reportType: GreenReportType) => {
               setState((prev) => ({ ...prev, reportType }));
               void window.lvcert?.greenReport?.saveReportType(reportType).catch(() => undefined);
+              // 切换报告类型时自动刷新报告编号
+              void window.lvcert?.greenReport?.generateReportCode().then((newCode) => {
+                if (newCode) {
+                  setDraftProjectInfo((prev) => ({ ...prev, reportCode: newCode }));
+                }
+              });
             }}
             onSaveProjectInfo={async () => {
               if (!draftProjectInfo.companyName?.trim()) {
@@ -280,9 +286,15 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
                 showToast('请选择编制日期（必填）', 'error');
                 return;
               }
-              setState((prev) => ({ ...prev, projectInfo: draftProjectInfo }));
+              // 每次保存企业信息都自动刷新报告编号，确保每份报告唯一
+              const newCode = await window.lvcert?.greenReport?.generateReportCode();
+              const finalProjectInfo = newCode
+                ? { ...draftProjectInfo, reportCode: newCode }
+                : draftProjectInfo;
+              setState((prev) => ({ ...prev, projectInfo: finalProjectInfo }));
+              setDraftProjectInfo(finalProjectInfo);
               try {
-                await window.lvcert?.greenReport?.saveProjectInfo(draftProjectInfo);
+                await window.lvcert?.greenReport?.saveProjectInfo(finalProjectInfo);
                 showToast('企业信息已保存', 'success');
               } catch (error) {
                 showToast(`保存失败：${error instanceof Error ? error.message : String(error)}`, 'error');

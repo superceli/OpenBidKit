@@ -3,7 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 27;
+const schemaVersion = 28;
 
 function createInitialSchema(db) {
   db.exec(`
@@ -1169,6 +1169,30 @@ function addGreenReportSeq(db) {
   }
 }
 
+// 绿色新闻表。用于存储从外部爬取的绿色/低碳/可持续发展相关行业新闻。
+function createGreenNewsSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS green_news (
+      news_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '绿色低碳',
+      published_at TEXT NOT NULL DEFAULT '',
+      crawled_at TEXT NOT NULL,
+      UNIQUE(url)
+    );
+    CREATE INDEX IF NOT EXISTS idx_green_news_crawled
+      ON green_news(crawled_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_green_news_published
+      ON green_news(published_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_green_news_category
+      ON green_news(category);
+  `);
+}
+
 const schemaHealthTableGroups = [
   {
     version: 3,
@@ -1417,6 +1441,11 @@ const migrations = [
     version: 27,
     description: '绿色报告新增报告编号自增顺序号 report_seq',
     up: addGreenReportSeq,
+  },
+  {
+    version: 28,
+    description: '新增绿色新闻表结构 green_news',
+    up: createGreenNewsSchema,
   },
 ];
 

@@ -20,22 +20,12 @@ const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>>
   'document-knowledge-base': ArchiveIcon,
   'credential-library': ArchiveIcon,
   'image-knowledge-base': ArchiveIcon,
-  resources: ResourcesIcon,
   'bid-check': BidCheckIcon,
   'duplicate-check': CompareIcon,
   'rejection-check': ShieldIcon,
   'ai-evaluation': BidCheckIcon,
   'template-settings': DocumentIcon,
   'bid-opportunity': RadarIcon,
-  'developer-test': FlaskIcon,
-  'developer-json-test': FlaskIcon,
-  'developer-multimodal-test': FlaskIcon,
-  'developer-prompt-lab': FlaskIcon,
-  'developer-parser-sandbox': FlaskIcon,
-  'developer-export-preview': FlaskIcon,
-  'developer-expansion-replace-test': FlaskIcon,
-  'developer-layout-budget-test': FlaskIcon,
-  'developer-agent-test': FlaskIcon,
   'plugin-manager': PluginIcon,
   settings: GearIcon,
 };
@@ -271,17 +261,6 @@ function ArchiveIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-function ResourcesIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M4.8 6.4h4v12.2h-4z" />
-      <path d="M10.1 4.8h4.2v13.8h-4.2z" />
-      <path d="m15.4 7.1 3.4-.9 2.7 10.8-3.4.85z" />
-      <path d="M4 19.3h16.8" />
-    </svg>
-  );
-}
-
 function BidCheckIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
@@ -325,17 +304,6 @@ function RadarIcon(props: SVGProps<SVGSVGElement>) {
       <path d="M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z" />
       <path d="M12 12 18 6" />
       <path d="M12 12h.01" />
-    </svg>
-  );
-}
-
-function FlaskIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M9 3.8h6" />
-      <path d="M10.5 3.8v5.4l-4.2 7.4c-.85 1.5.24 3.4 1.96 3.4h7.48c1.72 0 2.81-1.9 1.96-3.4l-4.2-7.4V3.8" />
-      <path d="M8.5 15.8h7" />
-      <path d="M10 12.5h4" />
     </svg>
   );
 }

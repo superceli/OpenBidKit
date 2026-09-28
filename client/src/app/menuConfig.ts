@@ -93,7 +93,6 @@ export const appMenuItems: AppMenuItem[] = [
 ];
 
 export function getAppMenuItems(developerMode: boolean): AppMenuItem[] {
-  void developerMode;
   return appMenuItems;
 }
 

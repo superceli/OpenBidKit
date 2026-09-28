@@ -29,7 +29,6 @@ const pageLabels = {
   'feasibility-report/content': '可行性研究报告 - 正文生成',
   'business-bid': '商务标（历史）',
   'knowledge-base': '知识库',
-  resources: '资源下载',
   'knowledge-base/library': '知识库 - 文档列表',
   'knowledge-base/viewer/items': '知识库 - 知识条目',
   'knowledge-base/viewer/markdown': '知识库 - Markdown 原文',
@@ -56,15 +55,6 @@ const pageLabels = {
   'export-format': '模版设置 - 新建模板',
   'bid-opportunity': '投标机会',
   'plugin-manager': '插件管理',
-  'developer-test': '测试页',
-  'developer-json-test': '测试页 - Json请求测试',
-  'developer-multimodal-test': '测试页 - 多模态测试',
-  'developer-prompt-lab': '测试页 - Prompt调试台',
-  'developer-parser-sandbox': '测试页 - 文件解析沙盘',
-  'developer-export-preview': '测试页 - 导出链路预演',
-  'developer-agent-test': '测试页 - 智能体链路测试',
-  'developer-expansion-replace-test': '测试页 - 扩写替换测试',
-  'developer-layout-budget-test': '测试页 - 版面预算正文测试',
   settings: '设置',
 };
 

@@ -1,18 +1,11 @@
 import type { SectionId } from '../shared/types/navigation';
 import { getAppMenuItemById } from './menuConfig';
 import BidOpportunityPage from '../features/bid-opportunity/pages/BidOpportunityPage';
-import ContentExpansionReplaceTestPage from '../features/developer/pages/ContentExpansionReplaceTestPage';
-import ContentLayoutBudgetTestPage from '../features/developer/pages/ContentLayoutBudgetTestPage';
-import DeveloperDemoPage, { isDeveloperDemoSection } from '../features/developer/pages/DeveloperDemoPage';
-import DeveloperMultimodalTestPage from '../features/developer/pages/DeveloperMultimodalTestPage';
-import AgentTestPage from '../features/developer/pages/AgentTestPage';
-import DeveloperTestPage from '../features/developer/pages/DeveloperTestPage';
 import MyTemplatesPage from '../features/export-format/pages/MyTemplatesPage';
 import DuplicateCheckPage from '../features/duplicate-check/pages/DuplicateCheckPage';
 import CredentialLibraryPage from '../features/credential-library/pages/CredentialLibraryPage';
 import KnowledgeBasePage from '../features/knowledge-base/pages/KnowledgeBasePage';
 import RejectionCheckPage from '../features/rejection-check/pages/RejectionCheckPage';
-import ResourcesPage from '../features/resources/pages/ResourcesPage';
 import PluginsPage from '../features/plugins/pages/PluginsPage';
 import SettingsPage from '../features/settings/pages/SettingsPage';
 import TechnicalPlanHome from '../features/technical-plan/pages/TechnicalPlanHome';
@@ -34,10 +27,6 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
     return <SecondaryMenuPage menuItem={activeMenuItem} onNavigate={onSectionChange} />;
   }
 
-  if (isDeveloperDemoSection(activeSection)) {
-    return <DeveloperDemoPage sectionId={activeSection} />;
-  }
-
   switch (activeSection) {
     case 'technical-plan':
       return <TechnicalPlanHome registerLeaveGuard={registerLeaveGuard} />;
@@ -47,8 +36,6 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <KnowledgeBasePage />;
     case 'credential-library':
       return <CredentialLibraryPage developerMode={developerMode} />;
-    case 'resources':
-      return <ResourcesPage />;
     case 'plugin-manager':
       return <PluginsPage />;
     case 'duplicate-check':
@@ -59,18 +46,6 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <MyTemplatesPage />;
     case 'bid-opportunity':
       return <BidOpportunityPage />;
-    case 'developer-test':
-      return null;
-    case 'developer-json-test':
-      return <DeveloperTestPage />;
-    case 'developer-multimodal-test':
-      return <DeveloperMultimodalTestPage />;
-    case 'developer-expansion-replace-test':
-      return <ContentExpansionReplaceTestPage />;
-    case 'developer-layout-budget-test':
-      return <ContentLayoutBudgetTestPage />;
-    case 'developer-agent-test':
-      return <AgentTestPage />;
     case 'settings':
       return <SettingsPage onDeveloperModeChange={onDeveloperModeChange} />;
     default:

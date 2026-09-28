@@ -8,10 +8,6 @@ import AppShell from './components/AppShell';
 import { trackAppOpen, trackConfigUsage, trackPageView } from './shared/analytics/analytics';
 import type { SectionId } from './shared/types/navigation';
 
-function isDeveloperSection(section: SectionId) {
-  return section.startsWith('developer-');
-}
-
 function isManagedWorkbenchSection(section: SectionId) {
   return section === 'technical-plan' || section === 'feasibility-report';
 }
@@ -37,12 +33,6 @@ function App() {
     if (isManagedWorkbenchSection(activeSection)) return;
     void window.yibiao?.ui?.setCurrentView({ section: activeSection });
   }, [activeSection]);
-
-  useEffect(() => {
-    if (!developerMode && isDeveloperSection(activeSection)) {
-      setActiveSection('bid-generation');
-    }
-  }, [activeSection, developerMode]);
 
   const requestSectionChange = async (section: SectionId) => {
     if (section === activeSection) {

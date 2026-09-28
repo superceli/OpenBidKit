@@ -4,7 +4,6 @@ import { technicalPlanStorage } from '../services/technicalPlanStorage';
 import type { TechnicalPlanState } from '../types';
 
 const initialState: TechnicalPlanState = {
-  workflowKind: 'technical-plan',
   step: 'document-analysis',
   tenderFile: null,
   tenderFiles: [],
@@ -20,7 +19,7 @@ const initialState: TechnicalPlanState = {
   bidSections: [],
   bidSectionExtractionStatus: 'idle',
   bidSectionExtractionError: undefined,
-  outlineMode: 'aligned',
+  outlineMode: 'standalone-technical',
   outlineExpansionMode: 'ai-complement',
   outlineWordControlOptions: { ...DEFAULT_OUTLINE_WORD_CONTROL_OPTIONS },
   outlineWordControlSnapshot: undefined,
@@ -34,6 +33,8 @@ const initialState: TechnicalPlanState = {
   globalFactsAdjustmentTask: undefined,
   globalFacts: [],
   contentGenerationTask: undefined,
+  exportTemplateId: '',
+  exportTemplateScope: 'ai-only',
   contentGenerationSections: {},
   contentGenerationPlans: {},
   contentGenerationRuntime: undefined,

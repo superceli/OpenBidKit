@@ -10,6 +10,8 @@ const {
   TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
 } = require('./outlineGenerationAgentV2Config.cjs');
 const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
+const { ORIGINAL_RESTORATION_AGENT_TASK_KEY } = require('./originalPlanRestorationAgentConfig.cjs');
+const { CONTENT_GENERATION_AGENT_TASK_KEY } = require('./contentGenerationAgent.cjs');
 const { FEASIBILITY_OUTLINE_AGENT_TASK_KEY } = require('./feasibilityOutlineAgentConfig.cjs');
 
 const STORAGE_CLEANUP_VERSION = 1;
@@ -17,6 +19,8 @@ const PERSISTENT_AGENT_TASK_KEYS = [
   OUTLINE_AGENT_TASK_KEY,
   TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
   GLOBAL_FACTS_AGENT_TASK_KEY,
+  ORIGINAL_RESTORATION_AGENT_TASK_KEY,
+  CONTENT_GENERATION_AGENT_TASK_KEY,
   FEASIBILITY_OUTLINE_AGENT_TASK_KEY,
 ];
 const LEGACY_WORKSPACE_FILES = [
@@ -65,10 +69,6 @@ function collectGeneratedImageReferences(db) {
   };
 
   db.prepare(`
-    SELECT generation_asset_url AS value
-    FROM technical_plan_illustration_items
-    WHERE generation_asset_url IS NOT NULL AND generation_asset_url <> ''
-    UNION ALL
     SELECT content AS value
     FROM technical_plan_outline_nodes
     WHERE content LIKE '%yibiao-asset://generated-images/%'

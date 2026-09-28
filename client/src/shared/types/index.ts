@@ -40,7 +40,6 @@ export type {
 export type {
   AiConfig,
   AiRequestMode,
-  AgentModeScenariosConfig,
   ClientConfig,
   ConfigSaveResult,
   ComponentsConfig,
@@ -67,6 +66,7 @@ export type { AppMenuItem, SectionId } from './navigation';
 export type {
   ExportFormatConfig,
   ExportTemplateRecord,
+  ExportTemplateScope,
   HeadingNumberingFormat,
   HeadingStyleConfig,
   HeadingBorderConfig,
@@ -76,6 +76,8 @@ export type {
   ImageStyleConfig,
   ListStyle,
   PageSetupConfig,
+  HeaderFooterStyle,
+  PageNumberPad,
 } from './exportFormat';
 export {
   FONT_OPTIONS,
@@ -86,13 +88,18 @@ export {
   ALIGNMENT_TO_CSS,
   HEADING_NUMBERING_FORMAT_OPTIONS,
   HEADING_BORDER_STRUCTURE_OPTIONS,
+  HEADER_FOOTER_STYLE_OPTIONS,
+  PAGE_NUMBER_PAD_OPTIONS,
   LIST_STYLE_OPTIONS,
   PAPER_SIZES,
   PAPER_DIMENSIONS,
   DEFAULT_EXPORT_FORMAT,
   HEADING_LEVEL_LABELS,
+  resolveHeaderFooterStyle,
+  isDecorativeHeaderFooterStyle,
+  isHtmlHeaderFooterStyle,
 } from './exportFormat';
-export type { OutlineContentMode, OutlineData, OutlineExpansionMode, OutlineItem, OutlineMode, OutlineWordControlOptions } from './outline';
+export type { TechnicalPlanOutlineItem, TechnicalPlanOutlineData, OutlineContentMode, OutlineData, OutlineExpansionMode, OutlineItem, OutlineMode, OutlineWordControlOptions } from './outline';
 export { DEFAULT_OUTLINE_WORD_CONTROL_OPTIONS, OUTLINE_CONTENT_MODE_LABELS } from './outline';
 export type { AgentDiagnosticSection, AgentMonitorEvent, AgentMonitorEventType, AgentMonitorSnapshot, AgentQuestion, AgentQuestionAnswerPayload, AgentQuestionAnswerResult, AgentQuestionOption, AgentRetryAttempt, AgentRunFile, AgentRunPayload, AgentRunResult, AgentRuntimeActiveTask, AgentRuntimePhase, AgentRuntimeStatus, AgentSelfCheckReportExportResult, AgentSelfCheckResult, AgentSelfCheckStatus, AgentSelfCheckStep, AgentSelfCheckStepStatus, AutoConfirmationState, DonationCreateRequest, DonationIntent, DonationOrderStatus, DonationPaymentConfig, DonationPromptPayload, GpuHardwareAccelerationStatus, LatestReleaseInfo, LicenseOfflineActivationResult, LicenseRuntimeStatus, UpdateCheckResult, WordExportProgressEvent, WordExportResult, WorkspaceDatabasePhase, WorkspaceDatabaseStatus, YibiaoBridge } from './ipc';
 export type {

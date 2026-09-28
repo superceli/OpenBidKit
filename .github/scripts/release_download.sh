@@ -7,10 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ATOMGIT_ENV_FILE="${SCRIPT_DIR}/.env"
 
-GITHUB_REPO="superceli/OpenBidKit"
+GITHUB_REPO="FB208/OpenBidKit_Yibiao"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-ATOM_OWNER="qq_45963071"
-ATOM_REPO="OpenBidKit"
+ATOM_OWNER="FB208"
+ATOM_REPO="OpenBidKit_Yibiao"
 ATOM_API_BASE="https://api.atomgit.com"
 
 GITHUB_UA="macOS-Release-Downloader"

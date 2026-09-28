@@ -2,6 +2,7 @@
  * 引用顺序: tokens -> layout -> shared -> app-shell dialogs -> features
  * 顺序影响 CSS 优先级 (同权重选择器后声明覆盖先声明)，调整顺序前请确认不会引发视觉回归。
  */
+@import '@docx-editor.dev/core/styles/editor.css';
 @import './styles/tokens.css';
 @import './styles/layout-app-shell.css';
 @import './styles/shared-components.css';
@@ -10,6 +11,7 @@
 @import './styles/shared-toast.css';
 @import './styles/shared-upload.css';
 @import './styles/shared-markdown.css';
+@import './styles/shared-restricted-html.css';
 @import './styles/app-shell-dialogs.css';
 @import './styles/feature-technical-plan.css';
 @import './styles/feature-feasibility-report.css';
@@ -17,7 +19,6 @@
 @import './styles/feature-rejection-check.css';
 @import './styles/feature-settings.css';
 @import './styles/feature-knowledge-base.css';
-@import './styles/feature-resources.css';
+@import './styles/feature-credential-library.css';
 @import './styles/feature-export-format.css';
 @import './styles/feature-plugins.css';
-@import './styles/feature-developer.css';

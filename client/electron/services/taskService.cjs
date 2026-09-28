@@ -1,7 +1,8 @@
 const crypto = require('node:crypto');
 const { runBidSectionExtractionTask } = require('./bidSectionExtractionTask.cjs');
 const { runBidAnalysisTask } = require('./bidAnalysisTask.cjs');
-const { runContentGenerationTask } = require('./contentGenerationTask.cjs');
+const { runContentGenerationTask, prepareContentGenerationStart } = require('./contentGenerationTask.cjs');
+const { runContentSectionRegenerationTask } = require('./contentSectionRegenerationTask.cjs');
 const { runGlobalFactsTaskV2 } = require('./globalFactsTaskV2.cjs');
 const { runOutlineGenerationTaskV2 } = require('./outlineGenerationTaskV2.cjs');
 const { runOutlineAdjustmentTask } = require('./outlineAdjustmentTask.cjs');
@@ -11,9 +12,10 @@ const {
   TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
 } = require('./outlineGenerationAgentV2Config.cjs');
 const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
+const { ORIGINAL_RESTORATION_AGENT_TASK_KEY } = require('./originalPlanRestorationAgentConfig.cjs');
+const { CONTENT_GENERATION_AGENT_TASK_KEY } = require('./contentGenerationAgent.cjs');
 const { FEASIBILITY_OUTLINE_AGENT_TASK_KEY } = require('./feasibilityOutlineAgentConfig.cjs');
 const { runRejectionCheckTask, runRejectionItemsExtractionTask } = require('./rejectionCheckTask.cjs');
-const { originalPlanDownstreamTaskTypes } = require('./technicalPlanStore.cjs');
 const {
   clearContent,
   runFeasibilityAnalysisTask,
@@ -220,7 +222,6 @@ function copyPatchFields(target, source, fields) {
 function createTechnicalPlanUserSettings(state = {}) {
   const settings = {};
   copyPatchFields(settings, state, [
-    'workflowKind',
     'step',
     'tenderFile',
     'tenderFiles',
@@ -314,7 +315,7 @@ function createTask(type, payload) {
   };
 }
 
-function createTaskService({ aiService, agentService, autoConfirmationService, technicalPlanStore, rejectionCheckStore, duplicateCheckStore, feasibilityReportStore, knowledgeBaseService, duplicateCheckService, openXmlHelperService }) {
+function createTaskService({ templateStore, aiService, agentService, autoConfirmationService, technicalPlanStore, rejectionCheckStore, duplicateCheckStore, feasibilityReportStore, knowledgeBaseService, duplicateCheckService, openXmlHelperService }) {
   const subscribers = new Set();
   const callbackSubscribers = new Set();
   const activeTasks = new Map();
@@ -353,7 +354,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
           'contentGenerationOptions',
           'contentGenerationSections',
           'contentGenerationPlans',
-          'contentIllustrationPlan',
           'contentGenerationRuntime',
         ]);
       }
@@ -382,7 +382,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         'contentGenerationOptions',
         'contentGenerationSections',
         'contentGenerationPlans',
-        'contentIllustrationPlan',
         'contentGenerationRuntime',
       ]);
     }
@@ -408,7 +407,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
           'contentGenerationTask',
           'contentGenerationSections',
           'contentGenerationPlans',
-          'contentIllustrationPlan',
           'contentGenerationRuntime',
         ]);
       }
@@ -420,7 +418,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         'contentGenerationTask',
         'contentGenerationSections',
         'contentGenerationPlans',
-        'contentIllustrationPlan',
         'contentGenerationRuntime',
       ]);
     }
@@ -431,19 +428,17 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         'contentGenerationTask',
         'contentGenerationSections',
         'contentGenerationPlans',
-        'contentIllustrationPlan',
         'contentGenerationRuntime',
       ]);
     }
 
     if (task.type === 'content-generation') {
-      copyPatchFields(patch, state, ['outlineWordControlSnapshot', 'contentIllustrationPlan', 'contentGenerationRuntime']);
+      copyPatchFields(patch, state, ['outlineWordControlSnapshot', 'contentGenerationRuntime']);
       if (!isActiveTaskStatus(task.status)) {
         copyPatchFields(patch, state, [
           'outlineData',
           'contentGenerationSections',
           'contentGenerationPlans',
-          'contentIllustrationPlan',
           'contentGenerationRuntime',
         ]);
       }
@@ -586,7 +581,10 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         const technicalPlan = technicalPlanStore.loadTechnicalPlan() || {};
         const pausedContentTask = technicalPlan.contentGenerationTask;
         if (pausedContentTask?.status === 'paused') {
-          if (type === 'content-generation' && payload?.resume) {
+          const developerRestart = type === 'content-generation'
+            && payload?.developerRestart
+            && Boolean(aiService?.isDeveloperMode?.());
+          if (type === 'content-generation' && (payload?.resume || developerRestart)) {
             return;
           }
           throw new Error('正文生成已暂停，请先继续当前正文生成任务或重置技术方案后再启动新的任务。');
@@ -890,7 +888,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         signal: taskControl.signal,
       },
     );
-    runner({ aiService: runnerAiService, agentService: runnerAgentService, ordinaryAgentService: runnerOrdinaryAgentService, workspaceStore: runnerWorkspaceStore, knowledgeBaseService, openXmlHelperService, updateTask, checkpointTask, payload, taskControl, previousState }).catch((error) => {
+    runner({ templateStore, aiService: runnerAiService, agentService: runnerAgentService, ordinaryAgentService: runnerOrdinaryAgentService, workspaceStore: runnerWorkspaceStore, knowledgeBaseService, openXmlHelperService, updateTask, checkpointTask, payload, taskControl, previousState }).catch((error) => {
       if (!taskControl.signal.aborted) {
         checkpointTask({ status: 'error', error: error.message || '任务执行失败' });
       }
@@ -899,8 +897,8 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
       if (aiService?.resumeQueueScope) {
         aiService.resumeQueueScope(queueScopeId);
       }
-      activeTasks.delete(type);
-      activeTaskControls.delete(type);
+      if (activeTasks.get(type) === currentTask) activeTasks.delete(type);
+      if (activeTaskControls.get(type) === taskControl) activeTaskControls.delete(type);
       resolveSettled();
     });
 
@@ -1397,7 +1395,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         contentGenerationOptions: undefined,
         contentGenerationSections: {},
         contentGenerationPlans: {},
-        contentIllustrationPlan: undefined,
         contentGenerationRuntime: undefined,
       });
     },
@@ -1407,9 +1404,9 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
     startOutlineGeneration(payload) {
       const outlineMode = payload?.outline_mode === 'standalone-technical'
         ? 'standalone-technical'
-        : payload?.outline_mode === 'response-file'
-          ? 'response-file'
-          : 'aligned';
+        : payload?.outline_mode === 'standalone-business'
+          ? 'standalone-business'
+          : 'response-file';
       const taskPayload = { ...payload, outline_mode: outlineMode };
       return startManagedTask('outline-generation', taskPayload, runOutlineGenerationTaskV2, {
         outlineMode,
@@ -1426,13 +1423,14 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         contentGenerationTask: undefined,
         contentGenerationSections: {},
         contentGenerationPlans: {},
-        contentIllustrationPlan: undefined,
         contentGenerationRuntime: undefined,
       }, {
         primarySession: true,
         beforeStart: () => {
           agentService.deletePersistentTask(OUTLINE_AGENT_TASK_KEY);
           agentService.deletePersistentTask(TEMPLATE_EXTRACTION_AGENT_TASK_KEY);
+          agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+          agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
           technicalPlanStore.clearBidTemplate();
         },
       });
@@ -1450,7 +1448,6 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
         contentGenerationTask: undefined,
         contentGenerationSections: {},
         contentGenerationPlans: {},
-        contentIllustrationPlan: undefined,
         contentGenerationRuntime: undefined,
       }, {
         primarySession: true,
@@ -1467,7 +1464,50 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
       if (!technicalPlan.outlineWordControlSnapshot) {
         throw new Error('当前目录没有字数控制生效快照，请重新生成目录');
       }
-      return startManagedTask('content-generation', payload, runContentGenerationTask);
+      const taskPayload = payload?.developerRestart ? { ...payload, regenerate: true } : payload;
+      const sectionRegeneration = !taskPayload?.developerRestart && Boolean(taskPayload?.targetItemId
+        || ((taskPayload?.resume || taskPayload?.retryFailedSections || taskPayload?.retry_failed_sections)
+          && technicalPlan.contentGenerationRuntime?.target_item_id));
+      if (sectionRegeneration && isActiveTaskStatus(activeTasks.get('content-generation')?.status)) {
+        throw new Error('当前正文任务正在执行，请等待完成后再修改小节');
+      }
+      const continuing = taskPayload?.resume || [
+        'retryContentCorrection', 'retry_content_correction', 'retryFailedSections', 'retry_failed_sections',
+      ].some(field => taskPayload?.[field]);
+      // 普通生成没有待办时直接返回已有结果，避免 beforeStart 删除产物会话。
+      function hasPendingSections(items) {
+        return items.some(item => item.children?.length ? hasPendingSections(item.children)
+          : item.content_mode === 'ai-generate'
+            && (technicalPlan.contentGenerationSections?.[item.id]?.status !== 'success'
+              || !Object.hasOwn(technicalPlan.contentGenerationRuntime?.section_words || {}, item.id)));
+      }
+      if (!sectionRegeneration && !continuing && !taskPayload?.regenerate
+        && technicalPlan.contentGenerationTask?.status === 'success'
+        && !hasPendingSections(technicalPlan.outlineData?.outline || [])) {
+        const task = technicalPlan.contentGenerationTask;
+        emit(task, { technicalPlanPatch: technicalPlan });
+        return task;
+      }
+      // 只读取用户已保存的测试状态，在落库和清理会话前提示，不重新请求生图测试。
+      const imageOptions = technicalPlan.contentGenerationOptions;
+      if (imageOptions?.imageQuantity !== 'none' && imageOptions?.useAiImages
+        && aiService.getConfig().image_model?.status !== 'available') {
+        throw new Error('已开启 AI 生图，但当前生图模型不可用。请去设置-生图模型中点击测试，并配置可用渠道。');
+      }
+      const initialState = sectionRegeneration || continuing
+        ? { contentGenerationRuntime: { ...technicalPlan.contentGenerationRuntime, generation_started: true } }
+        : prepareContentGenerationStart(technicalPlan, taskPayload);
+      return startManagedTask('content-generation', taskPayload, sectionRegeneration ? runContentSectionRegenerationTask : runContentGenerationTask, initialState, {
+        primarySession: true,
+        beforeStart: () => {
+          if (sectionRegeneration) return;
+          // 只有明确全文重生才删除正文会话；局部新增继续使用原 Session。
+          if (!continuing && taskPayload?.regenerate) agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
+          if (technicalPlan.originalPlanFile?.markdownPath && !continuing) {
+            agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+          }
+        },
+      });
     },
     pauseContentGeneration() {
       const task = activeTasks.get('content-generation');
@@ -1589,6 +1629,12 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
       await openXmlHelperService.close?.();
       return technicalPlanStore.clearTechnicalPlan();
     },
+    // 仅重置正文阶段，保留目录、全局事实和生成配置。
+    async resetContentGeneration() {
+      await cancelTechnicalPlanTasks('正文生成阶段已重置，后台任务已取消', ['content-generation']);
+      technicalPlanStore.updateTechnicalPlanWithoutReload({ invalidateContentGeneration: true });
+      return technicalPlanStore.loadTechnicalPlan();
+    },
     importTenderDocument(filePaths) {
       return technicalPlanStore.importTenderDocument(filePaths, {
         beforeCommit: async () => {
@@ -1606,9 +1652,10 @@ function createTaskService({ aiService, agentService, autoConfirmationService, t
       });
     },
     importOriginalPlanDocument(filePaths) {
-      return technicalPlanStore.importOriginalPlanDocument(filePaths, {
-        beforeCommit: () => cancelTechnicalPlanTasks('原方案已更新，后台任务已取消', originalPlanDownstreamTaskTypes),
-      });
+      return technicalPlanStore.importOriginalPlanDocument(filePaths);
+    },
+    removeOriginalPlanDocument() {
+      return technicalPlanStore.removeOriginalPlanDocument();
     },
     async resetRejectionCheck() {
       await cancelRejectionCheckTasks('废标项检查已重置，后台任务已取消');

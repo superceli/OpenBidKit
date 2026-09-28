@@ -1,36 +1,52 @@
 ﻿import * as Dialog from '@radix-ui/react-dialog';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { DocxEditor, type DocxEditorRef } from '@docx-editor.dev/react';
+import { createBrowserAutomationHost } from '@docx-editor.dev/core/editor';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+// 输入框的取值区间取自共享几何模块，别在 UI 里再写一份魔数 ——
+// 真正的钳制发生在 geometry.mjs，那里才兜得住老模板和手改的 JSON。
+import {
+  HEADER_CHROME_HEIGHT_RANGE_CM, FOOTER_CHROME_HEIGHT_RANGE_CM, resolveChromeGeometryDefaults,
+} from '../../../../electron/shared/chrome/index.mjs';
 import { trackPageView } from '../../../shared/analytics/analytics';
-import { AppSwitch, FloatingToolbar, ProgressBar, useToast } from '../../../shared/ui';
+import { AppDialog, AppSwitch, FloatingToolbar, ProgressBar, useToast } from '../../../shared/ui';
 import type { FloatingToolbarGroup } from '../../../shared/ui';
 import type {
   BodyTextStyleConfig,
+  BodyLineSpacingMode,
+  ParagraphSpacingUnit,
   ExportFormatConfig,
   HeadingBorderConfig,
   HeadingNumberingFormat,
   HeadingStyleConfig,
+  HeaderFooterStyle,
   ImageStyleConfig,
   ListStyle,
   OrderedListStyle,
+  PageNumberPad,
   PageSetupConfig,
   PaperSize,
   TableCellStyleConfig,
   TableStyleConfig,
+  ExportTemplateRecord,
 } from '../../../shared/types/exportFormat';
 import {
   ALIGNMENT_OPTIONS,
+  BODY_LINE_SPACING_OPTIONS,
   DEFAULT_EXPORT_FORMAT,
   FONT_OPTIONS,
   HEADING_LEVEL_LABELS,
   HEADING_NUMBERING_FORMAT_OPTIONS,
+  isDecorativeHeaderFooterStyle,
+  isHtmlHeaderFooterStyle,
+  usesHeaderTextColor,
   LIST_STYLE_OPTIONS,
   ORDERED_LIST_STYLE_OPTIONS,
-  PAPER_DIMENSIONS,
   PAPER_SIZES,
+  PAGE_NUMBER_PAD_OPTIONS,
+  resolveHeaderFooterStyle,
   SIZE_OPTIONS,
 } from '../../../shared/types/exportFormat';
-import { buildExportFormatCssVars } from '../../../shared/utils/exportFormatCss';
-import { formatOutlineNumber, formatOutlineTitle } from '../../../shared/utils/outlineNumbering';
+import { formatOutlineNumber } from '../../../shared/utils/outlineNumbering';
 import type { OutlineItem, WordExportProgressEvent } from '../../../shared/types';
 import {
   EXPORT_LAYOUT_PRESETS,
@@ -38,19 +54,36 @@ import {
   applyExportLayoutPreset,
   applyExportThemePreset,
 } from '../exportFormatPresets';
+import { HeaderFooterStylePicker, resolveChromeColors } from '../../../shared/ui/HeaderFooterChrome';
+import { DOCUMENT_DISPLAY_TEMPLATE_HTML } from '../../../shared/bodyHtml/documentTemplate';
+import { planPreviewUpdate, type PreviewPlan } from '../templatePreviewIncrement';
 
-type TemplateTab = 'quick' | 'layout' | 'cover' | 'heading' | 'body' | 'table' | 'image';
+type TemplateTab = 'quick' | 'layout' | 'header-footer' | 'cover' | 'heading' | 'body' | 'table' | 'image';
 type TableCellStyleKey = 'header_row' | 'first_column' | 'body_cell';
 
 interface ExportFormatPageProps {
-  mode?: 'create' | 'edit';
+  mode?: 'create' | 'edit' | 'view';
   templateId?: string | null;
   onBack?: () => void;
+  onSaved?: (template: ExportTemplateRecord) => void | Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
+  onSavingChange?: (saving: boolean) => void;
+  backLabel?: string;
+}
+
+export interface ExportTemplateEditorDialogProps {
+  open: boolean;
+  mode: 'create' | 'edit' | 'view';
+  templateId?: string | null;
+  returnLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved?: (template: ExportTemplateRecord) => void | Promise<void>;
 }
 
 const templateTabs: Array<{ id: TemplateTab; label: string }> = [
   { id: 'quick', label: '快捷设置' },
   { id: 'layout', label: '布局设置' },
+  { id: 'header-footer', label: '页眉页脚' },
   { id: 'cover', label: '封皮' },
   { id: 'heading', label: '标题样式' },
   { id: 'body', label: '正文样式' },
@@ -77,41 +110,6 @@ const initialExportProgress: ExportProgressState = {
   warnings: [],
   mermaidCount: 0,
 };
-
-interface PreviewViewportSize {
-  width: number;
-  height: number;
-}
-
-interface PreviewBlock {
-  id: string;
-  content: ReactNode;
-  startsNewPage?: boolean;
-  fallbackHeight: number;
-}
-
-interface PreviewPaginationMetrics {
-  bodyHeight: number;
-  blockHeights: Record<string, number>;
-}
-
-const CSS_MM_TO_PX = 96 / 25.4;
-
-function getPreviewPaperSize(config: ExportFormatConfig) {
-  const dims = PAPER_DIMENSIONS[config.page.paper_size as PaperSize] || PAPER_DIMENSIONS.a4;
-  const landscape = config.page.orientation === 'landscape';
-
-  return {
-    widthPx: (landscape ? dims.height : dims.width) * CSS_MM_TO_PX,
-    heightPx: (landscape ? dims.width : dims.height) * CSS_MM_TO_PX,
-  };
-}
-
-function arePreviewBlockHeightsEqual(left: Record<string, number>, right: Record<string, number>) {
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length && leftKeys.every((key) => left[key] === right[key]);
-}
 
 function collectLeafItems(items: OutlineItem[]): OutlineItem[] {
   return items.flatMap((item) => item.children?.length ? collectLeafItems(item.children) : [item]);
@@ -156,6 +154,7 @@ function collectConfigFonts(config: ExportFormatConfig): string[] {
     config.table.header_row.font,
     config.table.first_column.font,
     config.table.body_cell.font,
+    config.table.caption_font,
     config.image.caption_font,
   ].filter(Boolean);
 }
@@ -238,11 +237,6 @@ function headingNumberExample(index: number, heading: HeadingStyleConfig): strin
   return formatOutlineNumber(sampleIds[index] || '1', heading);
 }
 
-function headingPreviewTitle(config: ExportFormatConfig, level: number, id: string, title: string) {
-  const heading = config.headings[level - 1];
-  return formatOutlineTitle(id, title, heading);
-}
-
 function createDefaultTemplateName(date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -267,6 +261,11 @@ function createDefaultExportFormat(): ExportFormatConfig {
       border_color: DEFAULT_EXPORT_FORMAT.table.border_color,
       cell_padding_pt: DEFAULT_EXPORT_FORMAT.table.cell_padding_pt,
       full_width: DEFAULT_EXPORT_FORMAT.table.full_width,
+      caption_font: DEFAULT_EXPORT_FORMAT.table.caption_font,
+      caption_size: DEFAULT_EXPORT_FORMAT.table.caption_size,
+      caption_alignment: DEFAULT_EXPORT_FORMAT.table.caption_alignment,
+      caption_bold: DEFAULT_EXPORT_FORMAT.table.caption_bold,
+      caption_italic: DEFAULT_EXPORT_FORMAT.table.caption_italic,
       header_row: { ...DEFAULT_EXPORT_FORMAT.table.header_row },
       first_column: { ...DEFAULT_EXPORT_FORMAT.table.first_column },
       body_cell: { ...DEFAULT_EXPORT_FORMAT.table.body_cell },
@@ -284,10 +283,20 @@ function createNewTemplateExportFormat(): ExportFormatConfig {
 
 function withExportFormatDefaults(source: ExportFormatConfig): ExportFormatConfig {
   const defaults = createDefaultExportFormat();
+  // 页眉页脚的六个几何量在配置里可以是 null（老模板、系统预设都没写过它们）。
+  // 几何层认得 null，但输入框认不得 —— 在这里落成该样式的真实数字，
+  // 用户打开模板看到的就是「页脚高 0.63」而不是一个没有信息量的空值。
+  const page = { ...defaults.page, ...source.page };
+  const geometryDefaults = resolveChromeGeometryDefaults(page);
+  for (const [key, value] of Object.entries(geometryDefaults)) {
+    if (typeof (page as Record<string, unknown>)[key] !== 'number') {
+      (page as Record<string, unknown>)[key] = value;
+    }
+  }
   return {
     ...defaults,
     ...source,
-    page: { ...defaults.page, ...source.page },
+    page,
     heading_border: {
       ...defaults.heading_border,
       ...source.heading_border,
@@ -306,22 +315,40 @@ function withExportFormatDefaults(source: ExportFormatConfig): ExportFormatConfi
   };
 }
 
-function ExportFormatPage({ mode = 'create', templateId = null, onBack }: ExportFormatPageProps) {
+function ExportFormatPage({
+  mode = 'create',
+  templateId = null,
+  onBack,
+  onSaved,
+  onDirtyChange,
+  onSavingChange,
+  backLabel = '返回',
+}: ExportFormatPageProps) {
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TemplateTab>('quick');
   const [config, setConfig] = useState<ExportFormatConfig>(
     () => mode === 'create' ? createNewTemplateExportFormat() : createDefaultExportFormat(),
   );
   const [savedConfig, setSavedConfig] = useState<ExportFormatConfig | null>(null);
+  const [initialConfig, setInitialConfig] = useState<ExportFormatConfig | null>(null);
   const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(templateId);
   const [selectedLayoutPresetId, setSelectedLayoutPresetId] = useState('');
   const [selectedThemePresetId, setSelectedThemePresetId] = useState('');
   const [expandedHeadings, setExpandedHeadings] = useState<Set<number>>(new Set([0, 1]));
+  const [expandedTableCards, setExpandedTableCards] = useState<Set<string>>(new Set(['caption']));
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [exportProgress, setExportProgress] = useState<ExportProgressState>(initialExportProgress);
+  const [exportSourceOpen, setExportSourceOpen] = useState(false);
+  const [exportSource, setExportSource] = useState<'template' | 'bid'>('template');
   const [previewFullscreenOpen, setPreviewFullscreenOpen] = useState(false);
   const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  /** 系统预设模板以只读模式打开：控件全禁用，不给保存入口，但预览和分类切换照常。 */
+  const readOnly = mode === 'view';
+  const templatePreview = useTemplatePreview(config, loaded && !loadError);
+  const exitPreviewFullscreen = useCallback(() => setPreviewFullscreenOpen(false), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -339,15 +366,16 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
   }, []);
 
   useEffect(() => {
-    trackPageView(mode === 'edit' ? 'my-templates/edit' : 'new-template');
+    trackPageView(mode === 'create' ? 'new-template' : mode === 'view' ? 'my-templates/view' : 'my-templates/edit');
     let cancelled = false;
     (async () => {
       setLoaded(false);
       setLoadError('');
+      setInitialConfig(null);
       try {
-        if (mode === 'edit') {
+        if (mode === 'edit' || mode === 'view') {
           if (!templateId) {
-            throw new Error('缺少要编辑的模板');
+            throw new Error('缺少要打开的模板');
           }
           const template = await window.yibiao?.templates.get(templateId);
           if (!template) {
@@ -358,6 +386,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           setCurrentTemplateId(template.template_id);
           setConfig(nextConfig);
           setSavedConfig(nextConfig);
+          setInitialConfig(nextConfig);
           setSelectedLayoutPresetId('');
           setSelectedThemePresetId('');
           return;
@@ -368,6 +397,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         setCurrentTemplateId(null);
         setConfig(defaultConfig);
         setSavedConfig(null);
+        setInitialConfig(defaultConfig);
         setSelectedLayoutPresetId('');
         setSelectedThemePresetId('');
       } catch (error) {
@@ -382,9 +412,20 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     return () => { cancelled = true; };
   }, [mode, showToast, templateId]);
 
-  const isDirty = useMemo(() => !savedConfig || JSON.stringify(config) !== JSON.stringify(savedConfig), [config, savedConfig]);
-  const previewStyle = useMemo<CSSProperties>(() => buildExportFormatCssVars(config), [config]);
+  const isDirty = useMemo(
+    () => loaded && !loadError && (!savedConfig || JSON.stringify(config) !== JSON.stringify(savedConfig)),
+    [config, loadError, loaded, savedConfig],
+  );
+  const hasUnsavedChanges = useMemo(() => {
+    if (!loaded || loadError) return false;
+    const baseline = savedConfig || initialConfig;
+    return Boolean(baseline && JSON.stringify(config) !== JSON.stringify(baseline));
+  }, [config, initialConfig, loadError, loaded, savedConfig]);
   const fontOptions = useMemo(() => mergeFontOptions(FONT_OPTIONS, collectConfigFonts(config), systemFonts), [config, systemFonts]);
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
 
   const updateTemplate = useCallback((updates: Partial<ExportFormatConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }));
@@ -463,14 +504,19 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
   }, []);
 
   const handleSave = useCallback(async () => {
+    if (savingRef.current) return;
     const templateName = config.template_name.trim();
     if (!templateName) {
       showToast('请先填写模板名称', 'info');
       return;
     }
 
+    savingRef.current = true;
+    setSaving(true);
+    onSavingChange?.(true);
     try {
       const nextConfig = templateName === config.template_name ? config : { ...config, template_name: templateName };
+      const configAtSaveStart = JSON.stringify(config);
       const template = currentTemplateId
         ? await window.yibiao?.templates.update(currentTemplateId, nextConfig)
         : await window.yibiao?.templates.create(nextConfig);
@@ -478,13 +524,18 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         throw new Error('模板保存失败');
       }
       setCurrentTemplateId(template.template_id);
-      setConfig(template.config);
+      setConfig((current) => JSON.stringify(current) === configAtSaveStart ? template.config : current);
       setSavedConfig(template.config);
+      await onSaved?.(template);
       showToast(currentTemplateId ? '模板已保存' : '模板已创建', 'success');
     } catch (error) {
       showToast(`保存失败：${error instanceof Error ? error.message : '未知错误'}`, 'error');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      onSavingChange?.(false);
     }
-  }, [config, currentTemplateId, showToast]);
+  }, [config, currentTemplateId, onSaved, onSavingChange, showToast]);
 
   const handleResetDefault = useCallback(() => {
     if (selectedLayoutPresetId || selectedThemePresetId) {
@@ -525,14 +576,43 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     showToast(`已应用主题预设：${preset?.label || '未命名预设'}，保存后生效`, 'success');
   }, [showToast]);
 
-  const handleExportTest = useCallback(async () => {
+  const handleApplyHeaderFooterStyle = useCallback((style: HeaderFooterStyle) => {
+    setConfig((prev) => {
+      const previousBandTextColor = resolveChromeColors(prev.page).onAccent;
+      const page = {
+        ...prev.page,
+        header_footer_style: style,
+        header_enabled: true,
+        footer_enabled: true,
+        page_number_enabled: true,
+      };
+      // 换样式就是换一套装饰结构：高度和文字位置整组回到新样式的默认值。
+      // 不重置的话，frame 的「文字左 0.58」会被带到 band 上，文字直接压在徽标块里。
+      Object.assign(page, resolveChromeGeometryDefaults(page));
+      const footerColor = style === 'band'
+        ? resolveChromeColors(page).onAccent
+        : prev.page.header_footer_style === 'band' && prev.page.footer_color.toLowerCase() === previousBandTextColor
+          ? DEFAULT_EXPORT_FORMAT.page.footer_color
+          : prev.page.footer_color;
+      const next = {
+        ...prev,
+        page: { ...page, footer_color: footerColor },
+      };
+      return selectedThemePresetId ? applyExportThemePreset(next, selectedThemePresetId) : next;
+    });
+  }, [selectedThemePresetId]);
+
+  /** 按所选来源导出模板样张或已有投标文件，共用进度和保存流程。 */
+  const handleExportTest = useCallback(async (source: 'template' | 'bid') => {
+    setExportSourceOpen(false);
+    setExportSource(source);
     let unsubscribe: (() => void) | undefined;
 
     try {
-      const technicalPlan = await window.yibiao?.technicalPlan.loadState();
+      const technicalPlan = source === 'bid' ? await window.yibiao?.technicalPlan.loadState() : undefined;
       const outlineData = technicalPlan?.outlineData;
       const outline = outlineData?.outline || [];
-      if (!hasGeneratedContent(outline)) {
+      if (source === 'bid' && !hasGeneratedContent(outline)) {
         showToast('无已完成标书', 'info');
         return;
       }
@@ -545,7 +625,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         progress: 2,
         message: mermaidCount
           ? `检测到 ${mermaidCount} 张 Mermaid 图，导出时会转换为 Word 图片，可能需要稍等。`
-          : '正在使用当前模板导出测试 Word。',
+          : source === 'template' ? '正在使用当前设置导出模板预览样张。' : '正在使用当前模板导出投标文件。',
         warnings: [],
         mermaidCount,
       });
@@ -568,7 +648,8 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
 
       const result = await window.yibiao?.export.exportWord({
         requestId,
-        project_name: outlineData?.project_name,
+        project_name: source === 'template' ? config.template_name || '模板样张' : outlineData?.project_name,
+        template_html: source === 'template' ? DOCUMENT_DISPLAY_TEMPLATE_HTML : undefined,
         outline,
         export_format: config,
       });
@@ -615,6 +696,10 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     }
   }, [exportProgress.filePath, showToast]);
 
+  /** 只读态里折叠按钮被 fieldset 禁用，直接当全部展开处理，避免有内容看不到。 */
+  const isHeadingExpanded = (index: number) => readOnly || expandedHeadings.has(index);
+  const isTableCardExpanded = (key: string) => readOnly || expandedTableCards.has(key);
+
   const toggleHeading = useCallback((index: number) => {
     setExpandedHeadings((prev) => {
       const next = new Set(prev);
@@ -624,16 +709,25 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     });
   }, []);
 
+  const toggleTableCard = useCallback((key: string) => {
+    setExpandedTableCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const resetToolbarGroup: FloatingToolbarGroup = {
     id: 'template-reset',
     actions: [
-      { id: 'reset-default', label: '重置默认', variant: 'danger', tooltip: selectedLayoutPresetId || selectedThemePresetId ? '恢复当前预设样式，保存后生效' : '恢复默认模版设置，保存后生效', onClick: handleResetDefault },
+      { id: 'reset-default', label: '重置默认', variant: 'danger', disabled: saving, tooltip: selectedLayoutPresetId || selectedThemePresetId ? '恢复当前预设样式，保存后生效' : '恢复默认模版设置，保存后生效', onClick: handleResetDefault },
     ],
   };
   const exportTestToolbarGroup: FloatingToolbarGroup = {
     id: 'template-export-test',
     actions: [
-      { id: 'export-test', label: '导出测试', variant: 'warning', disabled: exportProgress.running, onClick: () => { void handleExportTest(); } },
+      { id: 'export-test', label: '导出测试', variant: 'warning', disabled: exportProgress.running, onClick: () => setExportSourceOpen(true) },
     ],
   };
   const previewToolbarGroup: FloatingToolbarGroup = {
@@ -642,7 +736,16 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
       { id: 'fullscreen-preview', label: '全屏预览', variant: 'success', tooltip: '放大右侧模板预览', onClick: () => setPreviewFullscreenOpen(true) },
     ],
   };
-  const saveToolbarGroups: FloatingToolbarGroup[] = isDirty
+  const saveToolbarGroups: FloatingToolbarGroup[] = saving
+    ? [
+        {
+          id: 'template-saving',
+          actions: [
+            { id: 'saving-indicator', label: '保存中...', variant: 'ghost', disabled: true, onClick: () => {} },
+          ],
+        },
+      ]
+    : isDirty
     ? [
         {
           id: 'template-save-state',
@@ -669,41 +772,21 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     ? {
         id: 'template-navigation',
         actions: [
-          { id: 'back', label: '返回我的模板', variant: 'secondary', onClick: onBack },
+          { id: 'back', label: backLabel, variant: 'secondary', disabled: saving, onClick: onBack },
         ],
       }
     : null;
   const toolbarGroups: FloatingToolbarGroup[] = [
     ...(navigationToolbarGroup ? [navigationToolbarGroup] : []),
     previewToolbarGroup,
-    resetToolbarGroup,
+    ...(readOnly ? [] : [resetToolbarGroup]),
     exportTestToolbarGroup,
-    ...saveToolbarGroups,
+    ...(readOnly ? [] : saveToolbarGroups),
   ];
 
   const renderQuickSettings = () => (
     <>
       <div className="settings-list">
-        <label className="settings-row">
-          <div className="settings-row-copy">
-            <strong>版面预设</strong>
-            <span>快捷设置所有版面包括纸张、边距、标题、正文等</span>
-          </div>
-          <select value={selectedLayoutPresetId} onChange={(event) => handleApplyLayoutPreset(event.target.value)}>
-            <option value="" disabled>选择版面预设</option>
-            {EXPORT_LAYOUT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-          </select>
-        </label>
-        <label className="settings-row">
-          <div className="settings-row-copy">
-            <strong>主题预设</strong>
-            <span>未开启章节页框时只应用表格颜色；开启章节页框后同步应用标题、页框、页眉页脚和表格颜色。</span>
-          </div>
-          <select value={selectedThemePresetId} onChange={(event) => handleApplyThemePreset(event.target.value)}>
-            <option value="" disabled>选择主题预设</option>
-            {EXPORT_THEME_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-          </select>
-        </label>
         {mode === 'create' ? (
           <form
             className="settings-row export-template-name-row"
@@ -713,8 +796,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             }}
           >
             <div className="settings-row-copy">
-              <strong>设置模板名称</strong>
-              <span>默认按 yibiao-YYYY-MM-DD-HHmmss 格式生成，保存后显示在“我的模板”中。</span>
+              <strong>模版名称</strong>
             </div>
             <div className="input-with-action export-template-name-control">
               <input
@@ -729,11 +811,29 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             </div>
           </form>
         ) : null}
+        <label className="settings-row">
+          <div className="settings-row-copy">
+            <strong>版面预设</strong>
+          </div>
+          <select value={selectedLayoutPresetId} onChange={(event) => handleApplyLayoutPreset(event.target.value)}>
+            <option value="" disabled>选择版面预设</option>
+            {EXPORT_LAYOUT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+          </select>
+        </label>
+        <label className="settings-row">
+          <div className="settings-row-copy">
+            <strong>主题预设</strong>
+          </div>
+          <select value={selectedThemePresetId} onChange={(event) => handleApplyThemePreset(event.target.value)}>
+            <option value="" disabled>选择主题预设</option>
+            {EXPORT_THEME_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+          </select>
+        </label>
       </div>
       <div className="export-format-preset-panel">
         <div className="export-format-preset-panel-head">
           <strong>主题色展示</strong>
-          <span>主题只覆盖颜色；章节页框关闭时仅表格使用主题色。</span>
+          <span>主题只覆盖颜色；装饰页眉页脚会同步改色条，章节页框关闭时经典文字仅表格用主题色。</span>
         </div>
         <div className="export-format-preset-list is-theme is-static">
           {EXPORT_THEME_PRESETS.map((preset) => (
@@ -770,6 +870,12 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             <option value="landscape">横向</option>
           </select>
         </label>
+        {config.page.orientation === 'landscape' && (
+          <label className="settings-row">
+            <div className="settings-row-copy"><strong>双栏布局</strong><span>横向纸张下正文分两栏排版，一级标题仍通栏显示。</span></div>
+            <AppSwitch checked={config.page.two_column} onCheckedChange={(checked) => updatePage({ two_column: checked })} />
+          </label>
+        )}
         <div className="settings-row">
           <div className="settings-row-copy"><strong>页边距</strong><span>上 / 右 / 下 / 左（厘米）</span></div>
           <div className="export-format-margin-grid">
@@ -779,6 +885,42 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             <input type="number" min={0} max={10} step={0.1} value={config.page.margin_left_cm} onChange={(event) => updatePage({ margin_left_cm: Number(event.target.value) })} placeholder="左" />
           </div>
         </div>
+      </div>
+    </>
+  );
+
+  const renderHeaderFooterSettings = () => {
+    const headerFooterStyle = resolveHeaderFooterStyle(config.page.header_footer_style);
+    const usesChromeBarColor = headerFooterStyle === 'band' || headerFooterStyle === 'footer-badge' || isHtmlHeaderFooterStyle(headerFooterStyle);
+    return (
+    <>
+      <div className="export-format-preset-panel is-header-footer">
+        <div className="export-format-preset-panel-head">
+          <strong>页眉页脚样式</strong>
+          <span>点选纸面结构，颜色由主题或下方色条色控制。</span>
+        </div>
+        <HeaderFooterStylePicker
+          value={headerFooterStyle}
+          bar={config.page.chrome_bar_color}
+          accent={config.page.chrome_accent_color}
+          onChange={handleApplyHeaderFooterStyle}
+        />
+      </div>
+      <div className="settings-list">
+        {isDecorativeHeaderFooterStyle(headerFooterStyle) && (
+          <>
+            {usesChromeBarColor && (
+              <label className="settings-row">
+                <div className="settings-row-copy"><strong>色条浅底</strong></div>
+                <input type="color" value={config.page.chrome_bar_color} onChange={(event) => updatePage({ chrome_bar_color: event.target.value })} />
+              </label>
+            )}
+            <label className="settings-row">
+              <div className="settings-row-copy"><strong>强调色</strong></div>
+              <input type="color" value={config.page.chrome_accent_color} onChange={(event) => updatePage({ chrome_accent_color: event.target.value })} />
+            </label>
+          </>
+        )}
         <label className="settings-row">
           <div className="settings-row-copy"><strong>页眉</strong></div>
           <AppSwitch checked={config.page.header_enabled} onCheckedChange={(checked) => updatePage({ header_enabled: checked })} />
@@ -789,6 +931,17 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
               <div className="settings-row-copy"><strong>页眉文本</strong></div>
               <input type="text" value={config.page.header_text} onChange={(event) => updatePage({ header_text: event.target.value })} />
             </label>
+            {headerFooterStyle === 'band' && (
+              <label className="settings-row">
+                <div className="settings-row-copy"><strong>左侧短标记</strong><span>最多 4 个字，可空</span></div>
+                <input
+                  type="text"
+                  maxLength={4}
+                  value={config.page.header_badge_text}
+                  onChange={(event) => updatePage({ header_badge_text: event.target.value.slice(0, 4) })}
+                />
+              </label>
+            )}
             <label className="settings-row">
               <div className="settings-row-copy"><strong>页眉字体</strong></div>
               <FontPicker value={config.page.header_font} options={fontOptions} onChange={(font) => updatePage({ header_font: font })} />
@@ -799,16 +952,50 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
                 {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
               </select>
             </label>
-            <label className="settings-row">
-              <div className="settings-row-copy"><strong>页眉对齐方式</strong></div>
-              <select value={config.page.header_alignment} onChange={(event) => updatePage({ header_alignment: event.target.value })}>
-                {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
-              </select>
-            </label>
-            <label className="settings-row">
-              <div className="settings-row-copy"><strong>页眉颜色</strong></div>
-              <input type="color" value={config.page.header_color} onChange={(event) => updatePage({ header_color: event.target.value })} />
-            </label>
+            {!isDecorativeHeaderFooterStyle(headerFooterStyle) && (
+              <label className="settings-row">
+                <div className="settings-row-copy"><strong>页眉对齐方式</strong></div>
+                <select value={config.page.header_alignment} onChange={(event) => updatePage({ header_alignment: event.target.value })}>
+                  {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
+                </select>
+              </label>
+            )}
+            {usesHeaderTextColor(headerFooterStyle) && (
+              <label className="settings-row">
+                <div className="settings-row-copy"><strong>页眉颜色</strong></div>
+                <input type="color" value={config.page.header_color} onChange={(event) => updatePage({ header_color: event.target.value })} />
+              </label>
+            )}
+            {/* 高度和文字位置只对装饰样式有意义：plain 的页眉文字走 Word 普通段落，
+                没有装饰带也没有浮动文本框，这两组量都没有落点。 */}
+            {isDecorativeHeaderFooterStyle(headerFooterStyle) && (
+              <>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页眉装饰带高度</strong><span>单位：厘米</span></div>
+                  <input
+                    type="number" min={HEADER_CHROME_HEIGHT_RANGE_CM.min} max={HEADER_CHROME_HEIGHT_RANGE_CM.max} step={0.05}
+                    value={config.page.header_chrome_height_cm ?? 0}
+                    onChange={(event) => updatePage({ header_chrome_height_cm: Number(event.target.value) })}
+                  />
+                </label>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页眉文字上边距</strong><span>文字区距装饰带上沿，单位：厘米</span></div>
+                  <input
+                    type="number" min={0} max={HEADER_CHROME_HEIGHT_RANGE_CM.max} step={0.05}
+                    value={config.page.header_text_top_cm ?? 0}
+                    onChange={(event) => updatePage({ header_text_top_cm: Number(event.target.value) })}
+                  />
+                </label>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页眉文字左边距</strong><span>文字区距纸张左沿，单位：厘米</span></div>
+                  <input
+                    type="number" min={0} max={20} step={0.05}
+                    value={config.page.header_text_left_cm ?? 0}
+                    onChange={(event) => updatePage({ header_text_left_cm: Number(event.target.value) })}
+                  />
+                </label>
+              </>
+            )}
           </>
         )}
         <label className="settings-row">
@@ -820,16 +1007,6 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             <label className="settings-row">
               <div className="settings-row-copy"><strong>页脚文本</strong></div>
               <input type="text" value={config.page.footer_text} onChange={(event) => updatePage({ footer_text: event.target.value })} />
-            </label>
-            <label className="settings-row">
-              <div className="settings-row-copy"><strong>页脚字体</strong></div>
-              <FontPicker value={config.page.footer_font} options={fontOptions} onChange={(font) => updatePage({ footer_font: font })} />
-            </label>
-            <label className="settings-row">
-              <div className="settings-row-copy"><strong>页脚字号</strong></div>
-              <select value={config.page.footer_size} onChange={(event) => updatePage({ footer_size: event.target.value })}>
-                {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-              </select>
             </label>
             <label className="settings-row">
               <div className="settings-row-copy"><strong>页脚对齐方式</strong></div>
@@ -844,10 +1021,50 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           </>
         )}
         {(config.page.footer_enabled || config.page.page_number_enabled) && (
-          <label className="settings-row">
-            <div className="settings-row-copy"><strong>距底边距离</strong><span>页脚或页码距页面底边，单位：厘米</span></div>
-            <input type="number" min={0} max={5} step={0.1} value={config.page.footer_distance_cm} onChange={(event) => updatePage({ footer_distance_cm: Number(event.target.value) })} />
-          </label>
+          <>
+            <label className="settings-row">
+              <div className="settings-row-copy"><strong>页脚及页码字体</strong></div>
+              <FontPicker value={config.page.footer_font} options={fontOptions} onChange={(font) => updatePage({ footer_font: font })} />
+            </label>
+            <label className="settings-row">
+              <div className="settings-row-copy"><strong>页脚及页码字号</strong></div>
+              <select value={config.page.footer_size} onChange={(event) => updatePage({ footer_size: event.target.value })}>
+                {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+            <label className="settings-row">
+              <div className="settings-row-copy"><strong>距底边距离</strong><span>页脚或页码距页面底边，单位：厘米</span></div>
+              <input type="number" min={0} max={5} step={0.1} value={config.page.footer_distance_cm} onChange={(event) => updatePage({ footer_distance_cm: Number(event.target.value) })} />
+            </label>
+            {isDecorativeHeaderFooterStyle(headerFooterStyle) && (
+              <>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页脚装饰带高度</strong><span>单位：厘米</span></div>
+                  <input
+                    type="number" min={FOOTER_CHROME_HEIGHT_RANGE_CM.min} max={FOOTER_CHROME_HEIGHT_RANGE_CM.max} step={0.05}
+                    value={config.page.footer_chrome_height_cm ?? 0}
+                    onChange={(event) => updatePage({ footer_chrome_height_cm: Number(event.target.value) })}
+                  />
+                </label>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页脚文字上边距</strong><span>文字区距装饰带上沿，单位：厘米</span></div>
+                  <input
+                    type="number" min={0} max={FOOTER_CHROME_HEIGHT_RANGE_CM.max} step={0.05}
+                    value={config.page.footer_text_top_cm ?? 0}
+                    onChange={(event) => updatePage({ footer_text_top_cm: Number(event.target.value) })}
+                  />
+                </label>
+                <label className="settings-row">
+                  <div className="settings-row-copy"><strong>页脚文字左边距</strong><span>文字区距纸张左沿；页码格右锚定，不跟随</span></div>
+                  <input
+                    type="number" min={0} max={20} step={0.05}
+                    value={config.page.footer_text_left_cm ?? 0}
+                    onChange={(event) => updatePage({ footer_text_left_cm: Number(event.target.value) })}
+                  />
+                </label>
+              </>
+            )}
+          </>
         )}
         <label className="settings-row">
           <div className="settings-row-copy"><strong>页码</strong><span>是否启用页码显示</span></div>
@@ -863,11 +1080,18 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
               <div className="settings-row-copy"><strong>页码起始值</strong></div>
               <input type="number" min={1} max={9999} step={1} value={config.page.page_number_start} onChange={(event) => updatePage({ page_number_start: Number(event.target.value) })} />
             </label>
+            <label className="settings-row">
+              <div className="settings-row-copy"><strong>页码补零</strong></div>
+              <select value={config.page.page_number_pad} onChange={(event) => updatePage({ page_number_pad: Number(event.target.value) as PageNumberPad })}>
+                {PAGE_NUMBER_PAD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
           </>
         )}
       </div>
     </>
-  );
+    );
+  };
 
   const renderHeadingSettings = () => (
     <>
@@ -877,14 +1101,14 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           <AppSwitch checked={config.heading_level1_page_break_before} onCheckedChange={(checked) => updateTemplate({ heading_level1_page_break_before: checked })} />
         </label>
         <label className="settings-row">
-          <div className="settings-row-copy"><strong>章节页框</strong><span>会导致导航窗格失效</span></div>
+          <div className="settings-row-copy"><strong>章节页框</strong><span>为章节内容显示连续页框，保留标题导航和正文分页</span></div>
           <AppSwitch checked={config.heading_border.enabled} onCheckedChange={(checked) => updateHeadingBorder({ enabled: checked })} />
         </label>
         {config.heading_border.enabled && (
           <>
             <label className="settings-row">
-              <div className="settings-row-copy"><strong>最小标题居左</strong><span>最小标题不显示序号，固定在内容左侧</span></div>
-              <AppSwitch checked={config.heading_border.min_heading_left_enabled} onCheckedChange={(checked) => updateHeadingBorder({ min_heading_left_enabled: checked })} />
+              <div className="settings-row-copy"><strong>标题也放入页框</strong><span>关闭后隐藏标题边框，保留标题底纹和导航</span></div>
+              <AppSwitch checked={config.heading_border.include_headings} onCheckedChange={(checked) => updateHeadingBorder({ include_headings: checked })} />
             </label>
             <label className="settings-row">
               <div className="settings-row-copy"><strong>页框颜色</strong></div>
@@ -892,8 +1116,8 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             </label>
             <div className="export-format-heading-cell-colors">
               <div className="export-format-heading-cell-colors-title">
-                <strong>标题单元格颜色</strong>
-                <span>仅作用于章节页框内对应级别标题所在的表格单元格。</span>
+                <strong>标题底纹颜色</strong>
+                <span>作用于对应级别的标题，不受标题边框开关影响。</span>
               </div>
               <div className="export-format-heading-cell-color-grid">
                 {HEADING_LEVEL_LABELS.map((label, index) => (
@@ -966,7 +1190,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
       </details>
       <div className="export-format-heading-list">
         {config.headings.map((heading, index) => {
-          const isExpanded = expandedHeadings.has(index);
+          const isExpanded = isHeadingExpanded(index);
           const numExample = headingNumberExample(index, heading);
           return (
             <div key={index} className={`export-format-heading-card${isExpanded ? ' is-expanded' : ''}`}>
@@ -1060,22 +1284,51 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
             {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
           </select>
         </label>
-        <label className="settings-row">
-          <div className="settings-row-copy"><strong>段前（磅）</strong></div>
-          <input type="number" min={0} max={100} step={1} value={config.body_text.spacing_before_pt} onChange={(event) => updateBodyText({ spacing_before_pt: Number(event.target.value) })} />
-        </label>
-        <label className="settings-row">
-          <div className="settings-row-copy"><strong>段后（磅）</strong></div>
-          <input type="number" min={0} max={100} step={1} value={config.body_text.spacing_after_pt} onChange={(event) => updateBodyText({ spacing_after_pt: Number(event.target.value) })} />
-        </label>
+        {(['before', 'after'] as const).map((position) => {
+          const label = position === 'before' ? '段前' : '段后';
+          const valueKey = `spacing_${position}` as const;
+          const unitKey = `spacing_${position}_unit` as const;
+          const maxSpacing = config.body_text[unitKey] === 'pt' ? 1584 : 132;
+          return (
+            <div className="settings-row" key={position}>
+              <div className="settings-row-copy"><strong>{label}</strong></div>
+              <div className="export-format-spacing-control">
+                <input aria-label={`${label}间距`} type="number" min={0} max={maxSpacing} step={0.1} value={config.body_text[valueKey]} onChange={(event) => updateBodyText({ [valueKey]: Math.min(maxSpacing, Math.max(0, Number(event.target.value))) })} />
+                <select aria-label={`${label}单位`} value={config.body_text[unitKey]} onChange={(event) => updateBodyText({
+                  [unitKey]: event.target.value as ParagraphSpacingUnit,
+                  [valueKey]: Math.min(config.body_text[valueKey], event.target.value === 'pt' ? 1584 : 132),
+                })}>
+                  <option value="lines">行</option>
+                  <option value="pt">磅</option>
+                </select>
+              </div>
+            </div>
+          );
+        })}
         <label className="settings-row">
           <div className="settings-row-copy"><strong>首行缩进（字符）</strong></div>
           <input type="number" min={0} max={10} step={0.5} value={config.body_text.first_line_indent_chars} onChange={(event) => updateBodyText({ first_line_indent_chars: Number(event.target.value) })} />
         </label>
         <label className="settings-row">
-          <div className="settings-row-copy"><strong>行间距（倍）</strong></div>
-          <input type="number" min={0.5} max={5} step={0.1} value={config.body_text.line_spacing_multiple} onChange={(event) => updateBodyText({ line_spacing_multiple: Number(event.target.value) })} />
+          <div className="settings-row-copy"><strong>行距</strong></div>
+          <select value={config.body_text.line_spacing_mode} onChange={(event) => {
+            const mode = event.target.value as BodyLineSpacingMode;
+            const wasPoints = ['at-least', 'exact'].includes(config.body_text.line_spacing_mode);
+            const usePoints = mode === 'at-least' || mode === 'exact';
+            updateBodyText({
+              line_spacing_mode: mode,
+              line_spacing_value: wasPoints === usePoints ? config.body_text.line_spacing_value : usePoints ? 12 : 1.2,
+            });
+          }}>
+            {BODY_LINE_SPACING_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
         </label>
+        {['at-least', 'exact', 'multiple'].includes(config.body_text.line_spacing_mode) && (
+          <label className="settings-row">
+            <div className="settings-row-copy"><strong>设置值（{config.body_text.line_spacing_mode === 'multiple' ? '倍' : '磅'}）</strong></div>
+            <input type="number" min={0.1} max={config.body_text.line_spacing_mode === 'multiple' ? 132 : 1584} step={config.body_text.line_spacing_mode === 'multiple' ? 0.01 : 0.1} value={config.body_text.line_spacing_value} onChange={(event) => updateBodyText({ line_spacing_value: Math.min(config.body_text.line_spacing_mode === 'multiple' ? 132 : 1584, Math.max(0.1, Number(event.target.value))) })} />
+          </label>
+        )}
         <label className="settings-row">
           <div className="settings-row-copy"><strong>无序列表符号</strong><span>Markdown “- 内容”的无序列表</span></div>
           <div className="export-bullet-library" role="radiogroup" aria-label="无序列表符号">
@@ -1111,37 +1364,46 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     </>
   );
 
-  const renderTableCellSettings = (title: string, cellKey: TableCellStyleKey) => {
+  const renderTableCellSettings = (title: string, example: string, cellKey: TableCellStyleKey) => {
     const cell = config.table[cellKey];
+    const isExpanded = isTableCardExpanded(cellKey);
     return (
-      <div className="export-template-subsection">
-        <strong>{title}</strong>
-        <div className="export-format-heading-grid">
-          <label>
-            <span>字体</span>
-            <FontPicker value={cell.font} options={fontOptions} onChange={(font) => updateTableCell(cellKey, { font })} />
-          </label>
-          <label>
-            <span>字号</span>
-            <select value={cell.size} onChange={(event) => updateTableCell(cellKey, { size: event.target.value })}>
-              {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>对齐方式</span>
-            <select value={cell.alignment} onChange={(event) => updateTableCell(cellKey, { alignment: event.target.value })}>
-              {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>文字颜色</span>
-            <input type="color" value={cell.text_color} onChange={(event) => updateTableCell(cellKey, { text_color: event.target.value })} />
-          </label>
-          <label>
-            <span>背景色</span>
-            <input type="color" value={cell.background_color} onChange={(event) => updateTableCell(cellKey, { background_color: event.target.value })} />
-          </label>
-        </div>
+      <div className={`export-format-heading-card${isExpanded ? ' is-expanded' : ''}`}>
+        <button type="button" className="export-format-heading-header" onClick={() => toggleTableCard(cellKey)}>
+          <span className="export-format-heading-label">{title}</span>
+          <span className="export-format-heading-example">{example}</span>
+          <span className={`export-format-heading-chevron${isExpanded ? ' is-open' : ''}`}>▸</span>
+        </button>
+        {isExpanded && (
+          <div className="export-format-heading-body">
+            <div className="export-format-heading-grid">
+              <label>
+                <span>字体</span>
+                <FontPicker value={cell.font} options={fontOptions} onChange={(font) => updateTableCell(cellKey, { font })} />
+              </label>
+              <label>
+                <span>字号</span>
+                <select value={cell.size} onChange={(event) => updateTableCell(cellKey, { size: event.target.value })}>
+                  {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>对齐方式</span>
+                <select value={cell.alignment} onChange={(event) => updateTableCell(cellKey, { alignment: event.target.value })}>
+                  {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>文字颜色</span>
+                <input type="color" value={cell.text_color} onChange={(event) => updateTableCell(cellKey, { text_color: event.target.value })} />
+              </label>
+              <label>
+                <span>背景色</span>
+                <input type="color" value={cell.background_color} onChange={(event) => updateTableCell(cellKey, { background_color: event.target.value })} />
+              </label>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -1166,9 +1428,48 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           <AppSwitch checked={config.table.full_width} onCheckedChange={(checked) => updateTable({ full_width: checked })} />
         </label>
       </div>
-      {renderTableCellSettings('首行', 'header_row')}
-      {renderTableCellSettings('首列', 'first_column')}
-      {renderTableCellSettings('其余单元格', 'body_cell')}
+      <div className="export-format-heading-list">
+        <div className={`export-format-heading-card${isTableCardExpanded('caption') ? ' is-expanded' : ''}`}>
+          <button type="button" className="export-format-heading-header" onClick={() => toggleTableCard('caption')}>
+            <span className="export-format-heading-label">表格标题</span>
+            <span className="export-format-heading-example" />
+            <span className={`export-format-heading-chevron${isTableCardExpanded('caption') ? ' is-open' : ''}`}>▸</span>
+          </button>
+          {isTableCardExpanded('caption') && (
+            <div className="export-format-heading-body">
+              <div className="export-format-heading-grid">
+                <label>
+                  <span>字体</span>
+                  <FontPicker value={config.table.caption_font} options={fontOptions} onChange={(font) => updateTable({ caption_font: font })} />
+                </label>
+                <label>
+                  <span>字号</span>
+                  <select value={config.table.caption_size} onChange={(event) => updateTable({ caption_size: event.target.value })}>
+                    {SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>对齐方式</span>
+                  <select value={config.table.caption_alignment} onChange={(event) => updateTable({ caption_alignment: event.target.value })}>
+                    {ALIGNMENT_OPTIONS.map((alignment) => <option key={alignment} value={alignment}>{alignment}</option>)}
+                  </select>
+                </label>
+                <label className="export-format-heading-switch">
+                  <span>加粗</span>
+                  <AppSwitch checked={config.table.caption_bold} onCheckedChange={(checked) => updateTable({ caption_bold: checked })} />
+                </label>
+                <label className="export-format-heading-switch">
+                  <span>斜体</span>
+                  <AppSwitch checked={config.table.caption_italic} onCheckedChange={(checked) => updateTable({ caption_italic: checked })} />
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+        {renderTableCellSettings('首行', '表头行', 'header_row')}
+        {renderTableCellSettings('首列', '首列', 'first_column')}
+        {renderTableCellSettings('其余单元格', '正文单元格', 'body_cell')}
+      </div>
     </>
   );
 
@@ -1227,6 +1528,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
   const renderActiveSettings = () => {
     if (activeTab === 'quick') return renderQuickSettings();
     if (activeTab === 'layout') return renderLayoutSettings();
+    if (activeTab === 'header-footer') return renderHeaderFooterSettings();
     if (activeTab === 'heading') return renderHeadingSettings();
     if (activeTab === 'body') return renderBodySettings();
     if (activeTab === 'table') return renderTableSettings();
@@ -1246,7 +1548,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           <div className="export-template-error-state">
             <strong>模板加载失败</strong>
             <span>{loadError}</span>
-            {onBack ? <button type="button" className="secondary-action" onClick={onBack}>返回我的模板</button> : null}
+            {onBack ? <button type="button" className="secondary-action" onClick={onBack}>{backLabel}</button> : null}
           </div>
         </div>
       </div>
@@ -1254,14 +1556,14 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
   }
 
   return (
-    <div className="settings-page export-template-page">
+    <div className="settings-page export-template-page" aria-busy={saving}>
       <div className="settings-page-scroll export-template-scroll">
-        <div className="settings-tab-shell" role="tablist" aria-label="模版设置分类">
+        <div className="document-switch-tabs generation-settings-tabs" role="tablist" aria-label="模版设置分类">
           {templateTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              className={`settings-tab ${activeTab === tab.id ? 'is-active' : ''}`}
+              className={`document-switch-tab generation-settings-tab${activeTab === tab.id ? ' is-active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
               role="tab"
               aria-selected={activeTab === tab.id}
@@ -1272,11 +1574,30 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
         </div>
         <div className="export-template-workspace">
           <section className="settings-page-section export-template-editor">
-            {renderActiveSettings()}
+            <fieldset className="export-template-settings-fieldset" disabled={readOnly}>
+              {renderActiveSettings()}
+            </fieldset>
           </section>
-          <TemplatePreview config={config} previewStyle={previewStyle} />
+          <TemplatePreviewView
+            preview={templatePreview}
+            fullscreen={previewFullscreenOpen}
+            onExitFullscreen={exitPreviewFullscreen}
+          />
         </div>
       </div>
+      <AppDialog
+        open={exportSourceOpen}
+        onOpenChange={setExportSourceOpen}
+        title="导出测试"
+        actions={(
+          <button className="secondary-action" type="button" onClick={() => setExportSourceOpen(false)}>取消</button>
+        )}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <button className="primary-action" type="button" onClick={() => { void handleExportTest('template'); }}>从模板导出</button>
+          <button className="primary-action" type="button" onClick={() => { void handleExportTest('bid'); }}>从投标文件导出</button>
+        </div>
+      </AppDialog>
       <Dialog.Root
         open={exportProgress.open}
         onOpenChange={(open) => {
@@ -1294,7 +1615,7 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
               <Dialog.Description>
                 {exportProgress.mermaidCount > 0
                   ? `本次包含 ${exportProgress.mermaidCount} 张 Mermaid 图，导出时会在本地转换成 Word 图片。`
-                  : '正在使用当前模板导出已生成的技术方案。'}
+                  : exportSource === 'template' ? '本次导出当前模板的预览样张。' : '本次使用当前模板导出已生成的投标文件。'}
               </Dialog.Description>
             </div>
             <div className="export-progress-body">
@@ -1317,334 +1638,358 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      <Dialog.Root open={previewFullscreenOpen} onOpenChange={setPreviewFullscreenOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="export-template-fullscreen-overlay" />
-          <Dialog.Content className="export-template-fullscreen-dialog">
-            <Dialog.Title className="export-template-fullscreen-title">全屏预览</Dialog.Title>
-            <Dialog.Description className="export-template-fullscreen-description">当前模板的全屏排版预览。</Dialog.Description>
-            <Dialog.Close className="export-template-fullscreen-close" type="button">退出全屏</Dialog.Close>
-            <TemplatePreview config={config} previewStyle={previewStyle} />
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
       <FloatingToolbar groups={toolbarGroups} label="模版设置保存工具条" />
     </div>
   );
 }
 
-export function TemplatePreview({ config, previewStyle }: { config: ExportFormatConfig; previewStyle: CSSProperties }) {
-  const previewStageRef = useRef<HTMLDivElement | null>(null);
-  const measureRef = useRef<HTMLDivElement | null>(null);
-  const [viewportSize, setViewportSize] = useState<PreviewViewportSize>({ width: 0, height: 0 });
-  const [paginationMetrics, setPaginationMetrics] = useState<PreviewPaginationMetrics>({ bodyHeight: 0, blockHeights: {} });
-  const paperSize = useMemo(() => getPreviewPaperSize(config), [config.page.orientation, config.page.paper_size]);
-  const footerText = config.page.footer_enabled ? config.page.footer_text.trim() : '';
-  const showFooterArea = Boolean(footerText) || config.page.page_number_enabled;
-  const previewScale = useMemo(() => {
-    const ratios = [1];
-    if (viewportSize.width > 0 && paperSize.widthPx > 0) {
-      ratios.push(viewportSize.width / paperSize.widthPx);
-    }
-
-    return Math.max(0.01, Math.min(...ratios));
-  }, [paperSize.widthPx, viewportSize.width]);
-  const scaleBoxStyle = useMemo<CSSProperties>(() => ({
-    width: `${paperSize.widthPx * previewScale}px`,
-  }), [paperSize.widthPx, previewScale]);
-  const pageShellStyle = useMemo<CSSProperties>(() => ({
-    width: `${paperSize.widthPx * previewScale}px`,
-    height: `${paperSize.heightPx * previewScale}px`,
-  }), [paperSize.heightPx, paperSize.widthPx, previewScale]);
-  const paperStyle = useMemo<CSSProperties>(() => ({
-    ...previewStyle,
-    transform: `scale(${previewScale})`,
-  }), [previewScale, previewStyle]);
-
-  const renderPageHeader = () => (
-    config.page.header_enabled && config.page.header_text.trim() ? (
-      <div className="export-template-page-header">
-        {config.page.header_text.trim()}
-      </div>
-    ) : null
-  );
-
-  const renderPageFooter = (pageIndex: number) => {
-    if (!showFooterArea) return null;
-    const pageNo = Math.max(1, Number(config.page.page_number_start) || 1) + pageIndex;
-    const pageNumberText = String(config.page.page_number_format || '第{page}页').replace('{page}', String(pageNo));
-
-    return (
-      <div className="export-template-page-footer" style={config.page.footer_enabled ? undefined : { textAlign: 'center' }}>
-        {footerText && <span>{footerText}</span>}
-        {config.page.page_number_enabled && <span>{pageNumberText}</span>}
-      </div>
-    );
-  };
+/**
+ * 可在各业务页面复用的全屏模板编辑器。
+ */
+export function ExportTemplateEditorDialog({
+  open,
+  mode,
+  templateId = null,
+  returnLabel,
+  onOpenChange,
+  onSaved,
+}: ExportTemplateEditorDialogProps) {
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
 
   useEffect(() => {
-    const node = previewStageRef.current;
-    if (!node) return;
-
-    const updateSize = (rect: DOMRectReadOnly) => {
-      const nextSize = {
-        width: Math.max(0, Math.floor(rect.width)),
-        height: Math.max(0, Math.floor(rect.height)),
-      };
-      setViewportSize((prev) => (
-        prev.width === nextSize.width && prev.height === nextSize.height ? prev : nextSize
-      ));
-    };
-
-    updateSize(node.getBoundingClientRect());
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) updateSize(entry.contentRect);
-    });
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, []);
-
-  const renderPreviewHeadingRow = (level: 1 | 2 | 3 | 4 | 5 | 6, id: string, title: string) => {
-    const HeadingTag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
-    return (
-      <div className={`export-template-chapter-heading-row is-level-${level}`}>
-        <HeadingTag>{headingPreviewTitle(config, level, id, title)}</HeadingTag>
-      </div>
-    );
-  };
-
-  const renderPreviewContentRow = (content: ReactNode) => (
-    <div className="export-template-chapter-content-row">{content}</div>
-  );
-
-  const renderPreviewLeafRow = (level: 1 | 2 | 3 | 4 | 5 | 6, id: string, title: string, content: ReactNode) => {
-    if (!config.heading_border.min_heading_left_enabled) {
-      return (
-        <>
-          {renderPreviewHeadingRow(level, id, title)}
-          {renderPreviewContentRow(content)}
-        </>
-      );
+    if (!open) {
+      setDirty(false);
+      setSaving(false);
+      setDiscardConfirmOpen(false);
     }
+  }, [open]);
 
-    const HeadingTag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
-    return (
-      <div className={`export-template-chapter-leaf-row is-level-${level}`}>
-        <div className="export-template-chapter-leaf-title">
-          <HeadingTag>{title}</HeadingTag>
-        </div>
-        <div className="export-template-chapter-leaf-content">{content}</div>
-      </div>
-    );
-  };
-
-  const previewBlocks = useMemo<PreviewBlock[]>(() => {
-    const serviceTable = (
-      <table>
-        <thead>
-          <tr>
-            <th>阶段</th>
-            <th>内容</th>
-            <th>输出</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>准备</td>
-            <td>资料梳理与计划确认</td>
-            <td>实施计划</td>
-          </tr>
-          <tr>
-            <td>执行</td>
-            <td>方案落地与质量检查</td>
-            <td>交付成果</td>
-          </tr>
-        </tbody>
-      </table>
-    );
-    const processFigure = (
-      <figure className="export-template-image-figure">
-        <div className="export-template-image-placeholder">图片预览</div>
-        <figcaption>图 1 项目实施流程示意</figcaption>
-      </figure>
-    );
-
-    if (config.heading_border.enabled) {
-      const frameBlock = (id: string, content: ReactNode, fallbackHeight: number, startsNewPage = false): PreviewBlock => ({
-        id,
-        fallbackHeight,
-        startsNewPage,
-        content: <section className="export-template-chapter-frame is-fragment">{content}</section>,
-      });
-
-      return [
-        frameBlock('frame-1-h1', renderPreviewHeadingRow(1, '1', '项目实施方案'), 58),
-        frameBlock('frame-1-intro', renderPreviewContentRow(<p>本节展示模板设置在导出文档中的基础排版效果，包括页面边距、正文样式、标题层级和表格展示。</p>), 74),
-        frameBlock('frame-1-h2', renderPreviewHeadingRow(2, '1.1', '总体目标'), 46),
-        frameBlock('frame-1-goal', renderPreviewContentRow(<p>围绕项目建设目标，结合招标文件要求，形成可执行、可检查、可交付的技术实施方案。</p>), 74),
-        frameBlock('frame-1-h3', renderPreviewHeadingRow(3, '1.1.1', '实施安排'), 42),
-        frameBlock('frame-1-plan', renderPreviewContentRow(<p>项目团队将按阶段推进需求确认、方案设计、系统实施、联调测试和验收交付等工作。</p>), 74),
-        frameBlock('frame-1-h4', renderPreviewHeadingRow(4, '1.1.1.1', '需求确认'), 38),
-        frameBlock('frame-1-confirm', renderPreviewContentRow(<p>明确业务边界、交付范围和关键验收指标，形成统一的实施依据。</p>), 74),
-        frameBlock('frame-1-h5', renderPreviewHeadingRow(5, '1.1.1.1.1', '资料收集'), 34),
-        frameBlock('frame-1-collect', renderPreviewContentRow(<p>整理招标文件、现状资料和接口清单，支撑后续方案细化。</p>), 74),
-        frameBlock('frame-1-leaf-1', renderPreviewLeafRow(6, '1.1.1.1.1.1', '记录归档', <>
-                <p>对确认过程、会议纪要和问题闭环结果进行留痕归档。</p>
-                <ul>
-                  <li>建立项目启动、过程检查和验收交付的闭环机制。</li>
-                  <li>按周同步风险、进度和资源需求，确保实施节奏可控。</li>
-                </ul>
-                <ol>
-                  <li>完成资料接收和范围确认。</li>
-                  <li>完成过程复核和成果归档。</li>
-                </ol>
-                {processFigure}
-              </>), 250),
-        frameBlock('frame-1-leaf-2', renderPreviewLeafRow(6, '1.1.1.1.1.2', '过程复核', <p>对关键节点的确认材料、实施记录和交付清单进行复核，确保过程资料完整一致。</p>), 82),
-        frameBlock('frame-1-leaf-3', renderPreviewLeafRow(6, '1.1.1.1.1.3', '资料归档', <p>按项目阶段整理归档目录、会议纪要、问题闭环记录和验收支撑材料。</p>), 82),
-        frameBlock('frame-2-h1', renderPreviewHeadingRow(1, '2', '运维保障方案'), 58, config.heading_level1_page_break_before),
-        frameBlock('frame-2-intro', renderPreviewContentRow(<p>本章展示第二个一级目录，用于预览一级标题另起页、页眉页脚延续和章节页框跨页排版效果。</p>), 74),
-        frameBlock('frame-2-leaf-1', renderPreviewLeafRow(2, '2.1', '监控中心值守', <p>值守团队按照 7×24 小时轮班机制开展监控、告警确认、事件记录和问题派单。</p>), 82),
-        frameBlock('frame-2-leaf-2', renderPreviewLeafRow(2, '2.2', '故障响应机制', <><p>发现系统异常后，按照分级响应流程定位影响范围，组织软件、网络和硬件人员协同处理。</p>{serviceTable}</>), 210),
-        frameBlock('frame-2-leaf-3', renderPreviewLeafRow(2, '2.3', '巡检维护计划', <p>定期检查系统运行状态、设备资源和关键链路，形成巡检记录和问题整改清单。</p>), 82),
-        frameBlock('frame-2-leaf-4', renderPreviewLeafRow(2, '2.4', '质量保障措施', <p>通过交付检查、过程复盘和服务评价，持续优化运维质量和响应效率。</p>), 82),
-      ];
+  const requestClose = useCallback(() => {
+    if (saving) return;
+    if (dirty) {
+      setDiscardConfirmOpen(true);
+      return;
     }
+    onOpenChange(false);
+  }, [dirty, onOpenChange, saving]);
 
-    return [
-      { id: 'h1-1', fallbackHeight: 64, content: <h1>{headingPreviewTitle(config, 1, '1', '项目实施方案')}</h1> },
-      { id: 'p-1', fallbackHeight: 64, content: <p>本节展示模板设置在导出文档中的基础排版效果，包括页面边距、正文样式、标题层级和表格展示。</p> },
-      { id: 'h2-1', fallbackHeight: 46, content: <h2>{headingPreviewTitle(config, 2, '1.1', '总体目标')}</h2> },
-      { id: 'p-2', fallbackHeight: 64, content: <p>围绕项目建设目标，结合招标文件要求，形成可执行、可检查、可交付的技术实施方案。</p> },
-      { id: 'h3-1', fallbackHeight: 40, content: <h3>{headingPreviewTitle(config, 3, '1.1.1', '实施安排')}</h3> },
-      { id: 'p-3', fallbackHeight: 64, content: <p>项目团队将按阶段推进需求确认、方案设计、系统实施、联调测试和验收交付等工作。</p> },
-      { id: 'h4-1', fallbackHeight: 36, content: <h4>{headingPreviewTitle(config, 4, '1.1.1.1', '需求确认')}</h4> },
-      { id: 'p-4', fallbackHeight: 64, content: <p>明确业务边界、交付范围和关键验收指标，形成统一的实施依据。</p> },
-      { id: 'h5-1', fallbackHeight: 32, content: <h5>{headingPreviewTitle(config, 5, '1.1.1.1.1', '资料收集')}</h5> },
-      { id: 'p-5', fallbackHeight: 64, content: <p>整理招标文件、现状资料和接口清单，支撑后续方案细化。</p> },
-      { id: 'h6-1', fallbackHeight: 30, content: <h6>{headingPreviewTitle(config, 6, '1.1.1.1.1.1', '记录归档')}</h6> },
-      { id: 'h6-2', fallbackHeight: 30, content: <h6>{headingPreviewTitle(config, 6, '1.1.1.1.1.2', '过程复核')}</h6> },
-      { id: 'p-5-2', fallbackHeight: 54, content: <p>对关键节点的确认材料、实施记录和交付清单进行复核，确保过程资料完整一致。</p> },
-      { id: 'h6-3', fallbackHeight: 30, content: <h6>{headingPreviewTitle(config, 6, '1.1.1.1.1.3', '资料归档')}</h6> },
-      { id: 'p-5-3', fallbackHeight: 54, content: <p>按项目阶段整理归档目录、会议纪要、问题闭环记录和验收支撑材料。</p> },
-      { id: 'list-1', fallbackHeight: 110, content: <ul><li>建立项目启动、过程检查和验收交付的闭环机制。</li><li>按周同步风险、进度和资源需求，确保实施节奏可控。</li><li>保留关键过程记录，便于后续审查和复盘。</li></ul> },
-      { id: 'ordered-list-1', fallbackHeight: 82, content: <ol><li>完成资料接收和范围确认。</li><li>完成过程复核和成果归档。</li><li>完成验收支撑材料提交。</li></ol> },
-      { id: 'figure-1', fallbackHeight: 150, content: processFigure },
-      { id: 'table-1', fallbackHeight: 130, content: serviceTable },
-      { id: 'h1-2', startsNewPage: config.heading_level1_page_break_before, fallbackHeight: 64, content: <h1>{headingPreviewTitle(config, 1, '2', '运维保障方案')}</h1> },
-      { id: 'p-6', fallbackHeight: 82, content: <p>本章展示第二个一级目录，用于预览一级标题另起页、页眉页脚延续和多页排版效果。</p> },
-      { id: 'h2-2', fallbackHeight: 46, content: <h2>{headingPreviewTitle(config, 2, '2.1', '监控中心值守')}</h2> },
-      { id: 'p-7', fallbackHeight: 90, content: <p>值守团队按照 7×24 小时轮班机制开展监控、告警确认、事件记录和问题派单，确保关键系统异常能够及时发现、及时响应、及时闭环。</p> },
-      { id: 'h2-3', fallbackHeight: 46, content: <h2>{headingPreviewTitle(config, 2, '2.2', '故障响应机制')}</h2> },
-      { id: 'p-8', fallbackHeight: 90, content: <p>发现系统异常后，按照分级响应流程定位影响范围，组织软件、网络和硬件人员协同处理，并保留处理过程记录。</p> },
-      { id: 'h2-4', fallbackHeight: 46, content: <h2>{headingPreviewTitle(config, 2, '2.3', '巡检维护计划')}</h2> },
-      { id: 'p-9', fallbackHeight: 72, content: <p>定期检查系统运行状态、设备资源和关键链路，形成巡检记录和问题整改清单。</p> },
-      { id: 'h2-5', fallbackHeight: 46, content: <h2>{headingPreviewTitle(config, 2, '2.4', '质量保障措施')}</h2> },
-      { id: 'p-10', fallbackHeight: 72, content: <p>通过交付检查、过程复盘和服务评价，持续优化运维质量和响应效率。</p> },
-      { id: 'table-2', fallbackHeight: 130, content: serviceTable },
-    ];
-  }, [config]);
-
-  useEffect(() => {
-    const node = measureRef.current;
-    if (!node) return;
-
-    let frameId = 0;
-    const measure = () => {
-      const body = node.querySelector<HTMLElement>('[data-preview-measure-body="true"]');
-      if (!body) return;
-
-      const blockHeights: Record<string, number> = {};
-      node.querySelectorAll<HTMLElement>('[data-preview-block-id]').forEach((block) => {
-        const blockId = block.dataset.previewBlockId;
-        if (blockId) blockHeights[blockId] = Math.ceil(block.getBoundingClientRect().height);
-      });
-
-      const bodyHeight = Math.floor(body.getBoundingClientRect().height);
-      setPaginationMetrics((prev) => (
-        prev.bodyHeight === bodyHeight && arePreviewBlockHeightsEqual(prev.blockHeights, blockHeights)
-          ? prev
-          : { bodyHeight, blockHeights }
-      ));
-    };
-    const scheduleMeasure = () => {
-      cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(measure);
-    };
-
-    scheduleMeasure();
-    const observer = new ResizeObserver(scheduleMeasure);
-    observer.observe(node);
-    node.querySelectorAll<HTMLElement>('[data-preview-block-id]').forEach((block) => observer.observe(block));
-
-    return () => {
-      cancelAnimationFrame(frameId);
-      observer.disconnect();
-    };
-  }, [previewBlocks, previewStyle, showFooterArea]);
-
-  const previewPages = useMemo(() => {
-    const bodyHeight = paginationMetrics.bodyHeight || Math.max(240, Math.round(paperSize.heightPx * 0.68));
-    const pages: PreviewBlock[][] = [[]];
-    let usedHeight = 0;
-
-    previewBlocks.forEach((block) => {
-      const measuredHeight = paginationMetrics.blockHeights[block.id] || block.fallbackHeight;
-      const blockHeight = Math.max(1, Math.ceil(measuredHeight));
-      const currentPage = pages[pages.length - 1];
-      const shouldStartNewPage = (block.startsNewPage && currentPage.length > 0)
-        || (currentPage.length > 0 && usedHeight + blockHeight > bodyHeight);
-
-      if (shouldStartNewPage) {
-        pages.push([]);
-        usedHeight = 0;
-      }
-
-      pages[pages.length - 1].push(block);
-      usedHeight += Math.min(blockHeight, bodyHeight);
-    });
-
-    return pages.filter((page) => page.length > 0);
-  }, [paginationMetrics.blockHeights, paginationMetrics.bodyHeight, paperSize.heightPx, previewBlocks]);
-
-  const renderPreviewBlock = (block: PreviewBlock, measure = false) => (
-    <div key={block.id} className="export-template-preview-block" data-preview-block-id={measure ? block.id : undefined}>
-      {block.content}
-    </div>
-  );
+  const discardAndClose = useCallback(() => {
+    setDiscardConfirmOpen(false);
+    setDirty(false);
+    onOpenChange(false);
+  }, [onOpenChange]);
 
   return (
-    <aside className="settings-page-section export-template-preview-panel" aria-label="模板预览">
-      <div className="export-template-preview-scroll" ref={previewStageRef}>
-        <div className="export-template-preview-scale-box" style={scaleBoxStyle}>
-          <div className="export-template-preview-page-stack">
-            {previewPages.map((page, pageIndex) => (
-              <div key={pageIndex} className="export-template-preview-page-shell" style={pageShellStyle}>
-                <div className="export-format-paper export-format-preview-content export-template-preview-paper" style={paperStyle}>
-                  {renderPageHeader()}
-                  <div className="export-template-page-body">
-                    {page.map((block) => renderPreviewBlock(block))}
-                  </div>
-                  {renderPageFooter(pageIndex)}
-                </div>
-              </div>
-            ))}
+    <>
+      <Dialog.Root
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) requestClose();
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="export-template-editor-overlay" />
+          <Dialog.Content
+            className="export-template-editor-dialog"
+            onPointerDownOutside={(event) => event.preventDefault()}
+          >
+            <Dialog.Title className="export-template-fullscreen-title">
+              {mode === 'view' ? '查看模板' : mode === 'edit' ? '编辑模板' : '新建模板'}
+            </Dialog.Title>
+            <Dialog.Description className="export-template-fullscreen-description">
+              {mode === 'view'
+                ? '查看该模板的版面、页眉页脚、标题、正文、表格和图片样式。'
+                : '配置模板的版面、页眉页脚、标题、正文、表格和图片样式。'}
+            </Dialog.Description>
+            <ExportFormatPage
+              mode={mode}
+              templateId={templateId}
+              onBack={requestClose}
+              onSaved={onSaved}
+              onDirtyChange={setDirty}
+              onSavingChange={setSaving}
+              backLabel={returnLabel}
+            />
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <AppDialog
+        open={discardConfirmOpen}
+        onOpenChange={setDiscardConfirmOpen}
+        kicker="未保存修改"
+        title="放弃本次模板修改？"
+        description="关闭后，本次尚未保存的模板设置将丢失。"
+        actions={(
+          <>
+            <button type="button" className="secondary-action" onClick={() => setDiscardConfirmOpen(false)}>继续编辑</button>
+            <button type="button" className="danger-action" onClick={discardAndClose}>放弃修改</button>
+          </>
+        )}
+      />
+    </>
+  );
+}
+
+/**
+ * 重新生成整篇样张约 140ms，就地改样式只要 10–40ms，两条路的去抖分开定。
+ * 去抖必须长于对应那条路的一次刷新，否则拖动时请求会一直排队。
+ */
+const PREVIEW_REBUILD_DELAY_MS = 400;
+const PREVIEW_INCREMENT_DELAY_MS = 120;
+
+/** 编辑器暴露给预览逻辑的就地更新能力。 */
+interface PreviewEditorHandle {
+  /** 就地应用一份增量计划；编辑器未就绪或计划落不了地时返回 false，由调用方退回重新生成。 */
+  apply: (plan: Extract<PreviewPlan, { kind: 'incremental' }>) => boolean;
+}
+
+interface TemplatePreviewState {
+  /** 样张内容指纹；只有它变化才需要让编辑器重新打开文档。 */
+  documentKey: string;
+  document: Uint8Array | null;
+  /** 正文段落角色，按文档顺序，与编辑器枚举出的段落一一对应。 */
+  roles: string[];
+  loading: boolean;
+  error: string;
+  editorHandleRef: MutableRefObject<PreviewEditorHandle | null>;
+}
+
+/** 生成 Word 样张，忽略不参与排版的模板名称。 */
+function useTemplatePreview(config: ExportFormatConfig, enabled = true): TemplatePreviewState {
+  const [preview, setPreview] = useState<{ key: string; document: Uint8Array | null; roles: string[] }>(
+    { key: '', document: null, roles: [] },
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  // 用序列化后的配置做指纹：值没变就不该重新生成，哪怕上层换了新对象。
+  const requestKey = useMemo(() => JSON.stringify({ ...config, template_name: '' }), [config]);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const runningRef = useRef(false);
+  const renderedKeyRef = useRef('');
+  const mountedRef = useRef(true);
+  const editorHandleRef = useRef<PreviewEditorHandle | null>(null);
+  // 编辑器此刻真正呈现的那份配置；增量是相对它算的，不是相对上一次请求。
+  const appliedConfigRef = useRef<ExportFormatConfig | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    // 上一份样张还在生成时不排队；它结束后会把 attempt 加一，届时再按最新配置重新判断。
+    if (runningRef.current) return undefined;
+    if (requestKey === renderedKeyRef.current) return undefined;
+
+    const plan = planPreviewUpdate(appliedConfigRef.current, config, preview.roles);
+    if (plan.kind === 'none') {
+      renderedKeyRef.current = requestKey;
+      appliedConfigRef.current = config;
+      return undefined;
+    }
+
+    const incremental = plan.kind === 'incremental';
+    const delay = incremental
+      ? PREVIEW_INCREMENT_DELAY_MS
+      : (renderedKeyRef.current ? PREVIEW_REBUILD_DELAY_MS : 0);
+
+    const timer = window.setTimeout(() => {
+      const target = configRef.current;
+      if (plan.kind === 'incremental' && editorHandleRef.current?.apply(plan)) {
+        renderedKeyRef.current = requestKey;
+        appliedConfigRef.current = target;
+        setError('');
+        return;
+      }
+
+      runningRef.current = true;
+      setLoading(true);
+      void (async () => {
+        try {
+          const result = await window.yibiao.templates.renderPreview(
+            DOCUMENT_DISPLAY_TEMPLATE_HTML,
+            { ...target, template_name: '' },
+          );
+          renderedKeyRef.current = requestKey;
+          appliedConfigRef.current = target;
+          if (!mountedRef.current) return;
+          setError('');
+          // 字节没变就保持同一份引用，避免编辑器为一模一样的样张重开一次文档。
+          setPreview((current) => (current.key === result.key
+            ? current
+            : { key: result.key, document: new Uint8Array(result.bytes), roles: result.roles || [] }));
+        } catch (reason) {
+          // 同一份配置不重试，等下一次配置变化再说，否则会陷入失败重试循环。
+          renderedKeyRef.current = requestKey;
+          if (!mountedRef.current) return;
+          setError(reason instanceof Error ? reason.message : 'Word 样张生成失败');
+        } finally {
+          runningRef.current = false;
+          if (mountedRef.current) {
+            setLoading(false);
+            setAttempt((value) => value + 1);
+          }
+        }
+      })();
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+    // config 仅用于算增量计划，它的变化已经由 requestKey 表达。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, requestKey, attempt, preview.roles]);
+
+  return {
+    documentKey: preview.key,
+    document: preview.document,
+    roles: preview.roles,
+    loading,
+    error,
+    editorHandleRef,
+  };
+}
+
+interface TemplatePreviewViewProps {
+  preview: TemplatePreviewState;
+  fullscreen?: boolean;
+  onExitFullscreen?: () => void;
+}
+
+interface AutomationResultEntry {
+  value?: { handle?: unknown; handles?: unknown[] };
+}
+
+type AutomationEditor = Parameters<typeof createBrowserAutomationHost>[0];
+
+/**
+ * 显示已生成的 Word 样张。
+ *
+ * 编辑器实例只挂载一次，样张更新走 load()：换 document 属性会整实例重挂载，
+ * 代价是重新解析、重新分页，还会把滚动位置弹回顶部。
+ *
+ * 挂在 edit 模式上，是因为 automation 的写操作在只读文档上会被拒；样张不该被人改动，
+ * 所以画布用 CSS 挡掉指针事件，既进不去光标，也不影响外层滚动。
+ */
+function TemplatePreviewView({ preview, fullscreen = false, onExitFullscreen }: TemplatePreviewViewProps) {
+  const { documentKey, document, roles, loading, error, editorHandleRef } = preview;
+  const editorRef = useRef<DocxEditorRef | null>(null);
+  const readyRef = useRef(false);
+  const loadedKeyRef = useRef('');
+  const hostRef = useRef<ReturnType<typeof createBrowserAutomationHost> | null>(null);
+  const handlesRef = useRef<unknown[]>([]);
+
+  /** 文档换了就要重新取句柄：上一份文档的句柄在新文档里没有意义。 */
+  const rebindHost = useCallback(() => {
+    hostRef.current = null;
+    handlesRef.current = [];
+    const editor = editorRef.current?.getEditor?.();
+    if (!editor) return;
+    try {
+      // Root 交给 onReady/getEditor 的就是它自己创建的实例，automation 宿主要的也是它；
+      // 包里把两个类型分开导出，这里按运行时事实收窄。
+      const host = createBrowserAutomationHost(editor as unknown as AutomationEditor);
+      const first = host.execute({ operations: [{ op: 'getDocument' }] } as never);
+      const documentHandle = (first.results[0] as AutomationResultEntry)?.value?.handle;
+      if (!documentHandle) return;
+      const second = host.execute({ operations: [{ op: 'getBody', document: documentHandle }] } as never);
+      const body = (second.results[0] as AutomationResultEntry)?.value?.handle;
+      if (!body) return;
+      const third = host.execute({ operations: [{ op: 'getParagraphs', body }] } as never);
+      hostRef.current = host;
+      handlesRef.current = (third.results[0] as AutomationResultEntry)?.value?.handles ?? [];
+    } catch {
+      hostRef.current = null;
+    }
+  }, []);
+
+  const applyDocument = useCallback(() => {
+    if (!readyRef.current || !document || loadedKeyRef.current === documentKey) return;
+    loadedKeyRef.current = documentKey;
+    editorRef.current?.load(document);
+    // load 是排程的，句柄要等新文档真正打开之后再取。
+    window.setTimeout(rebindHost, 0);
+  }, [document, documentKey, rebindHost]);
+
+  useEffect(() => { applyDocument(); }, [applyDocument]);
+
+  useEffect(() => {
+    editorHandleRef.current = {
+      apply: (plan) => {
+        const host = hostRef.current;
+        const paragraphs = handlesRef.current;
+        if (!host || paragraphs.length === 0) return false;
+        // 角色表和编辑器枚举出的段落必须一一对应，对不上说明两边不是同一份文档。
+        if (paragraphs.length !== roles.length) return false;
+
+        const operations: unknown[] = [];
+        for (const heading of plan.headings) {
+          const role = `heading${heading.level}`;
+          for (let index = 0; index < roles.length; index += 1) {
+            if (roles[index] !== role) continue;
+            const paragraph = paragraphs[index];
+            operations.push({ op: 'setFont', span: { paragraph }, font: heading.font });
+            operations.push({ op: 'setParagraphFormat', paragraph: { paragraph }, format: heading.format });
+          }
+        }
+        if (operations.length === 0) return false;
+
+        try {
+          // 整批是一个事务、一次重排、一个撤销步；任一条被拒就整批不写。
+          return host.execute({ operations } as never).ok === true;
+        } catch {
+          return false;
+        }
+      },
+    };
+    return () => { editorHandleRef.current = null; };
+  }, [editorHandleRef, roles]);
+
+  useEffect(() => {
+    if (!fullscreen || !onExitFullscreen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onExitFullscreen();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [fullscreen, onExitFullscreen]);
+
+  return (
+    <aside
+      className={`settings-page-section export-template-preview-panel${fullscreen ? ' is-fullscreen' : ''}`}
+      aria-label="模板预览"
+    >
+      {fullscreen && onExitFullscreen && (
+        <button type="button" className="export-template-fullscreen-close" onClick={onExitFullscreen}>退出全屏</button>
+      )}
+      <div className="export-template-preview-scroll">
+        <DocxEditor
+          ref={editorRef}
+          className="export-template-docx-editor"
+          mode="edit"
+          chrome={false}
+          navigation={false}
+          rulers={false}
+          onReady={() => { readyRef.current = true; applyDocument(); }}
+        />
+        {!document && (
+          <div className="export-template-preview-empty" role="status">
+            {error || '正在生成 Word 样张…'}
           </div>
-        </div>
-      </div>
-      <div className="export-template-preview-measure" ref={measureRef} aria-hidden="true">
-        <div className="export-format-paper export-format-preview-content export-template-preview-paper" style={previewStyle}>
-          {renderPageHeader()}
-          <div className="export-template-page-body" data-preview-measure-body="true">
-            {previewBlocks.map((block) => renderPreviewBlock(block, true))}
-          </div>
-          {renderPageFooter(0)}
-        </div>
+        )}
+        {document && loading && <div className="export-template-preview-loading" role="status">正在更新 Word 样张…</div>}
+        {document && error && <div className="export-template-preview-error" role="alert">{error}</div>}
       </div>
     </aside>
   );
 }
 
-export default ExportFormatPage;
+/** 可独立使用的 Word 模板预览。 */
+export function TemplatePreview({ config }: { config: ExportFormatConfig }) {
+  const preview = useTemplatePreview(config);
+  return <TemplatePreviewView preview={preview} />;
+}

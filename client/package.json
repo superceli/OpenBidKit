@@ -1,18 +1,21 @@
 {
   "name": "yibiao-client",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "创合投标工具箱独立桌面客户端",
+  "description": "易标投标工具箱独立桌面客户端",
   "author": "mark",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "tsc --noEmit && vite build",
+    "check:docx": "node scripts/check-docx-table-pagination.cjs && node electron/services/exportService.cjs",
+    "check:chrome": "node scripts/check-chrome-layout.mjs",
+    "check": "npm run check:docx && npm run check:chrome",
     "dist": "npm run build && node scripts/prepare-openxml-helper.cjs && electron-builder",
     "dist:win": "npm run build && node scripts/prepare-openxml-helper.cjs --platform win32 --arch x64 && electron-builder --win",
     "dist:mac": "npm run build && node scripts/prepare-openxml-helper.cjs --platform darwin --arch all && electron-builder --mac",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "patch-package --error-on-fail --error-on-warn && electron-builder install-app-deps",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "generate-build-attestation": "node scripts/generate-build-attestation.cjs",
     "prepare-agent-tools": "node scripts/prepare-agent-tools.cjs",
@@ -23,7 +26,7 @@
   },
   "build": {
     "appId": "com.yibiao.openbidkit",
-    "productName": "创合投标工具箱",
+    "productName": "易标投标工具箱",
     "copyright": "Copyright © 2026 mark",
     "asar": true,
     "directories": {
@@ -38,8 +41,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "superceli",
-        "repo": "OpenBidKit",
+        "owner": "FB208",
+        "repo": "OpenBidKit_Yibiao",
         "releaseType": "release"
       }
     ],
@@ -152,9 +155,12 @@
     "artifactName": "Yibiao-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
+    "@docx-editor.dev/core": "2.15.0",
+    "@docx-editor.dev/react": "2.15.0",
     "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-separator": "^1.1.7",
     "@radix-ui/react-switch": "^1.2.6",
@@ -195,9 +201,10 @@
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
-    "electron": "^41.10.7",
+    "electron": "^41.10.2",
     "electron-builder": "^26.8.1",
     "js-yaml": "^4.1.1",
+    "patch-package": "^8.0.1",
     "typescript": "^5.9.2",
     "vite": "^7.1.7",
     "wait-on": "^8.0.4"

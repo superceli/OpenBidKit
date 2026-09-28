@@ -7,7 +7,8 @@ import type {
   TableCellStyleConfig,
   TableStyleConfig,
 } from '../../shared/types/exportFormat';
-import { DEFAULT_EXPORT_FORMAT } from '../../shared/types/exportFormat';
+import { DEFAULT_EXPORT_FORMAT, isDecorativeHeaderFooterStyle } from '../../shared/types/exportFormat';
+import { resolveChromeColors } from '../../shared/ui/HeaderFooterChrome';
 
 type HeadingLayoutStyle = Omit<HeadingStyleConfig, 'text_color'>;
 type TableCellLayoutStyle = Pick<TableCellStyleConfig, 'font' | 'size' | 'alignment'>;
@@ -16,6 +17,7 @@ type LayoutPageSettings = Pick<
   PageSetupConfig,
   | 'paper_size'
   | 'orientation'
+  | 'two_column'
   | 'first_page_different'
   | 'margin_top_cm'
   | 'margin_bottom_cm'
@@ -33,7 +35,6 @@ interface ExportLayoutPreset {
   page: LayoutPageSettings;
   heading_level1_page_break_before: boolean;
   heading_border_enabled: boolean;
-  heading_border_min_heading_left_enabled: boolean;
   headings: HeadingLayoutStyle[];
   body_text: BodyTextStyleConfig;
   table: Pick<TableStyleConfig, 'border_width' | 'cell_padding_pt' | 'full_width'> & {
@@ -53,6 +54,8 @@ interface ExportThemePreset {
   heading_border_color: string;
   heading_border_cell_colors: string[];
   header_footer_color: string;
+  chrome_bar_color: string;
+  chrome_accent_color: string;
   table_border_color: string;
   table_header_text_color: string;
   table_header_background_color: string;
@@ -102,6 +105,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'portrait',
+      two_column: false,
       first_page_different: false,
       margin_top_cm: 2,
       margin_bottom_cm: 2,
@@ -113,7 +117,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: false,
     heading_border_enabled: false,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('黑体', '小二', '居中对齐', false, 10, 10),
       heading('黑体', '四号', '两端对齐', false, 10, 10),
@@ -126,10 +129,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '宋体',
       size: '小四',
       alignment: '左对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 0,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 0,
+      spacing_after_unit: 'lines',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.2,
+      line_spacing_mode: 'multiple',
+      line_spacing_value: 1.2,
       list_style: 'disc',
       ordered_list_style: 'decimal-dot',
       list_indent_chars: 2,
@@ -159,6 +165,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'portrait',
+      two_column: false,
       first_page_different: true,
       margin_top_cm: 2.4,
       margin_bottom_cm: 2.2,
@@ -170,7 +177,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: true,
     heading_border_enabled: false,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('黑体', '二号', '居中对齐', true, 18, 14, 1.1),
       heading('黑体', '三号', '左对齐', true, 14, 10, 1.1),
@@ -183,10 +189,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '仿宋',
       size: '小四',
       alignment: '两端对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 6,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 6,
+      spacing_after_unit: 'pt',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.5,
+      line_spacing_mode: 'one-and-half',
+      line_spacing_value: 1.5,
       list_style: 'disc',
       ordered_list_style: 'chinese-dot',
       list_indent_chars: 2.5,
@@ -216,6 +225,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'portrait',
+      two_column: false,
       first_page_different: false,
       margin_top_cm: 1.5,
       margin_bottom_cm: 1.5,
@@ -227,7 +237,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: false,
     heading_border_enabled: false,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('黑体', '三号', '左对齐', true, 8, 6, 1),
       heading('黑体', '小三', '左对齐', true, 7, 5, 1),
@@ -240,10 +249,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '宋体',
       size: '五号',
       alignment: '两端对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 2,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 2,
+      spacing_after_unit: 'pt',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.15,
+      line_spacing_mode: 'multiple',
+      line_spacing_value: 1.15,
       list_style: 'dash',
       ordered_list_style: 'decimal-paren',
       list_indent_chars: 1.5,
@@ -273,6 +285,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'landscape',
+      two_column: true,
       first_page_different: false,
       margin_top_cm: 1.4,
       margin_bottom_cm: 1.4,
@@ -284,7 +297,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: false,
     heading_border_enabled: false,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('黑体', '三号', '居中对齐', true, 8, 6, 1),
       heading('黑体', '小三', '左对齐', true, 6, 4, 1),
@@ -297,10 +309,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '宋体',
       size: '五号',
       alignment: '左对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 2,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 2,
+      spacing_after_unit: 'pt',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.15,
+      line_spacing_mode: 'multiple',
+      line_spacing_value: 1.15,
       list_style: 'square',
       ordered_list_style: 'decimal-dot',
       list_indent_chars: 1.5,
@@ -330,6 +345,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'portrait',
+      two_column: false,
       first_page_different: true,
       margin_top_cm: 1.8,
       margin_bottom_cm: 1.8,
@@ -341,7 +357,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: true,
     heading_border_enabled: false,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('微软雅黑', '小二', '居中对齐', true, 14, 12, 1.1),
       heading('微软雅黑', '三号', '左对齐', true, 12, 8, 1.1),
@@ -354,10 +369,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '宋体',
       size: '小四',
       alignment: '左对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 6,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 6,
+      spacing_after_unit: 'pt',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.35,
+      line_spacing_mode: 'multiple',
+      line_spacing_value: 1.35,
       list_style: 'arrow',
       ordered_list_style: 'decimal-dot',
       list_indent_chars: 2,
@@ -387,6 +405,7 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     page: {
       paper_size: 'a4',
       orientation: 'portrait',
+      two_column: false,
       first_page_different: true,
       margin_top_cm: 2,
       margin_bottom_cm: 2,
@@ -398,7 +417,6 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
     },
     heading_level1_page_break_before: true,
     heading_border_enabled: true,
-    heading_border_min_heading_left_enabled: false,
     headings: [
       heading('黑体', '小二', '居中对齐', true, 0, 0, 1),
       heading('黑体', '四号', '左对齐', true, 0, 0, 1),
@@ -411,67 +429,13 @@ export const EXPORT_LAYOUT_PRESETS: ExportLayoutPreset[] = [
       font: '宋体',
       size: '小四',
       alignment: '左对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 4,
+      spacing_before: 0,
+      spacing_before_unit: 'lines',
+      spacing_after: 4,
+      spacing_after_unit: 'pt',
       first_line_indent_chars: 2,
-      line_spacing_multiple: 1.25,
-      list_style: 'disc',
-      ordered_list_style: 'decimal-dot',
-      list_indent_chars: 2,
-    },
-    table: {
-      border_width: 1,
-      cell_padding_pt: 6,
-      full_width: true,
-      header_row: { font: '黑体', size: '小四', alignment: '居中对齐' },
-      first_column: { font: '宋体', size: '小四', alignment: '左对齐' },
-      body_cell: { font: '宋体', size: '小四', alignment: '左对齐' },
-    },
-    image: {
-      max_width_percent: 90,
-      alignment: '居中对齐',
-      caption_font: '宋体',
-      caption_size: '小五',
-      caption_alignment: '居中对齐',
-      caption_bold: false,
-      caption_italic: false,
-    },
-  },
-  {
-    id: 'left-title-frame',
-    label: '左题栏页框版',
-    description: '启用章节页框，最小标题固定在正文左侧，适合条目化响应内容。',
-    page: {
-      paper_size: 'a4',
-      orientation: 'portrait',
-      first_page_different: true,
-      margin_top_cm: 2,
-      margin_bottom_cm: 2,
-      margin_left_cm: 2,
-      margin_right_cm: 2,
-      page_number_enabled: true,
-      page_number_format: '第{page}页',
-      page_number_start: 1,
-    },
-    heading_level1_page_break_before: true,
-    heading_border_enabled: true,
-    heading_border_min_heading_left_enabled: true,
-    headings: [
-      heading('黑体', '小二', '居中对齐', true, 0, 0, 1),
-      heading('黑体', '四号', '左对齐', true, 0, 0, 1),
-      heading('黑体', '小四', '左对齐', false, 0, 0, 1),
-      heading('楷体', '小四', '左对齐', false, 0, 0, 1),
-      heading('黑体', '小四', '左对齐', false, 0, 0, 1),
-      heading('宋体', '小四', '左对齐', false, 0, 0, 1),
-    ],
-    body_text: {
-      font: '宋体',
-      size: '小四',
-      alignment: '左对齐',
-      spacing_before_pt: 0,
-      spacing_after_pt: 4,
-      first_line_indent_chars: 2,
-      line_spacing_multiple: 1.25,
+      line_spacing_mode: 'multiple',
+      line_spacing_value: 1.25,
       list_style: 'disc',
       ordered_list_style: 'decimal-dot',
       list_indent_chars: 2,
@@ -506,6 +470,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#000000',
     heading_border_cell_colors: ['#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff'],
     header_footer_color: '#000000',
+    chrome_bar_color: '#e8e8e8',
+    chrome_accent_color: '#000000',
     table_border_color: '#000000',
     table_header_text_color: '#000000',
     table_header_background_color: '#ffffff',
@@ -523,6 +489,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#2174fd',
     heading_border_cell_colors: ['#dbeafe', '#e8f1ff', '#f1f7ff', '#f6faff', '#ffffff', '#ffffff'],
     header_footer_color: '#315b9f',
+    chrome_bar_color: '#dbeafe',
+    chrome_accent_color: '#173f82',
     table_border_color: '#8db8ff',
     table_header_text_color: '#123a78',
     table_header_background_color: '#dbeafe',
@@ -540,6 +508,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#a9d7f2',
     heading_border_cell_colors: ['#eaf7ff', '#f2fbff', '#f7fdff', '#fbfeff', '#ffffff', '#ffffff'],
     header_footer_color: '#55798f',
+    chrome_bar_color: '#eaf7ff',
+    chrome_accent_color: '#2f6f92',
     table_border_color: '#bddded',
     table_header_text_color: '#245f82',
     table_header_background_color: '#eaf7ff',
@@ -557,6 +527,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#22a05a',
     heading_border_cell_colors: ['#dcfce7', '#e9fbed', '#f1fcf4', '#f7fdf8', '#ffffff', '#ffffff'],
     header_footer_color: '#2e7449',
+    chrome_bar_color: '#dcfce7',
+    chrome_accent_color: '#116a3a',
     table_border_color: '#8fd3a6',
     table_header_text_color: '#0f5a32',
     table_header_background_color: '#dcfce7',
@@ -574,6 +546,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#a7dcb3',
     heading_border_cell_colors: ['#eaf8ee', '#f2fbf4', '#f7fdf8', '#fbfefc', '#ffffff', '#ffffff'],
     header_footer_color: '#5f8468',
+    chrome_bar_color: '#eaf8ee',
+    chrome_accent_color: '#3d764b',
     table_border_color: '#bfdfc5',
     table_header_text_color: '#356a43',
     table_header_background_color: '#eaf8ee',
@@ -591,6 +565,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#f59e0b',
     heading_border_cell_colors: ['#fff3d6', '#fff7e6', '#fffaf0', '#fffdf8', '#ffffff', '#ffffff'],
     header_footer_color: '#9b6123',
+    chrome_bar_color: '#fff3d6',
+    chrome_accent_color: '#8a4b10',
     table_border_color: '#f2c46f',
     table_header_text_color: '#79420e',
     table_header_background_color: '#fff3d6',
@@ -608,6 +584,8 @@ export const EXPORT_THEME_PRESETS: ExportThemePreset[] = [
     heading_border_color: '#a78bfa',
     heading_border_cell_colors: ['#f2edff', '#f6f2ff', '#faf7ff', '#fdfbff', '#ffffff', '#ffffff'],
     header_footer_color: '#7054aa',
+    chrome_bar_color: '#f2edff',
+    chrome_accent_color: '#5b3ca6',
     table_border_color: '#c9b8ff',
     table_header_text_color: '#553798',
     table_header_background_color: '#f2edff',
@@ -681,7 +659,6 @@ export function applyExportLayoutPreset(config: ExportFormatConfig, presetId: st
     heading_border: {
       ...config.heading_border,
       enabled: preset.heading_border_enabled,
-      min_heading_left_enabled: preset.heading_border_min_heading_left_enabled,
     },
     headings: config.headings.map((current, index) => ({
       ...current,
@@ -709,6 +686,33 @@ export function applyExportLayoutPreset(config: ExportFormatConfig, presetId: st
   };
 }
 
+function shouldReplaceThemeColor(value: string | undefined, colors: Array<string | undefined>, defaultColor: string): boolean {
+  if (!value) return true;
+  if (normalizeColor(value) === normalizeColor(defaultColor)) return true;
+  return isThemeColor(value, colors);
+}
+
+function applyChromeThemeColors(page: ExportFormatConfig['page'], preset: ExportThemePreset): ExportFormatConfig['page'] {
+  const barThemeColors = EXPORT_THEME_PRESETS.map((item) => item.chrome_bar_color);
+  const accentThemeColors = EXPORT_THEME_PRESETS.map((item) => item.chrome_accent_color);
+  return {
+    ...page,
+    chrome_bar_color: shouldReplaceThemeColor(page.chrome_bar_color, barThemeColors, DEFAULT_EXPORT_FORMAT.page.chrome_bar_color)
+      ? preset.chrome_bar_color
+      : page.chrome_bar_color,
+    chrome_accent_color: shouldReplaceThemeColor(page.chrome_accent_color, accentThemeColors, DEFAULT_EXPORT_FORMAT.page.chrome_accent_color)
+      ? preset.chrome_accent_color
+      : page.chrome_accent_color,
+  };
+}
+
+/** 色带页脚以强调色为正文底色，应用预设时同步写入可读的模板正文颜色。 */
+function applyBandFooterTextColor(page: ExportFormatConfig['page']): ExportFormatConfig['page'] {
+  return page.header_footer_style === 'band'
+    ? { ...page, footer_color: resolveChromeColors(page).onAccent }
+    : page;
+}
+
 export function applyExportThemePreset(config: ExportFormatConfig, presetId: string): ExportFormatConfig {
   const preset = EXPORT_THEME_PRESETS.find((item) => item.id === presetId);
   if (!preset) return config;
@@ -732,21 +736,26 @@ export function applyExportThemePreset(config: ExportFormatConfig, presetId: str
     },
   };
 
+  const decorative = isDecorativeHeaderFooterStyle(config.page.header_footer_style);
+
   if (!config.heading_border.enabled) {
     const withoutGlobalThemeColors = clearDisabledFrameThemeColors(config);
+    const themedPage = decorative ? applyChromeThemeColors(withoutGlobalThemeColors.page, preset) : withoutGlobalThemeColors.page;
     return {
       ...withoutGlobalThemeColors,
+      page: applyBandFooterTextColor(themedPage),
       table,
     };
   }
 
+  const themedPage = {
+    ...applyChromeThemeColors(config.page, preset),
+    header_color: preset.header_footer_color,
+    footer_color: preset.header_footer_color,
+  };
   return {
     ...config,
-    page: {
-      ...config.page,
-      header_color: preset.header_footer_color,
-      footer_color: preset.header_footer_color,
-    },
+    page: applyBandFooterTextColor(themedPage),
     heading_border: {
       ...config.heading_border,
       border_color: preset.heading_border_color,

@@ -25,6 +25,7 @@ interface ConfigUsagePayload {
   image_model_status?: string;
   bid_analysis_mode?: string;
   outline_mode?: string;
+  outline_expansion_mode?: string;
   table_requirement?: string;
   use_mermaid_images?: boolean;
   use_ai_images?: boolean;
@@ -34,7 +35,6 @@ interface ConfigUsagePayload {
   minimum_words?: number;
   maximum_words?: number;
   section_words?: number;
-  strict_section_words?: boolean;
   enable_consistency_audit?: boolean;
   consistency_repair_mode?: string;
   enable_original_plan_coverage_audit?: boolean;
@@ -47,6 +47,7 @@ const configUsageFields: Array<[keyof ConfigUsagePayload, string]> = [
   ['image_model_status', 'imageModelStatuses'],
   ['bid_analysis_mode', 'bidAnalysisModes'],
   ['outline_mode', 'outlineModes'],
+  ['outline_expansion_mode', 'outlineExpansionModes'],
   ['table_requirement', 'tableRequirements'],
   ['use_mermaid_images', 'useMermaidImages'],
   ['use_ai_images', 'useAiImages'],
@@ -56,7 +57,6 @@ const configUsageFields: Array<[keyof ConfigUsagePayload, string]> = [
   ['minimum_words', 'minimumWords'],
   ['maximum_words', 'maximumWords'],
   ['section_words', 'sectionWords'],
-  ['strict_section_words', 'strictSectionWords'],
   ['enable_consistency_audit', 'enableConsistencyAudit'],
   ['consistency_repair_mode', 'consistencyRepairModes'],
   ['enable_original_plan_coverage_audit', 'enableOriginalPlanCoverageAudit'],
@@ -189,7 +189,6 @@ function normalizeUsagePayload(payload: ConfigUsagePayload) {
     use_mermaid_images: booleanText(payload.use_mermaid_images),
     use_ai_images: booleanText(payload.use_ai_images),
     word_control_enabled: booleanText(payload.word_control_enabled),
-    strict_section_words: booleanText(payload.strict_section_words),
     enable_consistency_audit: booleanText(payload.enable_consistency_audit),
     enable_original_plan_coverage_audit: booleanText(payload.enable_original_plan_coverage_audit),
   };

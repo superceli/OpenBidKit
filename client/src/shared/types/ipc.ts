@@ -1,12 +1,21 @@
 import type { AiHttpErrorPayload, ChatCompletionRequest, JsonCompletionRequest } from './ai';
+import type { OfficialTransactionsPage, OfficialInvoiceApplicationInput, OfficialInvoiceInfo, OfficialAccountState, OfficialEmailCredentials, OfficialEmailPurpose, OfficialRechargeOption, OfficialRechargeOrder } from './officialAccount';
 import type { DuplicateCheckWorkspacePatch, DuplicateCheckWorkspaceState, FileSelectionResult } from './bid';
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelInfoResult, ModelListResult, UpdateChannel } from './config';
-import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
+import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseSearchRequest, KnowledgeBaseSearchPage, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
 import type { RejectionCheckWorkspacePatch, RejectionCheckWorkspaceState, RejectionDocumentRole } from '../../features/rejection-check/types';
-import type { BidAnalysisMode, BidAnalysisTaskState, BidSectionMode, ContentGenerationOptions, ContentGenerationPlanState, ContentGenerationProgressDetail, ContentGenerationRuntimeState, ContentGenerationSectionState, DetectedBidSection, GlobalFactGroupState, GlobalFactsMode, SaveOutlineRequest, SaveOutlineSelectionRequest, TechnicalPlanState, TechnicalPlanStep, TechnicalPlanWorkflowKind } from '../../features/technical-plan/types';
+import type { BidAnalysisMode, BidAnalysisTaskState, BidSectionMode, ContentGenerationOptions, ContentGenerationPlanState, ContentGenerationProgressDetail, ContentGenerationRuntimeState, ContentGenerationSectionState, DetectedBidSection, GlobalFactGroupState, SaveOutlineRequest, SaveOutlineSelectionRequest, TechnicalPlanGenerationConfig, TechnicalPlanState, TechnicalPlanStep } from '../../features/technical-plan/types';
 import type { FeasibilityProjectInfo, FeasibilityReportState, FeasibilityReportStep, FeasibilitySaveOutlineRequest, FeasibilitySourceFile } from '../../features/feasibility-report/types';
+import type { CredentialCertificate, CredentialEmployee, CredentialImageFieldKey, CredentialLibraryImportResult, CredentialLibraryMutationResult, CredentialLibraryProfile, CredentialLibrarySnapshot, CredentialOtherMaterial, CredentialProject, CredentialRecordSavePayload } from '../../features/credential-library/types';
 import type { ExportFormatConfig, ExportTemplateRecord } from './exportFormat';
-import type { OutlineData, OutlineExpansionMode, OutlineMode, OutlineWordControlOptions } from './outline';
+import type { TechnicalPlanOutlineData as OutlineData } from './outline';
+
+/** 配置保存只更新提交字段，文本服务商档案也支持局部更新。 */
+export type ClientConfigPatch = Partial<Omit<ClientConfig, 'text_model_profiles'>> & {
+  text_model_profiles?: {
+    [Provider in keyof ClientConfig['text_model_profiles']]?: Partial<ClientConfig['text_model_profiles'][Provider]>;
+  };
+};
 
 export interface TaskEventTask {
   task_id: string;
@@ -325,6 +334,10 @@ export interface AgentRunPayload {
   files?: AgentRunFile[];
   timeout_ms?: number;
   max_retries?: number;
+  /** 是否生成结束总结，默认开启；false 时最后一批工具成功后直接结束本阶段。 */
+  summary_enabled?: boolean;
+  /** 写入或修改预置 Schema 对应的 JSON 文件后自动校验，默认关闭。 */
+  auto_validate_json?: boolean;
 }
 
 export interface AgentRetryAttempt {
@@ -534,6 +547,28 @@ export interface DonationPromptPayload {
   wordExportClicks: number;
 }
 
+export interface DeveloperLayoutFigureRequest {
+  id: string;
+  generation: 'aiImage' | 'mermaid' | 'htmlImage';
+  prompt: string;
+  caption: string;
+  /** 画框比例，由版面预算给定；html 图按它定画布，其余按它居中裁切。 */
+  aspectWidth: number;
+  aspectHeight: number;
+}
+
+export interface DeveloperLayoutFigureResult {
+  id: string;
+  generation: string;
+  /** 可直接写进 data-yb-asset-ref 的相对路径。 */
+  assetRef: string;
+  width: number;
+  height: number;
+  /** mermaid 是 code，html 是 HTML 源码，AI 图是本地文件路径。 */
+  source: string;
+  elapsedMs: number;
+}
+
 export interface YibiaoBridge {
   appName: string;
   platform: string;
@@ -572,7 +607,7 @@ export interface YibiaoBridge {
   };
   config: {
     load: () => Promise<ClientConfig>;
-    save: (config: ClientConfig) => Promise<ConfigSaveResult>;
+    save: (config: ClientConfigPatch) => Promise<ConfigSaveResult>;
     listModels: (config?: ClientConfig) => Promise<ModelListResult>;
     getModelInfo: (modelName: string) => Promise<ModelInfoResult>;
     openConfigFolder: () => Promise<{ success: boolean; path: string }>;
@@ -582,6 +617,25 @@ export interface YibiaoBridge {
     refresh: () => Promise<LicenseRuntimeStatus>;
     importOfflineFile: () => Promise<LicenseOfflineActivationResult>;
     activateOfflineCode: (code: string) => Promise<LicenseOfflineActivationResult>;
+  };
+  officialAccount: {
+    redeemCode: (input: { code: string; requestNo: string }) => Promise<{ redeemedPoint: string }>;
+    createInvoiceApplication: (input: OfficialInvoiceApplicationInput) => Promise<void>;
+    getInvoiceInfo: () => Promise<OfficialInvoiceInfo>;
+    saveInvoiceInfo: (input: OfficialInvoiceInfo) => Promise<void>;
+    getState: () => Promise<OfficialAccountState>;
+    refreshBalance: () => Promise<OfficialAccountState>;
+    getRechargeOptions: () => Promise<OfficialRechargeOption[]>;
+    createRechargeOrder: (input: { optionId: string }) => Promise<OfficialRechargeOrder>;
+    getRechargeOrders: () => Promise<OfficialRechargeOrder[]>;
+    getTransactions: (page: number) => Promise<OfficialTransactionsPage>;
+    getRechargeOrder: (id: string) => Promise<OfficialRechargeOrder>;
+    closeRechargeOrder: (id: string) => Promise<OfficialRechargeOrder>;
+    onRechargeOrderChanged: (callback: (order: OfficialRechargeOrder) => void) => () => void;
+    onStateChanged: (callback: (state: OfficialAccountState) => void) => () => void;
+    sendEmailCode: (input: { email: string; purpose: OfficialEmailPurpose }) => Promise<boolean>;
+    loginWithEmail: (input: OfficialEmailCredentials) => Promise<OfficialAccountState>;
+    bindEmail: (input: OfficialEmailCredentials) => Promise<OfficialAccountState>;
   };
   ai: {
     chat: (request: ChatCompletionRequest) => Promise<string>;
@@ -622,6 +676,14 @@ export interface YibiaoBridge {
   developerExpansionReplaceTest: {
     run: (payload: DeveloperExpansionReplaceTestPayload) => Promise<DeveloperExpansionReplaceTestResult>;
   };
+  developerLayoutFigure: {
+    /** 清空上一轮生成的配图，返回测试专用的资源目录名。 */
+    reset: () => Promise<{ assetRoot: string }>;
+    /** 按骨架给定的画框比例真实生成一张配图。 */
+    render: (payload: DeveloperLayoutFigureRequest) => Promise<DeveloperLayoutFigureResult>;
+    /** 用测试资源目录渲染样张，图片走真实生成的那批。 */
+    renderPreview: (html: string, config: ExportFormatConfig) => Promise<{ key: string; bytes: Uint8Array; roles: string[] }>;
+  };
   file: {
     selectDuplicateCheckFiles: (options?: { multiple?: boolean; filePaths?: string[] }) => Promise<FileSelectionResult>;
     /** 把拖拽进来的 File 对象换成本地绝对路径，供各上传区拖拽导入使用 */
@@ -629,6 +691,7 @@ export interface YibiaoBridge {
   };
   knowledgeBase: {
     list: () => Promise<KnowledgeBaseIndex>;
+    search: (request: KnowledgeBaseSearchRequest) => Promise<KnowledgeBaseSearchPage>;
     createFolder: (name: string) => Promise<KnowledgeFolder>;
     renameFolder: (folderId: string, name: string) => Promise<KnowledgeFolder>;
     reorderFolder: (draggedFolderId: string, targetFolderId: string, position: 'before' | 'after') => Promise<KnowledgeBaseIndexMutationResult>;
@@ -643,8 +706,25 @@ export interface YibiaoBridge {
     readAnalysis: (documentId: string) => Promise<KnowledgeAnalysisSnapshot>;
     onEvent: (callback: (event: KnowledgeBaseEvent) => void) => () => void;
   };
+  credentialLibrary: {
+    load: () => Promise<CredentialLibrarySnapshot>;
+    importTestData: () => Promise<CredentialLibraryImportResult | null>;
+    saveProfile: (partial: Partial<CredentialLibraryProfile>) => Promise<CredentialLibrarySnapshot>;
+    addProfileImages: (fieldKey: CredentialImageFieldKey, filePaths: string[]) => Promise<CredentialLibrarySnapshot>;
+    deleteImage: (imageId: string) => Promise<CredentialLibraryMutationResult>;
+    saveCertificate: (payload: CredentialRecordSavePayload<CredentialCertificate>) => Promise<CredentialLibraryMutationResult>;
+    deleteCertificate: (recordId: string) => Promise<CredentialLibraryMutationResult>;
+    saveEmployee: (payload: CredentialRecordSavePayload<CredentialEmployee>) => Promise<CredentialLibraryMutationResult>;
+    deleteEmployee: (recordId: string) => Promise<CredentialLibraryMutationResult>;
+    saveProject: (payload: CredentialRecordSavePayload<CredentialProject>) => Promise<CredentialLibraryMutationResult>;
+    deleteProject: (recordId: string) => Promise<CredentialLibraryMutationResult>;
+    saveOtherMaterial: (payload: CredentialRecordSavePayload<CredentialOtherMaterial>) => Promise<CredentialLibraryMutationResult>;
+    deleteOtherMaterial: (recordId: string) => Promise<CredentialLibraryMutationResult>;
+  };
   technicalPlan: {
     loadState: () => Promise<TechnicalPlanState>;
+    loadGenerationConfig: () => Promise<TechnicalPlanGenerationConfig>;
+    saveGenerationConfig: (partial: Partial<TechnicalPlanGenerationConfig>) => Promise<TechnicalPlanGenerationConfig>;
     importTenderDocument: (filePaths?: string[]) => Promise<{
       success: boolean;
       message?: string;
@@ -662,22 +742,21 @@ export interface YibiaoBridge {
       message?: string;
       markdown?: string;
     }>;
+    removeOriginalPlanDocument: () => Promise<{ success: boolean; message?: string }>;
     checkBidSections: () => Promise<{ hasMultiple: boolean; totalDeclared?: number | null }>;
     selectBidSection: (selectedSection: DetectedBidSection) => Promise<{ success: boolean; message?: string; markdown: string }>;
     readTenderMarkdown: () => Promise<string>;
+    readContentWord: (sectionId: string) => Promise<Uint8Array | null>;
+    previewContentWord: (sectionId: string) => Promise<Uint8Array | null>;
     readTenderSourceMarkdown: (sourceId: string) => Promise<string>;
-    readOriginalPlanMarkdown: () => Promise<string>;
     updateStep: (step: TechnicalPlanStep) => Promise<void>;
-    setWorkflowKind: (workflowKind: TechnicalPlanWorkflowKind) => Promise<void>;
-    switchWorkflowKind: (workflowKind: TechnicalPlanWorkflowKind) => Promise<void>;
     saveBidAnalysisConfig: (payload: { mode: BidAnalysisMode; selectedTaskIds: string[]; bidSectionMode?: BidSectionMode }) => Promise<void>;
-    saveOutlineConfig: (payload: { referenceKnowledgeDocumentIds: string[]; outlineMode?: OutlineMode; outlineExpansionMode?: OutlineExpansionMode; wordControlOptions: OutlineWordControlOptions }) => Promise<void>;
     saveOutlineSelection: (payload: SaveOutlineSelectionRequest) => Promise<{ success: boolean }>;
     saveOutline: (payload: SaveOutlineRequest) => Promise<Partial<TechnicalPlanState>>;
-    saveGlobalFactsConfig: (payload: { globalFactsMode: GlobalFactsMode }) => Promise<Partial<TechnicalPlanState>>;
     saveGlobalFacts: (globalFacts: GlobalFactGroupState[]) => Promise<Partial<TechnicalPlanState>>;
     saveContentGenerationOptions: (options: ContentGenerationOptions) => Promise<Partial<TechnicalPlanState>>;
     saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<TechnicalPlanState>>;
+    resetContentGeneration: () => Promise<TechnicalPlanState>;
     clear: () => Promise<{ success: boolean; message?: string }>;
     openBidTemplate: () => Promise<{ success: boolean; message?: string }>;
   };
@@ -720,6 +799,9 @@ export interface YibiaoBridge {
     create: (config: ExportFormatConfig) => Promise<ExportTemplateRecord>;
     update: (templateId: string, config: ExportFormatConfig) => Promise<ExportTemplateRecord>;
     delete: (templateId: string) => Promise<{ success: boolean; message: string }>;
+    duplicate: (templateId: string) => Promise<ExportTemplateRecord>;
+    /** 生成模板样张；key 是内容指纹，字节未变时可跳过重新加载。 */
+    renderPreview: (html: string, config: ExportFormatConfig) => Promise<{ key: string; bytes: Uint8Array; roles: string[] }>;
   };
   tasks: {
     startBidSectionExtraction: (payload?: unknown) => Promise<unknown>;

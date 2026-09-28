@@ -3,9 +3,11 @@ import {
   AGENT_RUNTIME_MAX_RETRY_COUNT,
   AGENT_RUNTIME_STATUSES,
   ALLOWED_EVENTS,
+  ANALYTICS_DATA_FILTER,
   CONFIG_USAGE_FIELDS,
   DATASET,
   MODEL_USAGE_FIELDS,
+  RAW_DATASET,
 } from '../constants.js';
 import {
   businessDateRangeCondition,
@@ -86,19 +88,31 @@ function shouldAttemptRealtimeClientInsert(event) {
   return Number.isFinite(age) && age >= 0 && age <= RECENT_CLIENT_CREATED_MAX_AGE_DAYS;
 }
 
+function clientAttemptKey(projectName, clientId) {
+  return `${projectName}\0${clientId}`;
+}
+
 function clientLicenseAttemptKey(event, shouldInsert) {
   return [
     event.projectName,
     event.clientId,
     shouldInsert ? event.clientCreatedAt : '',
-    event.version || '',
-    event.clientIp || '',
     event.licenseStatus || '',
     event.licensePlan || '',
     event.licenseExpiresAt || '',
     event.sourceTrusted || '',
     event.untrustedReason || '',
   ].join('\0');
+}
+
+function hasClientLicenseSnapshot(event) {
+  return Boolean(
+    event.licenseStatus
+    || event.licensePlan
+    || event.licenseExpiresAt
+    || event.sourceTrusted
+    || event.untrustedReason,
+  );
 }
 
 function rememberClientAttempt(key) {
@@ -235,11 +249,14 @@ async function ensureTotals(db, projectName, updatedAt = nowText()) {
 
 export async function recordTrackClient(env, event) {
   const shouldInsert = shouldAttemptRealtimeClientInsert(event);
-  if (!event.clientId) {
+  const shouldUpdateLicense = hasClientLicenseSnapshot(event);
+  if (!shouldInsert && !shouldUpdateLicense) {
     return;
   }
 
-  const cacheKey = clientLicenseAttemptKey(event, shouldInsert);
+  const cacheKey = shouldUpdateLicense
+    ? clientLicenseAttemptKey(event, shouldInsert)
+    : clientAttemptKey(event.projectName, event.clientId);
   if (hasRecentClientAttempt(cacheKey)) {
     return;
   }
@@ -256,15 +273,18 @@ export async function recordTrackClient(env, event) {
         license_status, license_plan, license_expires_at, source_trusted, untrusted_reason,
         created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, 0, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM stats_blocked_clients
+        WHERE project_name = ? AND client_id = ?
+      )
       ON CONFLICT(project_name, client_id) DO NOTHING
     `, [
       event.projectName,
       event.clientId,
       updatedAt,
       event.clientCreatedAt,
-      getBusinessToday(),
-      normalizedVersion(event.version),
       event.clientIp || '',
       event.platform || '',
       event.arch || '',
@@ -275,6 +295,8 @@ export async function recordTrackClient(env, event) {
       event.untrustedReason || '',
       updatedAt,
       updatedAt,
+      event.projectName,
+      event.clientId,
     ]);
     if (result?.meta?.changes) {
       await ensureTotals(db, event.projectName, updatedAt);
@@ -287,14 +309,13 @@ export async function recordTrackClient(env, event) {
     }
   }
 
+  if (!shouldUpdateLicense) {
+    return;
+  }
+
   await run(db, `
     UPDATE stats_clients
     SET
-      last_active_date = ?,
-      last_active_version = ?,
-      last_access_ip = CASE WHEN ? != '' THEN ? ELSE last_access_ip END,
-      platform = CASE WHEN ? != '' THEN ? ELSE platform END,
-      arch = CASE WHEN ? != '' THEN ? ELSE arch END,
       license_status = CASE WHEN ? != '' THEN ? ELSE license_status END,
       license_plan = CASE WHEN ? != '' THEN ? ELSE license_plan END,
       license_expires_at = CASE WHEN ? != '' THEN ? ELSE license_expires_at END,
@@ -303,14 +324,6 @@ export async function recordTrackClient(env, event) {
       updated_at = ?
     WHERE project_name = ? AND client_id = ?
   `, [
-    getBusinessToday(),
-    normalizedVersion(event.version),
-    event.clientIp || '',
-    event.clientIp || '',
-    event.platform || '',
-    event.platform || '',
-    event.arch || '',
-    event.arch || '',
     event.licenseStatus || '',
     event.licenseStatus || '',
     event.licensePlan || '',
@@ -516,8 +529,9 @@ function dailyClientIpsSql(projectName, activityDate) {
       blob7 AS clientId,
       argMax(blob13, timestamp) AS ip,
       argMax(blob8, timestamp) AS clientCreatedDate
-    FROM ${DATASET}
-    WHERE blob1 = ${sqlString(projectName)}
+    FROM ${RAW_DATASET}
+    WHERE ${ANALYTICS_DATA_FILTER}
+      AND blob1 = ${sqlString(projectName)}
       AND blob2 IN ${allowedEventsSql()}
       AND blob7 != ''
       AND blob13 != ''
@@ -603,8 +617,9 @@ export async function queryStatsIpStats(env, projectName, activityDate, page, pa
         blob9 AS provider,
         blob10 AS endpointHost,
         SUM(double4 * _sample_interval) AS totalTokens
-      FROM ${DATASET}
-      WHERE blob1 = ${sqlString(projectName)}
+      FROM ${RAW_DATASET}
+      WHERE ${ANALYTICS_DATA_FILTER}
+        AND blob1 = ${sqlString(projectName)}
         AND blob2 = 'ai_request'
         AND blob13 IN (${items.map((item) => sqlString(item.ip)).join(', ')})
         AND ${businessDateCondition(activityDate)}
@@ -630,6 +645,218 @@ export async function queryStatsIpStats(env, projectName, activityDate, page, pa
     pageSize: normalizedPageSize,
     total: number(totalResult.data?.[0]?.count),
     items,
+  };
+}
+
+// 原子写入 IP 封禁、删除当前视图客户端明细并标记防止历史汇总回填。
+export async function blockIpAndDeleteStatsClients(env, projectName, blockedIp, reason, activityDate = '') {
+  const db = requireStatsDb(env);
+  const normalizedProjectName = normalizeText(projectName, 80);
+  const createdAt = nowText();
+  let clientIds = [];
+
+  if (activityDate) {
+    const result = await queryAnalytics(env, `
+      SELECT clientId
+      FROM (${dailyClientIpsSql(normalizedProjectName, activityDate)})
+      WHERE ip = ${sqlString(blockedIp)}
+      ORDER BY clientId ASC
+      LIMIT ${MAX_ANALYTICS_ROWS}
+    `);
+    clientIds = (result.data || []).map((row) => normalizeText(row.clientId, 120)).filter(Boolean);
+  }
+
+  clientIds = Array.from(new Set(clientIds));
+  const statements = [
+    db.prepare(`
+      INSERT INTO ip_blocks (ip, reason, created_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(ip) DO NOTHING
+    `).bind(blockedIp, normalizeText(reason, 500), createdAt),
+    db.prepare('SELECT ip, reason, created_at AS createdAt FROM ip_blocks WHERE ip = ?').bind(blockedIp),
+  ];
+
+  if (activityDate) {
+    for (const chunk of chunkRows(clientIds.map((clientId) => ({ clientId })))) {
+      statements.push(db.prepare(`
+        INSERT INTO stats_blocked_clients (project_name, client_id, blocked_ip, created_at)
+        SELECT ?, json_extract(item.value, '$.clientId'), ?, ?
+        FROM json_each(?) AS item
+        WHERE json_extract(item.value, '$.clientId') != ''
+        ON CONFLICT(project_name, client_id, blocked_ip) DO NOTHING
+      `).bind(normalizedProjectName, blockedIp, createdAt, rowsJson(chunk)));
+    }
+  } else {
+    statements.push(db.prepare(`
+      INSERT INTO stats_blocked_clients (project_name, client_id, blocked_ip, created_at)
+      SELECT project_name, client_id, ?, ?
+      FROM stats_clients
+      WHERE project_name = ? AND last_access_ip = ?
+      ON CONFLICT(project_name, client_id, blocked_ip) DO NOTHING
+    `).bind(blockedIp, createdAt, normalizedProjectName, blockedIp));
+  }
+
+  const matchedCountIndex = statements.length;
+  statements.push(
+    db.prepare(`
+      SELECT COUNT(DISTINCT client_id) AS count
+      FROM stats_blocked_clients
+      WHERE project_name = ? AND blocked_ip = ?
+    `).bind(normalizedProjectName, blockedIp),
+    db.prepare(`
+      DELETE FROM stats_client_activity
+      WHERE project_name = ?
+        AND EXISTS (
+          SELECT 1
+          FROM stats_blocked_clients blocked
+          WHERE blocked.project_name = stats_client_activity.project_name
+            AND blocked.client_id = stats_client_activity.client_id
+            AND blocked.blocked_ip = ?
+        )
+    `).bind(normalizedProjectName, blockedIp),
+    db.prepare(`
+      DELETE FROM stats_clients
+      WHERE project_name = ?
+        AND EXISTS (
+          SELECT 1
+          FROM stats_blocked_clients blocked
+          WHERE blocked.project_name = stats_clients.project_name
+            AND blocked.client_id = stats_clients.client_id
+            AND blocked.blocked_ip = ?
+        )
+    `).bind(normalizedProjectName, blockedIp),
+    db.prepare(`
+      UPDATE stats_totals
+      SET
+        total_clients = (SELECT COUNT(*) FROM stats_clients WHERE project_name = ?),
+        updated_at = ?
+      WHERE project_name = ?
+    `).bind(normalizedProjectName, createdAt, normalizedProjectName),
+  );
+  const results = await batchRun(db, statements);
+  const blockedIpRow = results[1]?.results?.[0] || { ip: blockedIp, reason: normalizeText(reason, 500), createdAt };
+  return {
+    blockedIp: blockedIpRow,
+    matchedClientCount: number(results[matchedCountIndex]?.results?.[0]?.count),
+    deletedClientCount: number(results[matchedCountIndex + 2]?.meta?.changes),
+  };
+}
+
+// 按项目和版本号查询当天匹配的客户端 ID（用于版本封禁清理）。
+function dailyClientIdsByVersionSql(projectName, version, activityDate) {
+  return `
+    SELECT blob7 AS clientId
+    FROM ${RAW_DATASET}
+    WHERE ${ANALYTICS_DATA_FILTER}
+      AND blob1 = ${sqlString(projectName)}
+      AND blob2 IN ${allowedEventsSql()}
+      AND blob7 != ''
+      AND blob4 = ${sqlString(version)}
+      AND ${businessDateCondition(activityDate)}
+    GROUP BY blob7
+  `;
+}
+
+// 原子写入版本号封禁，并清理规则生效当天、尚未被凌晨定时任务汇总的实时客户端影子数据。
+export async function blockVersionAndDeleteStatsClients(env, projectName, version, reason) {
+  const db = requireStatsDb(env);
+  const normalizedProjectName = normalizeText(projectName, 80);
+  const normalizedVersionValue = normalizeText(version, 50);
+  const createdAt = nowText();
+  const businessDate = getBusinessToday();
+
+  // 先激活规则再扫描客户端快照：规则写入 D1 后立即对新上报生效，
+  // 缩小“扫描快照”和“规则生效”之间可能漏删新客户端的竞态窗口。
+  await db.prepare(`
+    INSERT INTO version_blocks (project_name, version, reason, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(project_name, version) DO UPDATE SET reason = excluded.reason
+  `).bind(normalizedProjectName, normalizedVersionValue, normalizeText(reason, 500), createdAt).run();
+  const ruleRow = await db.prepare(
+    'SELECT version, reason, created_at AS createdAt FROM version_blocks WHERE project_name = ? AND version = ?'
+  ).bind(normalizedProjectName, normalizedVersionValue).first();
+
+  const result = await queryAnalytics(env, `
+    SELECT clientId
+    FROM (${dailyClientIdsByVersionSql(normalizedProjectName, normalizedVersionValue, businessDate)})
+    LIMIT ${MAX_ANALYTICS_ROWS}
+  `);
+  const clientIds = Array.from(new Set((result.data || []).map((row) => normalizeText(row.clientId, 120)).filter(Boolean)));
+
+  const statements = [];
+
+  for (const chunk of chunkRows(clientIds.map((clientId) => ({ clientId })))) {
+    // 写入墓碑记录，对齐 IP 封禁的 stats_blocked_clients：防止凌晨定时汇总从 AE
+    // 重新读到封禁前的历史事件后，把这里刚清理掉的客户端又插回 stats_clients。
+    statements.push(db.prepare(`
+      INSERT INTO stats_blocked_version_clients (project_name, client_id, blocked_version, created_at)
+      SELECT ?, json_extract(item.value, '$.clientId'), ?, ?
+      FROM json_each(?) AS item
+      WHERE json_extract(item.value, '$.clientId') != ''
+      ON CONFLICT(project_name, client_id, blocked_version) DO NOTHING
+    `).bind(normalizedProjectName, normalizedVersionValue, createdAt, rowsJson(chunk)));
+    statements.push(db.prepare(`
+      DELETE FROM stats_client_activity
+      WHERE project_name = ?
+        AND activity_date = ?
+        AND client_id IN (
+          SELECT json_extract(item.value, '$.clientId') FROM json_each(?) AS item
+        )
+    `).bind(normalizedProjectName, businessDate, rowsJson(chunk)));
+    statements.push(db.prepare(`
+      DELETE FROM stats_clients
+      WHERE project_name = ?
+        AND substr(created_at, 1, 10) = ?
+        AND client_id IN (
+          SELECT json_extract(item.value, '$.clientId') FROM json_each(?) AS item
+        )
+    `).bind(normalizedProjectName, businessDate, rowsJson(chunk)));
+  }
+
+  statements.push(db.prepare(`
+    UPDATE stats_totals
+    SET total_clients = (SELECT COUNT(*) FROM stats_clients WHERE project_name = ?),
+      updated_at = ?
+    WHERE project_name = ?
+  `).bind(normalizedProjectName, createdAt, normalizedProjectName));
+
+  const results = await batchRun(db, statements);
+  const deletedClientCount = results
+    .slice(0, statements.length - 1)
+    .filter((_, index) => index % 3 === 2)
+    .reduce((sum, item) => sum + Number(item?.meta?.changes || 0), 0);
+
+  return {
+    rule: ruleRow || { version: normalizedVersionValue, reason: normalizeText(reason, 500), createdAt },
+    matchedClientCount: clientIds.length,
+    deletedClientCount,
+  };
+}
+
+// 原子解除 IP 封禁并释放客户端标记，允许后续事件重新建立客户端数据。
+export async function unblockIpAndReleaseStatsClients(env, blockedIp) {
+  const db = requireStatsDb(env);
+  const results = await batchRun(db, [
+    db.prepare('DELETE FROM ip_blocks WHERE ip = ?').bind(blockedIp),
+    db.prepare('DELETE FROM stats_blocked_clients WHERE blocked_ip = ?').bind(blockedIp),
+  ]);
+  return { ip: blockedIp, releasedClientCount: number(results[1]?.meta?.changes) };
+}
+
+// 原子解除版本号封禁并释放客户端标记，允许凌晨定时汇总重新把这些客户端数据统计回来。
+export async function unblockVersionAndReleaseStatsClients(env, projectName, version) {
+  const db = requireStatsDb(env);
+  const normalizedProjectName = normalizeText(projectName, 80);
+  const normalizedVersionValue = normalizeText(version, 50);
+  const results = await batchRun(db, [
+    db.prepare('DELETE FROM version_blocks WHERE project_name = ? AND version = ?')
+      .bind(normalizedProjectName, normalizedVersionValue),
+    db.prepare('DELETE FROM stats_blocked_version_clients WHERE project_name = ? AND blocked_version = ?')
+      .bind(normalizedProjectName, normalizedVersionValue),
+  ]);
+  return {
+    removed: Number(results[0]?.meta?.changes || 0) > 0,
+    releasedClientCount: number(results[1]?.meta?.changes),
   };
 }
 
@@ -939,7 +1166,7 @@ function sortAgentRuntimeModelRows(rows) {
   });
 }
 
-export function createAgentRuntimeRowsFromMetricRows(rows = []) {
+function createAgentRuntimeRowsFromMetricRows(rows = []) {
   const grouped = new Map();
   for (const row of rows || []) {
     const parsed = parseAgentRuntimeMetricKey(row.metricKey ?? row.metric_key ?? row.status ?? row.blob9);
@@ -1679,6 +1906,18 @@ function prepareClientStatements(db, rows, updatedAt) {
       license_status, license_plan, license_expires_at, source_trusted, untrusted_reason, ?, ?
     FROM rows
     WHERE project_name != '' AND client_id != ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM stats_blocked_clients blocked
+        WHERE blocked.project_name = rows.project_name
+          AND blocked.client_id = rows.client_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM stats_blocked_version_clients blocked_version
+        WHERE blocked_version.project_name = rows.project_name
+          AND blocked_version.client_id = rows.client_id
+      )
     ON CONFLICT(project_name, client_id) DO UPDATE SET
       first_seen_at = MIN(stats_clients.first_seen_at, excluded.first_seen_at),
       first_seen_date = MIN(stats_clients.first_seen_date, excluded.first_seen_date),
@@ -1717,6 +1956,18 @@ function prepareClientActivityStatements(db, rows, updatedAt) {
       ), rows.client_created_date), ?
     FROM rows
     WHERE project_name != '' AND activity_date != '' AND client_id != '' AND client_created_date != ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM stats_blocked_clients blocked
+        WHERE blocked.project_name = rows.project_name
+          AND blocked.client_id = rows.client_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM stats_blocked_version_clients blocked_version
+        WHERE blocked_version.project_name = rows.project_name
+          AND blocked_version.client_id = rows.client_id
+      )
     ON CONFLICT(project_name, activity_date, client_id) DO UPDATE SET
       client_created_date = excluded.client_created_date,
       updated_at = excluded.updated_at

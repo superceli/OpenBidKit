@@ -1,16 +1,15 @@
-import { useEffect, useState } from 'react';
 import type { SectionId } from '../shared/types/navigation';
 import { getAppMenuItemById } from './menuConfig';
 import BidOpportunityPage from '../features/bid-opportunity/pages/BidOpportunityPage';
-import BusinessBidPage from '../features/business-bid/pages/BusinessBidPage';
 import ContentExpansionReplaceTestPage from '../features/developer/pages/ContentExpansionReplaceTestPage';
+import ContentLayoutBudgetTestPage from '../features/developer/pages/ContentLayoutBudgetTestPage';
 import DeveloperDemoPage, { isDeveloperDemoSection } from '../features/developer/pages/DeveloperDemoPage';
 import DeveloperMultimodalTestPage from '../features/developer/pages/DeveloperMultimodalTestPage';
 import AgentTestPage from '../features/developer/pages/AgentTestPage';
 import DeveloperTestPage from '../features/developer/pages/DeveloperTestPage';
-import ExportFormatPage from '../features/export-format/pages/ExportFormatPage';
 import MyTemplatesPage from '../features/export-format/pages/MyTemplatesPage';
 import DuplicateCheckPage from '../features/duplicate-check/pages/DuplicateCheckPage';
+import CredentialLibraryPage from '../features/credential-library/pages/CredentialLibraryPage';
 import KnowledgeBasePage from '../features/knowledge-base/pages/KnowledgeBasePage';
 import RejectionCheckPage from '../features/rejection-check/pages/RejectionCheckPage';
 import ResourcesPage from '../features/resources/pages/ResourcesPage';
@@ -30,13 +29,6 @@ interface AppRouterProps {
 
 function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSectionChange, registerLeaveGuard }: AppRouterProps) {
   const activeMenuItem = getAppMenuItemById(activeSection, developerMode);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (activeSection !== 'my-templates') {
-      setEditingTemplateId(null);
-    }
-  }, [activeSection]);
 
   if (activeMenuItem?.children?.length) {
     return <SecondaryMenuPage menuItem={activeMenuItem} onNavigate={onSectionChange} />;
@@ -48,15 +40,13 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
 
   switch (activeSection) {
     case 'technical-plan':
-      return <TechnicalPlanHome workflowKind="technical-plan" registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
-    case 'existing-plan-expansion':
-      return <TechnicalPlanHome workflowKind="existing-plan-expansion" registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
+      return <TechnicalPlanHome registerLeaveGuard={registerLeaveGuard} />;
     case 'feasibility-report':
-      return <FeasibilityReportHome registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
-    case 'business-bid':
-      return <BusinessBidPage />;
+      return <FeasibilityReportHome registerLeaveGuard={registerLeaveGuard} />;
     case 'document-knowledge-base':
       return <KnowledgeBasePage />;
+    case 'credential-library':
+      return <CredentialLibraryPage developerMode={developerMode} />;
     case 'resources':
       return <ResourcesPage />;
     case 'plugin-manager':
@@ -65,14 +55,8 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <DuplicateCheckPage />;
     case 'rejection-check':
       return <RejectionCheckPage />;
-    case 'my-templates':
-      return editingTemplateId
-        ? <ExportFormatPage mode="edit" templateId={editingTemplateId} onBack={() => setEditingTemplateId(null)} />
-        : <MyTemplatesPage onCreateTemplate={() => onSectionChange('new-template')} onEditTemplate={setEditingTemplateId} />;
-    case 'new-template':
-      return <ExportFormatPage mode="create" />;
-    case 'export-format':
-      return <ExportFormatPage mode="create" />;
+    case 'template-settings':
+      return <MyTemplatesPage />;
     case 'bid-opportunity':
       return <BidOpportunityPage />;
     case 'developer-test':
@@ -83,6 +67,8 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <DeveloperMultimodalTestPage />;
     case 'developer-expansion-replace-test':
       return <ContentExpansionReplaceTestPage />;
+    case 'developer-layout-budget-test':
+      return <ContentLayoutBudgetTestPage />;
     case 'developer-agent-test':
       return <AgentTestPage />;
     case 'settings':

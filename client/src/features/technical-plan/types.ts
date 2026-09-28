@@ -1,31 +1,28 @@
-import type { OutlineContentMode, OutlineData, OutlineExpansionMode, OutlineMode, OutlineWordControlOptions } from '../../shared/types';
+import type { ExportTemplateScope, OutlineContentMode, TechnicalPlanOutlineData as OutlineData, OutlineExpansionMode, OutlineMode, OutlineWordControlOptions } from '../../shared/types';
 
-export type TechnicalPlanStep = 'document-analysis' | 'bid-analysis' | 'outline-generation' | 'global-facts' | 'content-edit' | 'expand';
-export type TechnicalPlanWorkflowKind = 'technical-plan' | 'existing-plan-expansion';
+export type TechnicalPlanStep = 'document-analysis' | 'generation-settings' | 'bid-analysis' | 'outline-generation' | 'global-facts' | 'content-edit' | 'expand';
 export type BidAnalysisMode = 'key' | 'full' | 'custom';
 export type BidAnalysisTaskStatus = 'idle' | 'running' | 'success' | 'error';
 export type BidSectionMode = 'single' | 'multiple';
 export type BidSectionExtractionStatus = 'idle' | 'running' | 'success' | 'error';
 export type BackgroundTaskType = 'bid-section-extraction' | 'bid-analysis' | 'outline-generation' | 'outline-adjustment' | 'global-facts-generation' | 'global-facts-adjustment' | 'content-generation';
 export type BackgroundTaskStatus = 'running' | 'pausing' | 'paused' | 'success' | 'error';
-export type ContentGenerationSectionStatus = 'idle' | 'running' | 'success' | 'error' | 'ignored';
-export type ContentGenerationPhase = 'planning' | 'restoring' | 'generating' | 'section-word-adjusting' | 'original-auditing' | 'auditing' | 'table-cleaning' | 'final-section-word-adjusting' | 'total-word-adjusting' | 'illustration-planning' | 'illustration-generating' | 'done';
+export type ContentGenerationSectionStatus = 'idle' | 'running' | 'success' | 'error';
+export type ContentGenerationPhase = 'planning' | 'restoring' | 'generating' | 'sections-completed' | 'word-converting' | 'word-completed' | 'auditing' | 'table-cleaning' | 'layout-checking' | 'done';
 export type ContentTableRequirement = 'none' | 'light' | 'moderate' | 'heavy';
-export type ConsistencyRepairMode = 'agent' | 'normal';
-export type OriginalPlanCoverageRepairMode = 'agent' | 'normal';
 export type SaveOutlineReason = 'sort' | 'edit' | 'delete' | 'add-root' | 'add-child' | 'replace';
-export type OutlineAttribute = '通用' | '商务' | '资信' | '技术' | '其他';
+export type OutlineAttribute = '通用' | '商务/资信' | '技术' | '其他' | '目录' | '报价' | '业绩';
 export type GlobalFactsMode = 'fabricate' | 'omit' | 'placeholder';
 
 export interface SaveOutlineRequest {
   outlineData: OutlineData;
   reason: SaveOutlineReason;
-  idMap?: Record<string, string>;
   affectedNodeIds?: string[];
 }
 
 export interface OutlineSelectionItem {
   id: string;
+  number: string;
   title: string;
   description: string;
   attr: OutlineAttribute;
@@ -46,23 +43,54 @@ export interface SaveOutlineSelectionRequest {
   selectedIds: string[];
 }
 
+export type ContentImageQuantity = 'none' | 'light' | 'heavy';
+
 export interface ContentGenerationOptions {
+  imageQuantity: ContentImageQuantity;
   useAiImages: boolean;
-  maxAiImages: number;
   useMermaidImages: boolean;
-  maxMermaidImages: number;
   useHtmlImages: boolean;
-  maxHtmlImages: number;
+  htmlImageOptimization: boolean;
+  wordCountRepair: boolean;
+  layoutCheck: boolean;
   htmlImageTypes: string;
   tableRequirement: ContentTableRequirement;
-  enableConsistencyAudit: boolean;
-  consistencyRepairMode: ConsistencyRepairMode;
-  enableOriginalPlanCoverageAudit: boolean;
-  originalPlanCoverageRepairMode: OriginalPlanCoverageRepairMode;
+}
+
+export interface TechnicalPlanGenerationConfig {
+  bidAnalysisMode: BidAnalysisMode;
+  bidAnalysisSelectedTaskIds: string[];
+  bidSectionMode: BidSectionMode;
+  outlineMode: OutlineMode;
+  outlineExpansionMode: OutlineExpansionMode;
+  outlineWordControlOptions: OutlineWordControlOptions;
+  referenceKnowledgeDocumentIds: string[];
+  globalFactsMode: GlobalFactsMode;
+  exportTemplateId: string;
+  exportTemplateScope: ExportTemplateScope;
+  contentGenerationOptions: ContentGenerationOptions;
+}
+
+export interface ContentGenerationProgressItem {
+  status: 'pending' | 'running' | 'generating' | 'rendering' | 'success' | 'error' | 'needs_repair' | 'cancelled';
+  kind?: 'ai' | 'html' | 'mermaid';
+  source_ready?: boolean;
+  source_file?: string;
+  asset_ref?: string;
+}
+
+export interface ContentGenerationWorkflowProgress {
+  phase: ContentGenerationPhase;
+  round: number;
+  step: string;
+  label: string;
+  started_at: string;
+  activity: string;
+  steps: Record<string, { items: Record<string, ContentGenerationProgressItem>; unit?: string; total?: number; done?: boolean }>;
 }
 
 export interface ContentGenerationProgressDetail {
-  mode: 'full' | 'single' | 'correction' | 'illustration' | 'illustration-generation';
+  mode: 'full' | 'single' | 'html' | 'html-single' | 'correction';
   phase: ContentGenerationPhase;
   phase_label: string;
   phase_progress: number;
@@ -70,6 +98,16 @@ export interface ContentGenerationProgressDetail {
   total: number;
   step: string;
   step_label: string;
+  unit?: string;
+  failed?: number;
+  running?: number;
+  pending?: number;
+  cancelled?: number;
+  indeterminate?: boolean;
+  started_at?: string;
+  activity?: string;
+  detail_text?: string;
+  done?: boolean;
 }
 
 export interface BackgroundTaskState {
@@ -95,6 +133,7 @@ export interface BackgroundTaskState {
         outline_mode?: OutlineMode;
         outline_expansion_mode?: OutlineExpansionMode;
         word_control_options?: OutlineWordControlOptions;
+        no_technical_score_mode?: boolean;
       };
     };
     outline_selection?: OutlineSelectionState;
@@ -115,66 +154,39 @@ export interface BackgroundTaskState {
       planning_completed: number;
       restoration_total?: number;
       restoration_completed?: number;
+      /** 原方案还原保存后按原文可读字数统计，不代表扩写后的内容保留率。 */
+      original_restoration?: {
+        source_hash: string;
+        total_words: number;
+        restored_words: number;
+        total_images: number;
+        restored_images: number;
+        rate: number | null;
+      };
       generation_total: number;
       generation_completed: number;
+      /** 已有非空 HTML 的小节，仅用于预览展示，不代表正式流程完成。 */
+      preview_ready_section_ids?: string[];
+      generated_html_words?: number;
+      generated_html_workspace?: string;
+      word_conversion_total?: number;
+      word_conversion_completed?: number;
+      output_progress?: ContentGenerationProgressDetail;
+      workflow_progress?: ContentGenerationWorkflowProgress;
       minimum_words?: number;
       maximum_words?: number;
       section_words?: number;
-      strict_section_words?: boolean;
       current_words?: number;
-      section_adjustment_total?: number;
-      section_adjustment_completed?: number;
-      section_adjustment_active_count?: number;
-      section_adjustment_item_id?: string;
-      section_adjustment_round?: number;
-      section_adjustment_round_total?: number;
-      total_adjustment_round?: number;
-      total_adjustment_round_total?: number;
-      total_adjustment_mode?: 'expand' | 'shrink' | '';
-      total_adjustment_batch_total?: number;
-      total_adjustment_batch_completed?: number;
-      total_adjustment_batch_failed?: number;
-      total_adjustment_active_count?: number;
-      total_adjustment_item_id?: string;
-      total_adjustment_remaining_words?: number;
-      word_control_warning?: string;
-      audit_group_total?: number;
-      audit_group_completed?: number;
-      audit_step?: '' | 'checking' | 'fixing' | 'agent' | 'done';
-      audit_conflict_total?: number;
-      audit_fix_total?: number;
-      audit_fix_completed?: number;
-      audit_fix_failed?: number;
-      audit_repair_mode?: ConsistencyRepairMode | '';
-      audit_agent_step_total?: number;
-      audit_agent_step_completed?: number;
-      audit_agent_step_label?: string;
-      audit_agent_changed_sections?: number;
-      audit_agent_failed_sections?: number;
+      consistency_round?: number;
+      consistency_status?: '' | 'running' | 'round-completed' | 'completed';
+      consistency_summary?: string;
+      consistency_remaining_issues?: string[];
       table_cleanup_total?: number;
       table_cleanup_completed?: number;
-      table_cleanup_rewritten?: number;
-      table_cleanup_skipped?: number;
-      illustration_planning_step_total?: number;
-      illustration_planning_step_completed?: number;
-      illustration_planning_step_label?: string;
-      illustration_candidate_ai?: number;
-      illustration_candidate_mermaid?: number;
-      illustration_candidate_html?: number;
-      illustration_selected_ai?: number;
-      illustration_selected_mermaid?: number;
-      illustration_selected_html?: number;
-      illustration_generation_total?: number;
-      illustration_generation_completed?: number;
-      illustration_generation_ai_total?: number;
-      illustration_generation_ai_completed?: number;
-      illustration_generation_mermaid_total?: number;
-      illustration_generation_mermaid_completed?: number;
-      illustration_generation_html_total?: number;
-      illustration_generation_html_completed?: number;
-      illustration_generation_step_label?: string;
-      awaiting_content_decision?: boolean;
-      ignored_section_count?: number;
+      layout_status?: 'checking' | 'supplementing' | 'rechecking' | 'completed';
+      layout_total?: number;
+      layout_completed?: number;
+      developer_stage_gate?: ContentGenerationPhase;
     };
   };
 }
@@ -209,15 +221,15 @@ export type ContentGenerationSections = Record<string, ContentGenerationSectionS
 
 export type ContentMermaidDiagramType = 'process' | 'hierarchy' | 'responsibility';
 export type ContentIllustrationKind = 'ai' | 'mermaid' | 'html';
-export type ContentIllustrationPlacement = 'before' | 'after';
 
 export interface ContentGenerationPlanData {
   writing_focus?: string;
+  /** 小节配图适配性，0-10 分，目前仅供正文编排记录。 */
+  image_suitability_score: number;
+  /** 编排后由程序按全文评分和图片数量档位决定，暂不参与生图。 */
+  image_needed: boolean;
   knowledge: {
     item_ids: string[];
-  };
-  facts: {
-    titles: string[];
   };
   table: {
     needed: boolean;
@@ -226,10 +238,10 @@ export interface ContentGenerationPlanData {
   original_material?: {
     restored: boolean;
     optimized: boolean;
-    source_ids: string[];
-    source_titles: string[];
-    source_hashes: string[];
-    restored_chars: number;
+    source_hash: string;
+    /** 原文件行号从 1 开始，包含首尾；不同小节的范围不可重叠。 */
+    source_ranges: { start_line: number; end_line: number }[];
+    restored_words: number;
     restored_at?: string;
     optimized_at?: string;
   };
@@ -244,47 +256,24 @@ export interface ContentGenerationPlanState {
 
 export type ContentGenerationPlans = Record<string, ContentGenerationPlanState>;
 
-export interface ContentIllustrationPlanItem {
-  item_id: string;
-  kind: ContentIllustrationKind;
-  image_type: string;
-  title: string;
-  section_ids: string[];
-  placement: ContentIllustrationPlacement;
-  priority: number;
-  generation?: {
-    status: 'pending' | 'running' | 'success' | 'error';
-    mode?: 'normal' | 'agent';
-    code?: string;
-    source_path?: string;
-    asset_url?: string;
-    attempts?: number;
-    error?: string;
-    updated_at?: string;
-  };
-}
-
-export interface ContentIllustrationPlanState {
-  plan_version: number;
-  revision: string;
-  items: ContentIllustrationPlanItem[];
-  updated_at?: string;
-}
-
 export interface ContentGenerationRuntimeState {
+  /** 已确认的 HTML 实际字数，按稳定小节 ID 保存，不保存 HTML 正文。 */
+  section_words?: Record<string, number>;
+  /** HTML 位于 Agent 会话目录；Word 文件相对于独立的业务输出目录。 */
+  html_output?: {
+    workspace_dir: string;
+    word_output_dir: string;
+    word_sections: Array<{ section_id: string; file: string }>;
+  };
+  generation_started?: boolean;
+  direct_generation_item_ids?: string[];
+  pending_item_ids?: string[];
   phase?: string;
   touched_item_ids?: string[];
   completed_stages?: string[];
-  word_adjustment_stage?: 'section' | 'final-section' | 'total';
-  word_adjustment_item_id?: string;
-  word_adjustment_round?: number;
-  word_adjustment_item_rounds?: Record<string, number>;
-  word_adjustment_completed_item_ids?: string[];
-  word_adjustment_no_progress_rounds?: number;
-  word_adjustment_round_start_words?: number;
+  developer_stage_gate?: ContentGenerationPhase | '';
   target_item_id?: string;
   regenerate_requirement?: string;
-  awaiting_content_decision?: boolean;
   updated_at?: string;
 }
 
@@ -343,7 +332,6 @@ export interface DetectedBidSection {
 }
 
 export interface TechnicalPlanState {
-  workflowKind: TechnicalPlanWorkflowKind;
   step: TechnicalPlanStep;
   tenderFile: TechnicalPlanTenderFile | null;
   tenderFiles: TechnicalPlanTenderSourceFile[];
@@ -372,10 +360,11 @@ export interface TechnicalPlanState {
   globalFactsAdjustmentTask?: BackgroundTaskState;
   globalFacts: GlobalFactGroupState[];
   contentGenerationTask?: BackgroundTaskState;
+  exportTemplateId: string;
+  exportTemplateScope: ExportTemplateScope;
   contentGenerationOptions?: ContentGenerationOptions;
   contentGenerationSections: ContentGenerationSections;
   contentGenerationPlans: ContentGenerationPlans;
-  contentIllustrationPlan?: ContentIllustrationPlanState;
   contentGenerationRuntime?: ContentGenerationRuntimeState;
   bidTemplateExists?: boolean;
   outlineData: OutlineData | null;

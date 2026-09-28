@@ -8,6 +8,16 @@ function getConfigFilePath(app) {
   return path.join(getUserDataPath(app), 'user_config.json');
 }
 
+// 官方账户会话独立于设置表单保存。
+function getOfficialApiSessionFilePath(app) {
+  return path.join(getUserDataPath(app), 'official_api_session.json');
+}
+
+// 支付二维码独立缓存，订单状态仍由服务端管理。
+function getOfficialRechargeQrCachePath(app) {
+  return path.join(getUserDataPath(app), 'official_recharge_qr_cache.json');
+}
+
 function getLicenseFilePath(app) {
   return path.join(getUserDataPath(app), 'license.json');
 }
@@ -73,14 +83,6 @@ function getTechnicalPlanOriginalPlanMarkdownPath(app) {
   return path.join(getTechnicalPlanDir(app), 'original-plan.md');
 }
 
-function getTechnicalPlanIllustrationsDir(app) {
-  return path.join(getTechnicalPlanDir(app), 'illustrations');
-}
-
-function getTechnicalPlanGeneratedIllustrationsDir(app) {
-  return path.join(getGeneratedImagesDir(app), 'technical-plan', 'illustrations');
-}
-
 function getDuplicateCheckDir(app) {
   return path.join(getWorkspaceDir(app), 'duplicate-check');
 }
@@ -116,6 +118,11 @@ function getImportedImagesDir(app) {
 
 function getKnowledgeBaseDir(app) {
   return path.join(getWorkspaceDir(app), 'knowledge-base');
+}
+
+/** 资信库原始图片与其他文件的工作区根目录。 */
+function getCredentialLibraryDir(app) {
+  return path.join(getWorkspaceDir(app), 'credential-library');
 }
 
 function getAiLogsDir(app) {
@@ -202,6 +209,7 @@ module.exports = {
   getDuplicateCheckContentDir,
   getDuplicateCheckDir,
   getConfigFilePath,
+  getCredentialLibraryDir,
   getDonationStateFilePath,
   getGpuStartupProbePath,
   getFeasibilityReportDir,
@@ -210,6 +218,8 @@ module.exports = {
   getImportedImagesDir,
   getKnowledgeBaseDir,
   getLicenseFilePath,
+  getOfficialApiSessionFilePath,
+  getOfficialRechargeQrCachePath,
   getOpenXmlHelperDebugExecutablePath,
   getOpenXmlHelperProjectPath,
   getOpenXmlJobDir,
@@ -217,8 +227,6 @@ module.exports = {
   getRejectionCheckDir,
   getRejectionCheckDocumentMarkdownPath,
   getTechnicalPlanDir,
-  getTechnicalPlanGeneratedIllustrationsDir,
-  getTechnicalPlanIllustrationsDir,
   getTechnicalPlanLogsDir,
   getTechnicalPlanOriginalPlanMarkdownPath,
   getTechnicalPlanBidTemplatePath,

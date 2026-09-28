@@ -4,7 +4,7 @@
 -- 1. 本文件用于开源开发者阅读、评审和排查问题，展示 workspace/yibiao.sqlite 的目标完整表结构。
 -- 2. 用户运行客户端时不需要手动执行本文件。
 -- 3. 客户端运行时建表和升级以 Electron Main 侧 migration 代码为准。
--- 4. 当前运行代码已落地 technical_plan_* v1、duplicate_check_* / rejection_check_* v2、knowledge_* v3、technical_plan_global_fact_groups v4、标段兼容 v5/v6、标段选择 v7、旧待选择标段兼容字段 v8、工作流类型和原方案文件状态 v9、招标解析项选择配置 v10、知识库排序 v11、废标项检查多投标文件 v12、已有方案目录配置 v13、多标段优化状态 v14、导出模板库 v15、多招标文件 v16、全文图片编排 v17、目录字数控制 v18、全局事实补全模式 v22、可行性研究报告 v23 目标结构。
+-- 4. 当前运行代码已落地 technical_plan_* v1、duplicate_check_* / rejection_check_* v2、knowledge_* v3、technical_plan_global_fact_groups v4、标段兼容 v5/v6、标段选择 v7、旧待选择标段兼容字段 v8、工作流类型和原方案文件状态 v9、招标解析项选择配置 v10、知识库排序 v11、废标项检查多投标文件 v12、已有方案目录配置 v13、多标段优化状态 v14、导出模板库 v15、多招标文件 v16、全文图片编排 v17、目录字数控制 v18、全局事实补全模式 v22、可行性研究报告 v23、官方 API 开票信息 v24、统一生成配置 v25、单企业资信库 v26、导出模板样式范围 v32 目标结构。
 -- 5. 每次表结构调整后，需要同步更新本文件和 runtime migration 版本。
 -- 6. 本文件不保存历史版本，每次更新都写入最新目标完整结构。
 
@@ -14,21 +14,19 @@ PRAGMA busy_timeout = 5000;
 
 -- 目标完整结构版本。
 -- 运行时代码应通过 PRAGMA user_version 判断是否需要自动升级。
-PRAGMA user_version = 23;
+PRAGMA user_version = 34;
 
 -- ============================================================================
 -- 技术方案 technical_plan_*（v1 已落地）
 -- ============================================================================
 
 -- 技术方案单例元数据。
--- 只保留一行 id = 1，用于保存当前步骤、工作流类型、招标文件/原方案 Markdown 元数据、模式配置和正文生成运行时 JSON。
+-- 只保留一行 id = 1，用于保存当前步骤、招标文件/原方案 Markdown 元数据和任务运行状态。
 -- 招标文件 Markdown 原文不进入 SQLite，原始文件保存到 userData/workspace/technical-plan/tender-original.md，当前投标范围工作副本保存到 userData/workspace/technical-plan/tender.md。
 -- 原方案 Markdown 原文不进入 SQLite，保存到 userData/workspace/technical-plan/original-plan.md。
 -- pending_tender_* 为旧版 Step01 标段待选择兼容清理字段，新流程不再写入。
 CREATE TABLE IF NOT EXISTS technical_plan_meta (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  -- v9 工作流类型：technical-plan / existing-plan-expansion
-  workflow_kind TEXT NOT NULL DEFAULT 'technical-plan',
   step TEXT NOT NULL DEFAULT 'document-analysis',
   tender_file_name TEXT,
   tender_markdown_path TEXT,
@@ -42,7 +40,7 @@ CREATE TABLE IF NOT EXISTS technical_plan_meta (
   tender_original_markdown_path TEXT,
   tender_original_markdown_hash TEXT,
   tender_original_markdown_chars INTEGER NOT NULL DEFAULT 0,
-  -- v9 已有方案扩写的原方案文件状态
+  -- v9 用户上传的原方案文件状态
   original_plan_file_name TEXT,
   original_plan_markdown_path TEXT,
   original_plan_markdown_hash TEXT,
@@ -56,25 +54,13 @@ CREATE TABLE IF NOT EXISTS technical_plan_meta (
   pending_tender_sections_json TEXT,
   pending_tender_total_declared INTEGER,
   pending_tender_created_at TEXT,
-  bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
-  -- v10 招标解析项选择配置，JSON 数组，关键项由运行时代码强制并入。
-  bid_analysis_selected_task_ids_json TEXT,
-  -- v14 投标范围模式：single / multiple；多标段 AI 提取结果保存在 bid_sections_json。
-  bid_section_mode TEXT NOT NULL DEFAULT 'single',
   bid_sections_json TEXT,
   bid_section_extraction_status TEXT NOT NULL DEFAULT 'idle',
   bid_section_extraction_error TEXT,
-  outline_mode TEXT NOT NULL DEFAULT 'aligned',
-  -- v13 已有方案扩写目录使用方式：original-only / ai-complement。
-  outline_expansion_mode TEXT NOT NULL DEFAULT 'ai-complement',
-  -- v22 Step04 事实补全模式：fabricate / omit / placeholder，缺省 fabricate。
-  global_facts_mode TEXT NOT NULL DEFAULT 'fabricate',
-  -- v18 Step03 当前可编辑字数设置，以及当前目录生成成功时固化的生效快照。
-  outline_word_control_options_json TEXT,
+  -- 目录生成成功时固化的字数控制生效快照；当前可编辑配置在统一生成配置表。
   outline_word_control_snapshot_json TEXT,
   outline_project_name TEXT,
   outline_project_overview TEXT,
-  content_generation_options_json TEXT,
   content_generation_runtime_json TEXT,
   -- v6 兼容字段（旧版客户端遗留，新代码不再使用但保留以兼容）
   current_bid_section_id TEXT,
@@ -86,6 +72,52 @@ CREATE TABLE IF NOT EXISTS technical_plan_meta (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- v25 当前项目统一生成配置；只保留一行 id = 1。
+CREATE TABLE IF NOT EXISTS technical_plan_generation_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
+  bid_section_mode TEXT NOT NULL DEFAULT 'single',
+  outline_mode TEXT NOT NULL DEFAULT 'response-file',
+  outline_expansion_mode TEXT NOT NULL DEFAULT 'ai-complement',
+  minimum_words INTEGER NOT NULL DEFAULT 0,
+  maximum_words INTEGER NOT NULL DEFAULT 0,
+  section_words INTEGER NOT NULL DEFAULT 0,
+  global_facts_mode TEXT NOT NULL DEFAULT 'fabricate',
+  -- v29 当前项目明确选择的 Word 导出模板。
+  export_template_id TEXT NOT NULL DEFAULT '',
+  -- v32 模板样式范围：ai-only 仅 AI 生成目录，document 整个文件；页面基础布局始终全文件。
+  export_template_scope TEXT NOT NULL DEFAULT 'ai-only',
+  use_ai_images INTEGER NOT NULL DEFAULT 1,
+  use_mermaid_images INTEGER NOT NULL DEFAULT 1,
+  use_html_images INTEGER NOT NULL DEFAULT 1,
+  html_image_types TEXT NOT NULL DEFAULT '',
+  table_requirement TEXT NOT NULL DEFAULT 'heavy',
+  image_quantity TEXT NOT NULL DEFAULT 'light',
+  html_image_optimization INTEGER NOT NULL DEFAULT 0,
+  word_count_repair INTEGER NOT NULL DEFAULT 0,
+  layout_check INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- v25 统一配置中选择的招标解析项。
+CREATE TABLE IF NOT EXISTS technical_plan_generation_bid_tasks (
+  task_id TEXT PRIMARY KEY,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_technical_plan_generation_bid_tasks_order
+ON technical_plan_generation_bid_tasks(sort_order);
+
+-- v25 统一配置中选择的参考知识库文档。
+CREATE TABLE IF NOT EXISTS technical_plan_generation_reference_docs (
+  document_id TEXT PRIMARY KEY,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_technical_plan_generation_reference_docs_order
+ON technical_plan_generation_reference_docs(sort_order);
 
 -- 技术方案后台任务状态。
 CREATE TABLE IF NOT EXISTS technical_plan_tasks (
@@ -114,35 +146,6 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task
 ON task_logs(task_domain, task_type, task_id, id DESC);
 
 -- 全文图片计划头与图片项目按行存储，单张图片状态变化只更新对应项目。
-CREATE TABLE IF NOT EXISTS technical_plan_illustration_plans (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  plan_version INTEGER NOT NULL,
-  revision TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS technical_plan_illustration_items (
-  item_id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  image_type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  section_ids_json TEXT NOT NULL,
-  placement TEXT NOT NULL,
-  priority INTEGER NOT NULL DEFAULT 0,
-  generation_status TEXT,
-  generation_mode TEXT,
-  generation_code TEXT,
-  generation_source_path TEXT,
-  generation_asset_url TEXT,
-  generation_attempts INTEGER,
-  generation_error TEXT,
-  generation_updated_at TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_technical_plan_illustration_items_order
-ON technical_plan_illustration_items(sort_order);
 
 -- 技术方案招标文件解析项。
 CREATE TABLE IF NOT EXISTS technical_plan_bid_items (
@@ -157,15 +160,6 @@ CREATE TABLE IF NOT EXISTS technical_plan_bid_items (
 
 CREATE INDEX IF NOT EXISTS idx_technical_plan_bid_items_order
 ON technical_plan_bid_items(sort_order);
-
--- 技术方案选中的参考知识库文档。
-CREATE TABLE IF NOT EXISTS technical_plan_reference_docs (
-  document_id TEXT PRIMARY KEY,
-  sort_order INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_technical_plan_reference_docs_order
-ON technical_plan_reference_docs(sort_order);
 
 -- 技术方案目录树节点。
 -- 目录结构和正文内容的权威来源。
@@ -195,7 +189,7 @@ ON technical_plan_outline_nodes(level);
 
 -- 技术方案正文生成小节状态。
 -- 不重复保存正文内容，正文内容在 technical_plan_outline_nodes.content。
--- status: idle / running / success / error / ignored。
+-- status: idle / running / success / error。
 CREATE TABLE IF NOT EXISTS technical_plan_content_sections (
   node_id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'idle',
@@ -833,15 +827,130 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_match_batches_status
 ON knowledge_match_batches(document_id, status, batch_index);
 
 -- ============================================================================
--- 导出模板 export_templates（v15 目标设计）
+-- 单企业资信库 credential_library_*（v26 已落地）
+-- ============================================================================
+
+-- 企业基础、介绍、财务、开户行和水印配置单例。
+CREATE TABLE IF NOT EXISTS credential_library_profile (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  company_name TEXT,
+  unified_social_credit_code TEXT,
+  phone TEXT,
+  email TEXT,
+  legal_representative TEXT,
+  registered_capital TEXT,
+  operating_period_start TEXT,
+  operating_period_end TEXT,
+  address TEXT,
+  business_scope TEXT,
+  industry TEXT,
+  company_type TEXT,
+  insured_employee_count TEXT,
+  company_intro TEXT,
+  tax_certificate_date TEXT,
+  tax_certificate_note TEXT,
+  audit_report_date TEXT,
+  audit_report_note TEXT,
+  social_security_certificate_date TEXT,
+  social_security_certificate_note TEXT,
+  bank_account_name TEXT,
+  bank_account_number TEXT,
+  bank_name TEXT,
+  bank_routing_number TEXT,
+  watermark_enabled INTEGER NOT NULL DEFAULT 0,
+  watermark_content TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 用户自定义的其他证书。
+CREATE TABLE IF NOT EXISTS credential_library_certificates (
+  certificate_id TEXT PRIMARY KEY,
+  name TEXT,
+  number TEXT,
+  validity_mode TEXT,
+  valid_from TEXT,
+  valid_to TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 企业人员档案。
+CREATE TABLE IF NOT EXISTS credential_library_employees (
+  employee_id TEXT PRIMARY KEY,
+  name TEXT,
+  id_number TEXT,
+  position TEXT,
+  professional_title TEXT,
+  gender TEXT,
+  phone TEXT,
+  id_validity_mode TEXT,
+  id_valid_from TEXT,
+  id_valid_to TEXT,
+  education TEXT,
+  school TEXT,
+  major TEXT,
+  introduction TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 企业项目业绩。
+CREATE TABLE IF NOT EXISTS credential_library_projects (
+  project_id TEXT PRIMARY KEY,
+  project_name TEXT,
+  project_number TEXT,
+  customer_name TEXT,
+  project_type TEXT,
+  project_manager TEXT,
+  contract_amount TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  project_status TEXT,
+  introduction TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 其他自定义资料。
+CREATE TABLE IF NOT EXISTS credential_library_other_materials (
+  material_id TEXT PRIMARY KEY,
+  name TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 所有原图统一保存到 credential-library/images/，这里只记录相对路径和业务归属。
+CREATE TABLE IF NOT EXISTS credential_library_images (
+  image_id TEXT PRIMARY KEY,
+  owner_type TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  field_key TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  custom_name TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_credential_library_images_owner
+ON credential_library_images(owner_type, owner_id, field_key, sort_order, created_at);
+
+-- ============================================================================
+-- 导出模板 export_templates（v15 建表，v31 增加系统预设标记）
 -- ============================================================================
 
 -- 标书导出模板库。
--- config_json 保存完整 ExportFormatConfig；当前仅用于模板保存、查看和编辑，尚未接入 Word 导出选择。
+-- config_json 保存完整 ExportFormatConfig，由技术方案生成设置里的
+-- technical_plan_generation_config.export_template_id 引用，Word 导出时按它排版。
+-- is_system = 1 是系统预设模板：真源在 electron/services/systemExportTemplates.cjs，
+-- 每次启动幂等同步进来，用户不可编辑不可删除，只能复制成自己的模板。
 CREATE TABLE IF NOT EXISTS export_templates (
   template_id TEXT PRIMARY KEY,
   template_name TEXT NOT NULL,
   config_json TEXT NOT NULL,
+  is_system INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -903,3 +1012,12 @@ ON feasibility_report_outline_nodes(parent_node_id, sort_order);
 
 CREATE INDEX IF NOT EXISTS idx_feasibility_report_outline_level
 ON feasibility_report_outline_nodes(level);
+
+-- 官方 API 开票信息（v24）：当前工作区保存一份。
+CREATE TABLE IF NOT EXISTS official_invoice_info (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  title_type TEXT NOT NULL DEFAULT 'enterprise',
+  buyer TEXT NOT NULL DEFAULT '',
+  tax_number TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT ''
+);

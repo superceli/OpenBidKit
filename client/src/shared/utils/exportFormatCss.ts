@@ -1,10 +1,16 @@
 /**
- * 将 ExportFormatConfig 映射为 CSS 自定义属性
- * 注入到正文预览容器的 style 上，实现实时 WYSIWYG 预览
+ * 将 ExportFormatConfig 映射为 CSS 自定义属性，注入正文预览容器
+ * （.markdown-viewer.export-format-preview，见 shared-markdown.css）。
+ *
+ * 只覆盖正文排版：纸张宽度、正文边距、字体字号行距、列表与标题样式。
+ * 页眉页脚、章节页框、纸面模拟那一套 CSS 变量已经删掉 —— 模板设置页的预览
+ * 早就换成 docx-editor.dev 渲染真实 docx 了（ExportFormatPage 的 DocxEditor），
+ * 那条链路走的是共享几何 + C# 排版，不吃这里的变量。
  */
 
-import type { ExportFormatConfig, HeadingStyleConfig, ListStyle, OrderedListStyle, PaperSize } from '../types/exportFormat';
-import { SIZE_TO_PT, FONT_TO_CSS, ALIGNMENT_TO_CSS, PAPER_DIMENSIONS, DEFAULT_HEADING_BORDER_CELL_COLORS } from '../types/exportFormat';
+import { resolveChromeLayoutWithText } from '../../../electron/shared/chrome/index.mjs';
+import type { ExportFormatConfig, HeadingStyleConfig, ListStyle, OrderedListStyle } from '../types/exportFormat';
+import { SIZE_TO_PT, FONT_TO_CSS, ALIGNMENT_TO_CSS } from '../types/exportFormat';
 
 /**
  * 中文字号名 → pt 值
@@ -101,50 +107,33 @@ export function buildExportFormatCssVars(config: ExportFormatConfig): Record<str
   const vars: Record<string, string> = {};
 
   // ── 页面设置 ──
-  const dims = PAPER_DIMENSIONS[config.page.paper_size as PaperSize] || PAPER_DIMENSIONS.a4;
-  const landscape = config.page.orientation === 'landscape';
-  const pageWidth = landscape ? dims.height : dims.width;
-  const pageHeight = landscape ? dims.width : dims.height;
+  // 纸张与边距取自共享几何模块，与正式导出、C# 样张同源；正文边距要为页眉页脚
+  // 装饰带让位，所以必须走 resolveChromeLayoutWithText 而不是配置里的原始值。
+  const { layout } = resolveChromeLayoutWithText(config.page as unknown as Record<string, unknown>);
 
-  vars['--ef-page-width'] = `${pageWidth}mm`;
-  vars['--ef-page-height'] = `${pageHeight}mm`;
-  vars['--ef-page-aspect'] = `${pageWidth} / ${pageHeight}`;
-  vars['--ef-page-padding-top'] = `${config.page.margin_top_cm}cm`;
-  vars['--ef-page-padding-bottom'] = `${config.page.margin_bottom_cm}cm`;
-  vars['--ef-page-padding-left'] = `${config.page.margin_left_cm}cm`;
-  vars['--ef-page-padding-right'] = `${config.page.margin_right_cm}cm`;
-  vars['--ef-header-font'] = chineseFontToCss(config.page.header_font || '宋体');
-  vars['--ef-header-size'] = `${chineseSizeToPt(config.page.header_size || '小五')}pt`;
-  vars['--ef-header-align'] = alignmentToCss(config.page.header_alignment || '居中对齐');
-  vars['--ef-header-color'] = config.page.header_color || '#536176';
-  vars['--ef-footer-font'] = chineseFontToCss(config.page.footer_font || '宋体');
-  vars['--ef-footer-size'] = `${chineseSizeToPt(config.page.footer_size || '小五')}pt`;
-  vars['--ef-footer-align'] = alignmentToCss(config.page.footer_alignment || '居中对齐');
-  vars['--ef-footer-color'] = config.page.footer_color || '#536176';
-
-  // ── 章节页框 ──
-  const headingBorder = config.heading_border;
-  const frameEnabled = headingBorder?.enabled === true;
-  const frameColor = headingBorder?.border_color || '#2174fd';
-  const frameCellColors = DEFAULT_HEADING_BORDER_CELL_COLORS.map((color, index) => headingBorder?.level_cell_colors?.[index] || color);
-  vars['--ef-chapter-frame-border'] = frameEnabled ? `0.8pt solid ${frameColor}` : 'none';
-  vars['--ef-chapter-frame-color'] = frameEnabled ? frameColor : 'transparent';
-  vars['--ef-chapter-row-border'] = frameEnabled ? `0.6pt solid color-mix(in srgb, ${frameColor} 55%, white)` : 'none';
-  frameCellColors.forEach((color, index) => {
-    vars[`--ef-chapter-row-${index + 1}-background`] = frameEnabled ? color : 'transparent';
-  });
+  vars['--ef-page-width'] = `${layout.widthCm}cm`;
+  vars['--ef-page-padding-top'] = `${layout.marginTopCm}cm`;
+  vars['--ef-page-padding-bottom'] = `${layout.marginBottomCm}cm`;
+  vars['--ef-page-padding-left'] = `${layout.marginLeftCm}cm`;
+  vars['--ef-page-padding-right'] = `${layout.marginRightCm}cm`;
 
   // ── 正文 ──
   const bodySizePt = chineseSizeToPt(config.body_text.size);
   vars['--ef-body-font'] = chineseFontToCss(config.body_text.font);
   vars['--ef-body-size'] = `${bodySizePt}pt`;
   vars['--ef-body-align'] = alignmentToCss(config.body_text.alignment);
-  vars['--ef-body-spacing-before'] = `${config.body_text.spacing_before_pt}pt`;
-  vars['--ef-body-spacing-after'] = `${config.body_text.spacing_after_pt}pt`;
+  // 与无文档网格的 Word 预览一致，标准行单位为 12pt，不取 CSS 当前行高。
+  vars['--ef-body-spacing-before'] = `${(config.body_text.spacing_before ?? 0) * (config.body_text.spacing_before_unit === 'pt' ? 1 : 12)}pt`;
+  vars['--ef-body-spacing-after'] = `${(config.body_text.spacing_after ?? 0) * (config.body_text.spacing_after_unit === 'pt' ? 1 : 12)}pt`;
   vars['--ef-body-indent'] = config.body_text.first_line_indent_chars > 0
     ? `${config.body_text.first_line_indent_chars}em`
     : '0';
-  vars['--ef-body-line-height'] = String(config.body_text.line_spacing_multiple);
+  const lineMode = config.body_text.line_spacing_mode ?? 'multiple';
+  const lineValue = config.body_text.line_spacing_value ?? 1.2;
+  // HTML 正文展示使用对应 CSS；模板预览直接读取 Word 原生间距，不经 CSS 换算。
+  vars['--ef-body-line-height'] = lineMode === 'exact' ? `${lineValue}pt`
+    : lineMode === 'at-least' ? `max(1em, ${lineValue}pt)`
+      : String(lineMode === 'single' ? 1 : lineMode === 'one-and-half' ? 1.5 : lineMode === 'double' ? 2 : lineValue);
   const listIndent = `${config.body_text.list_indent_chars ?? 2}em`;
   vars['--ef-list-indent'] = listIndent;
   const unorderedListStyle = unorderedListStyleToCss(config.body_text.list_style, listIndent);
@@ -172,7 +161,11 @@ export function buildExportFormatCssVars(config: ExportFormatConfig): Record<str
     vars['--ef-table-border-width'] = `${table.border_width ?? 1}px`;
     vars['--ef-table-border-color'] = table.border_color || '#dcdff6';
     vars['--ef-table-cell-padding'] = `${table.cell_padding_pt ?? 6}pt`;
-    vars['--ef-table-width'] = table.full_width ? '100%' : 'auto';
+    vars['--ef-table-caption-font'] = chineseFontToCss(table.caption_font || '宋体');
+    vars['--ef-table-caption-size'] = `${chineseSizeToPt(table.caption_size || '小四')}pt`;
+    vars['--ef-table-caption-align'] = alignmentToCss(table.caption_alignment || '居中对齐');
+    vars['--ef-table-caption-weight'] = table.caption_bold ? '700' : '400';
+    vars['--ef-table-caption-style'] = table.caption_italic ? 'italic' : 'normal';
     const tableAreas = [
       ['header', table.header_row],
       ['first-column', table.first_column],
@@ -191,8 +184,11 @@ export function buildExportFormatCssVars(config: ExportFormatConfig): Record<str
   // ── 图片 ──
   const image = config.image;
   if (image) {
+    const imageAlignment = alignmentToCss(image.alignment || '居中对齐');
     vars['--ef-image-max-width'] = `${image.max_width_percent ?? 90}%`;
-    vars['--ef-image-align'] = alignmentToCss(image.alignment || '居中对齐');
+    vars['--ef-image-align'] = imageAlignment;
+    vars['--ef-image-margin-left'] = imageAlignment === 'right' || imageAlignment === 'center' ? 'auto' : '0';
+    vars['--ef-image-margin-right'] = imageAlignment === 'left' || imageAlignment === 'center' ? 'auto' : '0';
     vars['--ef-image-caption-font'] = chineseFontToCss(image.caption_font || '宋体');
     vars['--ef-image-caption-size'] = `${chineseSizeToPt(image.caption_size || '小五')}pt`;
     vars['--ef-image-caption-align'] = alignmentToCss(image.caption_alignment || '居中对齐');

@@ -155,7 +155,7 @@ function buildFileCatalog({ tenderPaths, isWorkingCopy, hasSectionHint, knowledg
     }
   }
   lines.push('- 项目概述.md：项目背景和术语，用于确定大项，不作为商务/资格材料来源。');
-  lines.push('- 招标解析结果.md：Step02 已抽出的项目信息、甲方信息、交货和服务要求，用于确定大项并提取明确值。');
+  lines.push('- 招标解析结果.md：招标文件解析阶段已抽出的项目信息、甲方信息、交货和服务要求，用于确定大项并提取明确值。');
   lines.push('- 技术方案目录.md：已确认目录，用于判断正文会反复用到哪些统一口径。');
   if (hasSectionHint) {
     lines.push('- 标段说明.md：本次投标范围，只关注该范围内的事实。');
@@ -164,7 +164,7 @@ function buildFileCatalog({ tenderPaths, isWorkingCopy, hasSectionHint, knowledg
     lines.push('- 参考知识库/条目-*.md：补充已有大项的具体内容。');
   }
   if (hasOriginalPlan) {
-    lines.push('- 原方案.md：已有方案扩写底稿，补充已有大项的具体内容。');
+    lines.push('- 原方案.md：用户上传的优化扩写底稿，补充已有大项的具体内容。');
   }
   lines.push('- 材料说明.md：本次实际提供的文件清单，与上述用途一致。');
   return lines.join('\n');
@@ -226,7 +226,7 @@ ${buildMissingValueRule(globalFactsMode)}
 输出：
 1. 只写入 ${GLOBAL_FACTS_OUTPUT_FILE}，必须是纯 JSON，不要 Markdown 代码块。
 2. 根对象只有 groups；每项包含 id、title、content。
-3. 程序已为该文件预置 Schema。写入后调用 json-validation，只传 {"file_path":"${GLOBAL_FACTS_OUTPUT_FILE}"}；失败则先改文件再校验，直到通过。
+3. 程序已为该文件开启写入时自动 Schema 校验。使用 write 或 edit 后根据工具返回结果处理：失败时继续修复；通过且确认全部工作完成时，在最后一次 write 或 edit 中传 task_complete=true。已通过自动校验后不要重复调用 json-validation。
 
 格式示意：
 ${buildJsonExample(globalFactsMode)}`;
@@ -302,12 +302,9 @@ async function runGlobalFactsTaskV2({
     throw new Error('请先生成目录，再生成全局事实');
   }
 
-  const isExpansionWorkflow = storedPlan.workflowKind === 'existing-plan-expansion';
+  const hasOriginalPlan = Boolean(storedPlan.originalPlanFile);
   let originalPlanMarkdown = '';
-  if (isExpansionWorkflow) {
-    if (!storedPlan.originalPlanFile) {
-      throw new Error('请先上传原方案，再生成全局事实');
-    }
+  if (hasOriginalPlan) {
     originalPlanMarkdown = String(workspaceStore.readOriginalPlanMarkdown?.() || '').trim();
     if (!originalPlanMarkdown) {
       throw new Error('请先上传原方案，再生成全局事实');
@@ -392,6 +389,8 @@ async function runGlobalFactsTaskV2({
   const agentResult = await agentService.runTask({
     task_id: task.task_id,
     title: '全局事实变量生成',
+    summary_enabled: false,
+    auto_validate_json: true,
     prompt,
     output_file: GLOBAL_FACTS_OUTPUT_FILE,
     files,

@@ -1,8 +1,8 @@
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { useState, type ComponentType, type ReactElement, type SVGProps } from 'react';
+import { useEffect, useState, type ComponentType, type ReactElement, type SVGProps } from 'react';
 import { getAppMenuItems, getParentMenuItemBySection } from '../app/menuConfig';
 import type { AppMenuItem, SectionId } from '../shared/types/navigation';
-import { AppDialog, useToast } from '../shared/ui';
+import { AppDialog, useNoticeToast } from '../shared/ui';
 import logoUrl from '../../assets/icon_256.png';
 import groupChatQrUrl from '../../assets/group-chat-qr.png';
 
@@ -15,11 +15,10 @@ interface SidebarProps {
 const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>> = {
   'bid-generation': BidGenerationIcon,
   'technical-plan': DocumentIcon,
-  'existing-plan-expansion': DocumentIcon,
   'feasibility-report': DocumentIcon,
-  'business-bid': BriefcaseIcon,
   'knowledge-base': ArchiveIcon,
   'document-knowledge-base': ArchiveIcon,
+  'credential-library': ArchiveIcon,
   'image-knowledge-base': ArchiveIcon,
   resources: ResourcesIcon,
   'bid-check': BidCheckIcon,
@@ -27,9 +26,6 @@ const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>>
   'rejection-check': ShieldIcon,
   'ai-evaluation': BidCheckIcon,
   'template-settings': DocumentIcon,
-  'my-templates': DocumentIcon,
-  'new-template': DocumentIcon,
-  'export-format': DocumentIcon,
   'bid-opportunity': RadarIcon,
   'developer-test': FlaskIcon,
   'developer-json-test': FlaskIcon,
@@ -38,19 +34,44 @@ const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>>
   'developer-parser-sandbox': FlaskIcon,
   'developer-export-preview': FlaskIcon,
   'developer-expansion-replace-test': FlaskIcon,
+  'developer-layout-budget-test': FlaskIcon,
   'developer-agent-test': FlaskIcon,
   'plugin-manager': PluginIcon,
   settings: GearIcon,
 };
 
 const USER_GUIDE_URL = 'https://wiki.agnet.top/';
+const SYSTEM_SETTINGS_URL = 'https://analytics.agnet.top/system-settings';
 
 function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [groupChatOpen, setGroupChatOpen] = useState(false);
-  const { showToast } = useToast();
+  const [groupChatQrSource, setGroupChatQrSource] = useState(groupChatQrUrl);
+  const showNotice = useNoticeToast();
   const menuItems = getAppMenuItems(developerMode);
   const activeParent = getParentMenuItemBySection(activeSection, developerMode);
+
+  useEffect(() => {
+    let active = true;
+
+    // 远程二维码完整加载后再替换，查询或图片失败时继续使用内置图片。
+    void fetch(SYSTEM_SETTINGS_URL)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => new Promise<string>((resolve, reject) => {
+        const url = String(data?.settings?.groupChatQrUrl || '');
+        if (!url) return reject();
+        const image = new Image();
+        image.onload = () => resolve(url);
+        image.onerror = reject;
+        image.src = url;
+      }))
+      .then((url) => {
+        if (active) setGroupChatQrSource(url);
+      })
+      .catch(() => undefined);
+
+    return () => { active = false; };
+  }, []);
 
   const handleMenuItemClick = (item: AppMenuItem) => {
     if (!item.notice) {
@@ -58,16 +79,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
       return;
     }
 
-    showToast(item.notice.message, 'info', {
-      duration: 7000,
-      actions: item.notice.externalUrl ? [
-        {
-          label: item.notice.actionLabel || '打开链接',
-          variant: 'primary',
-          onClick: () => openExternalUrl(item.notice?.externalUrl || ''),
-        },
-      ] : undefined,
-    });
+    showNotice(item.notice);
   };
 
   return (
@@ -79,7 +91,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
           <img src={logoUrl} alt="" />
         </div>
         <div className="brand-copy">
-          <span>创合</span>
+          <span>易标</span>
           <strong>投标工具箱</strong>
         </div>
       </div>
@@ -123,7 +135,7 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
       <div className="sidebar-footer">
         <div className="sidebar-footer-shortcuts">
           {collapsed ? wrapTooltip('使用文档', renderUserGuideButton()) : renderUserGuideButton()}
-          {collapsed ? wrapTooltip('加好友', renderGroupChatButton(() => setGroupChatOpen(true))) : renderGroupChatButton(() => setGroupChatOpen(true))}
+          {collapsed ? wrapTooltip('加群', renderGroupChatButton(() => setGroupChatOpen(true))) : renderGroupChatButton(() => setGroupChatOpen(true))}
         </div>
         {collapsed ? wrapTooltip('设置', renderSettingsButton(activeSection, onSectionChange)) : renderSettingsButton(activeSection, onSectionChange)}
       </div>
@@ -132,12 +144,12 @@ function Sidebar({ activeSection, developerMode, onSectionChange }: SidebarProps
         open={groupChatOpen}
         onOpenChange={setGroupChatOpen}
         kicker="用户交流"
-        title="扫码加好友交流"
-        description="使用微信扫描下方二维码。"
+        title="扫码加入交流群"
+        description="使用微信扫描下方二维码，加入易标用户交流群。"
         cardClassName="group-chat-dialog"
         actions={<button type="button" className="secondary-action" onClick={() => setGroupChatOpen(false)}>关闭</button>}
       >
-        <img className="group-chat-qr" src={groupChatQrUrl} alt="创合用户交流群二维码" />
+        <img className="group-chat-qr" src={groupChatQrSource} alt="易标用户交流群二维码" />
       </AppDialog>
     </aside>
   );
@@ -200,13 +212,13 @@ function renderGroupChatButton(onClick: () => void) {
       type="button"
       className="settings-trigger sidebar-footer-shortcut"
       onClick={onClick}
-      aria-label="加好友"
+      aria-label="加群"
     >
       <span className="nav-icon" aria-hidden="true">
         <GroupChatIcon />
       </span>
       <span className="settings-copy">
-        <strong>加好友</strong>
+        <strong>加群</strong>
       </span>
     </button>
   );
@@ -245,17 +257,6 @@ function DocumentIcon(props: SVGProps<SVGSVGElement>) {
       <path d="M13.5 4v4.35h4.25" />
       <path d="M9.5 12.2h5" />
       <path d="M9.5 15.7h4" />
-    </svg>
-  );
-}
-
-function BriefcaseIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M5 8h14v11.5H5z" />
-      <path d="M9 8V5.5h6V8" />
-      <path d="M5 12.5h14" />
-      <path d="M10.5 12.5v2h3v-2" />
     </svg>
   );
 }

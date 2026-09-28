@@ -1,28 +1,22 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentAnalysisPage from './DocumentAnalysisPage';
+import GenerationSettingsPage from './GenerationSettingsPage';
 import BidAnalysisPage from './BidAnalysisPage';
 import OutlineEditPage from './OutlineEditPage';
 import GlobalFactsPage from './GlobalFactsPage';
 import ContentEditPage from './ContentEditPage';
-import { TemplatePreview } from '../../export-format/pages/ExportFormatPage';
 import { useTechnicalPlanWorkflow } from '../hooks/useTechnicalPlanWorkflow';
-import { bidAnalysisTasks, getBidAnalysisTasks, isMissingBidAnalysisResult } from '../services/bidAnalysisWorkflow';
+import { bidAnalysisTasks, getBidAnalysisTasks, isMissingBidAnalysisResult, isMissingTechnicalScoreItems } from '../services/bidAnalysisWorkflow';
 import { trackPageView } from '../../../shared/analytics/analytics';
 import { AppDialog, FloatingToolbar, ProgressBar, ToolbarArrowLeftIcon, ToolbarArrowRightIcon, ToolbarDocumentIcon, ToolbarSparkleIcon, useToast } from '../../../shared/ui';
-import type { BackgroundTaskState, BidAnalysisTasks, ContentGenerationOptions, GlobalFactGroupState, GlobalFactsMode, SaveOutlineRequest, SaveOutlineSelectionRequest, TechnicalPlanState, TechnicalPlanStep, TechnicalPlanWorkflowKind } from '../types';
-import { DEFAULT_OUTLINE_WORD_CONTROL_OPTIONS } from '../../../shared/types';
-import type { OutlineData, OutlineItem, OutlineWordControlOptions, WordExportProgressEvent } from '../../../shared/types';
-import type { ExportFormatConfig, ExportTemplateRecord } from '../../../shared/types/exportFormat';
-import { DEFAULT_EXPORT_FORMAT } from '../../../shared/types/exportFormat';
-import type { SectionId } from '../../../shared/types/navigation';
-import { buildExportFormatCssVars } from '../../../shared/utils/exportFormatCss';
-import { countReadableWords } from '../../../shared/utils/wordCount';
+import type { BackgroundTaskState, BidAnalysisTasks, ContentGenerationOptions, GlobalFactGroupState, GlobalFactsMode, SaveOutlineRequest, SaveOutlineSelectionRequest, TechnicalPlanState, TechnicalPlanStep } from '../types';
+import type { TechnicalPlanOutlineData as OutlineData, TechnicalPlanOutlineItem as OutlineItem, OutlineWordControlOptions, WordExportProgressEvent } from '../../../shared/types';
+import type { ExportTemplateRecord, ExportTemplateScope } from '../../../shared/types/exportFormat';
+import { ExportTemplateEditorDialog } from '../../export-format/pages/ExportFormatPage';
 
 interface TechnicalPlanHomeProps {
-  workflowKind: TechnicalPlanWorkflowKind;
   registerLeaveGuard?: (guard: ((nextSection?: string) => Promise<boolean>) | null) => void;
-  onSectionChange?: (section: SectionId) => void;
 }
 
 interface OutlineSortGuard {
@@ -31,22 +25,10 @@ interface OutlineSortGuard {
   discardSort: () => void;
 }
 
-interface WorkflowSwitchRequest {
-  from: TechnicalPlanWorkflowKind;
-  to: TechnicalPlanWorkflowKind;
-  navigateBackOnCancel: boolean;
-}
-
 interface WordControlWarningMetric {
   label: string;
   expected: string;
   actual: string;
-}
-
-interface WordControlWarningSection {
-  id: string;
-  title: string;
-  words: number;
 }
 
 interface WordControlWarningDialogState {
@@ -54,13 +36,13 @@ interface WordControlWarningDialogState {
   title: string;
   message: string;
   metrics: WordControlWarningMetric[];
-  sections: WordControlWarningSection[];
 }
 
 const PET_PLUGIN_ID = 'openbidkit-pet';
 
-const steps: TechnicalPlanStep[] = [
+const technicalPlanSteps: TechnicalPlanStep[] = [
   'document-analysis',
+  'generation-settings',
   'bid-analysis',
   'outline-generation',
   'global-facts',
@@ -70,50 +52,12 @@ const steps: TechnicalPlanStep[] = [
 
 const stepLabels: Record<TechnicalPlanStep, string> = {
   'document-analysis': '选择标书',
+  'generation-settings': '生成设置',
   'bid-analysis': '招标文件解析',
   'outline-generation': '目录生成',
   'global-facts': '全局事实设定',
   'content-edit': '生成正文',
   expand: '扩写改写',
-};
-
-const resetState = {
-  workflowKind: 'technical-plan' as TechnicalPlanWorkflowKind,
-  step: 'document-analysis' as TechnicalPlanStep,
-  tenderFile: null,
-  tenderFiles: [],
-  originalPlanFile: null,
-  projectOverview: '',
-  techRequirements: '',
-  bidAnalysisMode: 'key' as const,
-  bidAnalysisSelectedTaskIds: [] as string[],
-  bidAnalysisTasks: {},
-  bidAnalysisProgress: 0,
-  bidSectionMode: 'single' as const,
-  bidSections: [],
-  bidSectionExtractionStatus: 'idle' as const,
-  bidSectionExtractionError: undefined,
-  outlineMode: 'aligned' as const,
-  outlineExpansionMode: 'ai-complement' as const,
-  outlineWordControlOptions: { ...DEFAULT_OUTLINE_WORD_CONTROL_OPTIONS },
-  outlineWordControlSnapshot: undefined,
-  referenceKnowledgeDocumentIds: [] as string[],
-  bidSectionExtractionTask: undefined,
-  bidAnalysisTask: undefined,
-  outlineGenerationTask: undefined,
-  outlineAdjustmentTask: undefined,
-  globalFactsMode: 'fabricate' as GlobalFactsMode,
-  globalFactsTask: undefined,
-  globalFactsAdjustmentTask: undefined,
-  globalFacts: [] as GlobalFactGroupState[],
-  contentGenerationTask: undefined,
-  contentGenerationOptions: undefined,
-  contentGenerationSections: {},
-  contentGenerationPlans: {},
-  contentIllustrationPlan: undefined,
-  contentGenerationRuntime: undefined,
-  bidTemplateExists: false,
-  outlineData: null,
 };
 
 function collectLeafItems(items: OutlineItem[]): OutlineItem[] {
@@ -124,20 +68,11 @@ function isOutlineLeafCountOutsideRange(outlineData: OutlineData, options: Outli
   if (options.minimumWords === 0 && options.maximumWords === 0) return false;
   const effectiveSectionWords = options.sectionWords > 0 ? options.sectionWords : 3000;
   const leafCount = collectLeafItems(outlineData.outline || []).filter((item) => item.content_mode === 'ai-generate').length;
+  if (leafCount === 0) return false;
   const minimumLeafCount = options.minimumWords > 0 ? Math.ceil(options.minimumWords / effectiveSectionWords) : null;
   const maximumLeafCount = options.maximumWords > 0 ? Math.floor(options.maximumWords / effectiveSectionWords) : null;
   return (minimumLeafCount !== null && leafCount < minimumLeafCount)
     || (maximumLeafCount !== null && leafCount > maximumLeafCount);
-}
-
-function countMermaidDiagrams(content: string) {
-  const mermaidBlocks = (String(content || '').match(/```mermaid[\s\S]*?```/gi) || []).length;
-  const mermaidInkImages = (String(content || '').match(/https:\/\/mermaid\.ink\/img\//gi) || []).length;
-  return mermaidBlocks + mermaidInkImages;
-}
-
-function countOutlineMermaidDiagrams(items: OutlineItem[]) {
-  return collectLeafItems(items).reduce((sum, item) => sum + countMermaidDiagrams(item.content || ''), 0);
 }
 
 interface ExportProgressState {
@@ -146,7 +81,6 @@ interface ExportProgressState {
   progress: number;
   message: string;
   warnings: string[];
-  mermaidCount: number;
   filePath?: string;
   error?: string;
 }
@@ -157,7 +91,6 @@ const initialExportProgress: ExportProgressState = {
   progress: 0,
   message: '',
   warnings: [],
-  mermaidCount: 0,
 };
 
 const MAX_UI_TASK_LOGS = 80;
@@ -183,7 +116,7 @@ function formatCountRange(minimum: number, maximum: number, unit: string) {
 }
 
 // 根据任务最终统计构建需要用户处理的字数警告弹窗。
-function buildWordControlWarningDialog(task: BackgroundTaskState, state: TechnicalPlanState): WordControlWarningDialogState | null {
+function buildWordControlWarningDialog(task: BackgroundTaskState): WordControlWarningDialogState | null {
   const outlineStats = task.stats?.outline;
   if (outlineStats?.word_adjustment_warning) {
     // 质量类：叶子数量已达标，仅二审发现可优化点，不展示会误导的叶子数对比。
@@ -193,7 +126,6 @@ function buildWordControlWarningDialog(task: BackgroundTaskState, state: Technic
         title: '目录已生成，建议人工核对',
         message: outlineStats.word_adjustment_warning,
         metrics: [],
-        sections: [],
       };
     }
     // 数量类：叶子数量未进入区间，展示预期与实际对比。
@@ -212,59 +144,10 @@ function buildWordControlWarningDialog(task: BackgroundTaskState, state: Technic
           : formatCountRange(minimumLeafCount, maximumLeafCount, '个'),
         actual: `${currentLeafCount.toLocaleString('zh-CN')} 个`,
       }],
-      sections: [],
     };
   }
 
-  const contentStats = task.stats?.content;
-  if (!contentStats?.word_control_warning) return null;
-
-  const minimumWords = contentStats.minimum_words || 0;
-  const maximumWords = contentStats.maximum_words || 0;
-  const sectionWords = contentStats.section_words || 0;
-  const sectionMinimumWords = sectionWords > 0 ? Math.ceil(sectionWords * 0.8) : 0;
-  const sectionMaximumWords = sectionWords > 0 ? Math.floor(sectionWords * 1.2) : 0;
-  const orderedLeaves = state.outlineData?.outline?.length
-    ? collectLeafItems(state.outlineData.outline).filter((item) => item.content_mode === 'ai-generate')
-    : [];
-  const sectionSources = orderedLeaves.length
-    ? orderedLeaves.map((item) => ({
-        id: item.id,
-        title: item.title || state.contentGenerationSections[item.id]?.title || '未命名章节',
-        status: state.contentGenerationSections[item.id]?.status,
-        content: state.contentGenerationSections[item.id]?.content ?? item.content ?? '',
-      }))
-    : Object.values(state.contentGenerationSections);
-  const sections = contentStats.strict_section_words && sectionWords > 0
-    ? sectionSources
-        .filter((section) => section.status === 'success')
-        .map((section) => ({ ...section, words: countReadableWords(section.content) }))
-        .filter((section) => section.words < sectionMinimumWords || section.words > sectionMaximumWords)
-        .map(({ id, title, words }) => ({ id, title, words }))
-    : [];
-  const metrics: WordControlWarningMetric[] = [];
-  if (minimumWords > 0 || maximumWords > 0) {
-    metrics.push({
-      label: '全文字数',
-      expected: formatCountRange(minimumWords, maximumWords, '字'),
-      actual: `${(contentStats.current_words || 0).toLocaleString('zh-CN')} 字`,
-    });
-  }
-  if (contentStats.strict_section_words && sectionWords > 0) {
-    metrics.push({
-      label: '单个小节',
-      expected: `${sectionMinimumWords.toLocaleString('zh-CN')} 至 ${sectionMaximumWords.toLocaleString('zh-CN')} 字（目标 ${sectionWords.toLocaleString('zh-CN')} 字）`,
-      actual: `${sections.length.toLocaleString('zh-CN')} 个小节未达标`,
-    });
-  }
-
-  return {
-    taskId: task.task_id,
-    title: '正文字数未达到预期',
-    message: contentStats.word_control_warning,
-    metrics,
-    sections,
-  };
+  return null;
 }
 
 function areRequiredBidAnalysisTasksReady(tasks: BidAnalysisTasks) {
@@ -272,41 +155,6 @@ function areRequiredBidAnalysisTasksReady(tasks: BidAnalysisTasks) {
     const state = tasks[task.id];
     return state?.status === 'success' && state.content.trim();
   });
-}
-
-function workflowKindFromSection(section?: string): TechnicalPlanWorkflowKind | null {
-  if (section === 'technical-plan') return 'technical-plan';
-  if (section === 'existing-plan-expansion') return 'existing-plan-expansion';
-  return null;
-}
-
-function workflowLabel(kind: TechnicalPlanWorkflowKind) {
-  return kind === 'existing-plan-expansion' ? '已有方案扩写' : '生成技术方案';
-}
-
-function hasRunningTechnicalPlanTask(state: TechnicalPlanState) {
-  return [state.bidSectionExtractionTask, state.bidAnalysisTask, state.outlineGenerationTask, state.outlineAdjustmentTask, state.globalFactsTask, state.globalFactsAdjustmentTask, state.contentGenerationTask]
-    .some((task) => task?.status === 'running' || task?.status === 'pausing');
-}
-
-function hasWorkflowSpecificProgress(state: TechnicalPlanState) {
-  return Boolean(
-    state.originalPlanFile
-    || state.bidSectionMode === 'multiple'
-    || state.bidSections.length > 0
-    || state.bidSectionExtractionTask
-    || state.outlineData
-    || state.globalFacts.length > 0
-    || Object.keys(state.contentGenerationSections || {}).length > 0
-    || Object.keys(state.contentGenerationPlans || {}).length > 0
-    || state.contentIllustrationPlan
-    || state.contentGenerationRuntime
-    || state.contentGenerationOptions
-    || state.outlineGenerationTask
-    || state.globalFactsTask
-    || state.contentGenerationTask
-    || ['outline-generation', 'global-facts', 'content-edit', 'expand'].includes(state.step),
-  );
 }
 
 function updateOutlineItemContent(items: OutlineItem[], itemId: string, content: string): OutlineItem[] {
@@ -321,38 +169,32 @@ function updateOutlineItemContent(items: OutlineItem[], itemId: string, content:
   });
 }
 
-function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }: TechnicalPlanHomeProps) {
+function TechnicalPlanHome({ registerLeaveGuard }: TechnicalPlanHomeProps) {
   const { hydrated, state, setState } = useTechnicalPlanWorkflow();
   const { showToast } = useToast();
   const [tenderMarkdown, setTenderMarkdown] = useState('');
-  const [originalPlanMarkdown, setOriginalPlanMarkdown] = useState('');
   const [exportProgress, setExportProgress] = useState<ExportProgressState>(initialExportProgress);
-  const [exportFormat, setExportFormat] = useState<ExportFormatConfig>(DEFAULT_EXPORT_FORMAT);
-  const [exportTemplateDialogOpen, setExportTemplateDialogOpen] = useState(false);
   const [exportTemplates, setExportTemplates] = useState<ExportTemplateRecord[]>([]);
   const [exportTemplatesLoading, setExportTemplatesLoading] = useState(false);
-  const [exportTemplateSearch, setExportTemplateSearch] = useState('');
-  const [selectedExportTemplateId, setSelectedExportTemplateId] = useState('');
+  const [exportTemplateEditorOpen, setExportTemplateEditorOpen] = useState(false);
   const [sortLeaveDialogOpen, setSortLeaveDialogOpen] = useState(false);
   const [outlineWordControlLeaveDialogOpen, setOutlineWordControlLeaveDialogOpen] = useState(false);
   const [wordControlWarningDialog, setWordControlWarningDialog] = useState<WordControlWarningDialogState | null>(null);
   const [pendingWordControlWarningTaskId, setPendingWordControlWarningTaskId] = useState<string | null>(null);
   const [savingSortBeforeLeave, setSavingSortBeforeLeave] = useState(false);
-  const [workflowSwitchRequest, setWorkflowSwitchRequest] = useState<WorkflowSwitchRequest | null>(null);
-  const [switchingWorkflow, setSwitchingWorkflow] = useState(false);
   const [petInstallDialogOpen, setPetInstallDialogOpen] = useState(false);
   const [installingPetPlugin, setInstallingPetPlugin] = useState(false);
   const [bidAnalysisFocusRequest, setBidAnalysisFocusRequest] = useState<{ taskId: string } | null>(null);
   const [globalFactsFocusRequest, setGlobalFactsFocusRequest] = useState<{ groupId: string } | null>(null);
+  const [generationSettingsInitialTab, setGenerationSettingsInitialTab] = useState<'content' | 'appearance'>('content');
   const [isResetting, setIsResetting] = useState(false);
   const sortGuardRef = useRef<OutlineSortGuard | null>(null);
   const sortLeaveResolverRef = useRef<((allowed: boolean) => void) | null>(null);
   const outlineWordControlLeaveResolverRef = useRef<((allowed: boolean) => void) | null>(null);
   const shownWordControlWarningTaskIdsRef = useRef(new Set<string>());
-  const workflowSwitchResolverRef = useRef<((allowed: boolean) => void) | null>(null);
-  const skippedWorkflowSwitchPromptRef = useRef<TechnicalPlanWorkflowKind | null>(null);
-  const lastExecutedWorkflowSwitchRef = useRef<TechnicalPlanWorkflowKind | null>(null);
-  const activeIndex = steps.indexOf(state.step);
+  const steps = technicalPlanSteps;
+  const activeIndex = Math.max(0, steps.indexOf(state.step));
+  const activeStepNumber = String(activeIndex + 1).padStart(2, '0');
   const requiredBidAnalysisReady = areRequiredBidAnalysisTasksReady(state.bidAnalysisTasks);
   const isBidSectionExtractionRunning = state.bidSectionExtractionTask?.status === 'running' || state.bidSectionExtractionTask?.status === 'pausing';
   const isBidAnalysisTaskRunning = state.bidAnalysisTask?.status === 'running' || state.bidAnalysisTask?.status === 'pausing';
@@ -361,8 +203,11 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
   const bidSectionReady = state.bidSectionMode !== 'multiple'
     || (state.bidSectionExtractionStatus === 'success' && !isBidSectionExtractionRunning && selectedBidSectionValid);
   const bidAnalysisReady = requiredBidAnalysisReady && !isBidAnalysisTaskRunning && bidSectionReady;
+  const technicalScoreMissing = state.bidAnalysisTasks.techRequirements?.status === 'success'
+    && isMissingTechnicalScoreItems(state.bidAnalysisTasks.techRequirements.content);
   const firstMissingBidAnalysisTask = bidAnalysisTasks.find((task) => (
-    state.bidAnalysisSelectedTaskIds.includes(task.id)
+    task.id !== 'techRequirements'
+    && state.bidAnalysisSelectedTaskIds.includes(task.id)
     && isMissingBidAnalysisResult(task, state.bidAnalysisTasks[task.id]?.content)
   ));
   const globalFactsReady = state.globalFacts.length > 0 && state.globalFactsTask?.status === 'success';
@@ -370,27 +215,27 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
   const globalFactsHasPlaceholder = Boolean(firstGlobalFactWithPlaceholder);
   const isGlobalFactsAdjusting = state.globalFactsAdjustmentTask?.status === 'running' || state.globalFactsAdjustmentTask?.status === 'pausing';
   const contentTaskStatus = state.contentGenerationTask?.status;
-  const isContentGenerating = contentTaskStatus === 'running' || contentTaskStatus === 'pausing';
-  const isContentPaused = contentTaskStatus === 'paused';
+  // AI 正文在会话 HTML 中；已完成记录及生成中保存的进度都需要清空确认。
+  const hasGeneratedBody = Boolean(state.contentGenerationTask?.stats?.content?.generation_completed)
+    || collectLeafItems(state.outlineData?.outline || []).some(item => item.content_mode === 'ai-generate' && (
+      state.contentGenerationSections?.[item.id]?.status === 'success'
+      || Object.hasOwn(state.contentGenerationRuntime?.section_words || {}, item.id)
+      || state.contentGenerationRuntime?.html_output?.word_sections.some(section => section.section_id === item.id)
+    ));
+  const contentBlocksExport = contentTaskStatus === 'running' || contentTaskStatus === 'pausing' || contentTaskStatus === 'paused';
   const isExporting = exportProgress.running;
-  const filteredExportTemplates = useMemo(() => {
-    const keyword = exportTemplateSearch.trim().toLowerCase();
-    if (!keyword) return exportTemplates;
-    return exportTemplates.filter((template) => template.template_name.toLowerCase().includes(keyword));
-  }, [exportTemplateSearch, exportTemplates]);
-  const selectedExportTemplate = filteredExportTemplates.find((template) => template.template_id === selectedExportTemplateId) || filteredExportTemplates[0] || null;
-  const exportTemplatePreviewStyle = useMemo(() => buildExportFormatCssVars(selectedExportTemplate?.config || exportFormat), [exportFormat, selectedExportTemplate]);
-  const requiresOriginalPlan = workflowKind === 'existing-plan-expansion';
+  const generatedOutlineMode = state.outlineGenerationTask?.stats?.agent?.resume_payload?.outline_mode;
+  const outlineModeRequiresRegeneration = Boolean(
+    state.outlineData && generatedOutlineMode && generatedOutlineMode !== state.outlineMode,
+  );
   const isNextDisabled = activeIndex >= steps.length - 1
-    || (state.step === 'document-analysis' && (!state.tenderFile || (requiresOriginalPlan && !state.originalPlanFile)))
+    || (state.step === 'document-analysis' && !state.tenderFile)
     || (state.step === 'bid-analysis' && !bidAnalysisReady)
     || (state.step === 'outline-generation' && (!state.outlineData || !state.outlineWordControlSnapshot))
     || (state.step === 'global-facts' && (!globalFactsReady || isGlobalFactsAdjusting));
   const nextTooltip = state.step === 'document-analysis' && !state.tenderFile
       ? '上传完招标文件后才能进入下一步'
-      : state.step === 'document-analysis' && requiresOriginalPlan && !state.originalPlanFile
-        ? '上传完原方案后才能进入下一步'
-        : state.step === 'bid-analysis' && isBidSectionExtractionRunning
+      : state.step === 'bid-analysis' && isBidSectionExtractionRunning
           ? '多标段识别任务仍在运行，请等待当前任务结束'
           : state.step === 'bid-analysis' && state.bidSectionMode === 'multiple' && state.bidSectionExtractionStatus === 'error'
             ? '请重新识别标段或切回单标段'
@@ -435,51 +280,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     });
   };
 
-  const executeWorkflowSwitch = useCallback(async (targetWorkflowKind: TechnicalPlanWorkflowKind) => {
-    if (!window.yibiao?.technicalPlan.switchWorkflowKind) {
-      showToast('技术方案工作流切换服务尚未初始化', 'error');
-      return false;
-    }
-
-    try {
-      setSwitchingWorkflow(true);
-      await window.yibiao.technicalPlan.switchWorkflowKind(targetWorkflowKind);
-      const saved = await window.yibiao.technicalPlan.loadState();
-      lastExecutedWorkflowSwitchRef.current = targetWorkflowKind;
-      setState((prev) => ({ ...prev, ...saved, workflowKind: targetWorkflowKind }));
-      setOriginalPlanMarkdown('');
-      showToast(`已切换到${workflowLabel(targetWorkflowKind)}`, 'success');
-      return true;
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '切换技术方案工作流失败', 'error');
-      return false;
-    } finally {
-      setSwitchingWorkflow(false);
-    }
-  }, [setState, showToast]);
-
-  const resolveWorkflowSwitch = useCallback((allowed: boolean) => {
-    const request = workflowSwitchRequest;
-    workflowSwitchResolverRef.current?.(allowed);
-    workflowSwitchResolverRef.current = null;
-    setWorkflowSwitchRequest(null);
-    if (!allowed && request?.navigateBackOnCancel) {
-      skippedWorkflowSwitchPromptRef.current = request.to;
-      onSectionChange?.(request.from);
-    }
-  }, [onSectionChange, workflowSwitchRequest]);
-
-  const openWorkflowSwitchDialog = useCallback((targetWorkflowKind: TechnicalPlanWorkflowKind, navigateBackOnCancel: boolean) => {
-    setWorkflowSwitchRequest({
-      from: state.workflowKind,
-      to: targetWorkflowKind,
-      navigateBackOnCancel,
-    });
-    return new Promise<boolean>((resolve) => {
-      workflowSwitchResolverRef.current = resolve;
-    });
-  }, [state.workflowKind]);
-
   const confirmSortLeaveOnly = useCallback(async () => {
     const guard = sortGuardRef.current;
     if (!guard?.hasUnsavedSort()) {
@@ -492,28 +292,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     });
   }, []);
 
-  const confirmPendingSortLeave = useCallback(async (nextSection?: string) => {
-    const targetWorkflowKind = workflowKindFromSection(nextSection);
-    if (!targetWorkflowKind || targetWorkflowKind === state.workflowKind) {
-      return confirmSortLeaveOnly();
-    }
-
-    if (hasRunningTechnicalPlanTask(state)) {
-      showToast('当前有技术方案任务正在运行，请等待任务结束后再切换模式', 'info');
-      return false;
-    }
-
-    const sortAllowed = await confirmSortLeaveOnly();
-    if (!sortAllowed) {
-      return false;
-    }
-
-    if (hasWorkflowSpecificProgress(state)) {
-      return openWorkflowSwitchDialog(targetWorkflowKind, false);
-    }
-
-    return executeWorkflowSwitch(targetWorkflowKind);
-  }, [confirmSortLeaveOnly, executeWorkflowSwitch, openWorkflowSwitchDialog, showToast, state]);
+  const confirmPendingSortLeave = useCallback(() => confirmSortLeaveOnly(), [confirmSortLeaveOnly]);
 
   const continueSorting = () => {
     resolveSortLeave(false);
@@ -542,61 +321,13 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     }
   };
 
-  const cancelWorkflowSwitch = () => {
-    resolveWorkflowSwitch(false);
-  };
-
-  const confirmWorkflowSwitch = async () => {
-    if (!workflowSwitchRequest) {
-      return;
-    }
-
-    const switched = await executeWorkflowSwitch(workflowSwitchRequest.to);
-    if (switched) {
-      resolveWorkflowSwitch(true);
-    }
-  };
-
   useEffect(() => {
     if (!hydrated) return;
 
-    trackPageView(`${workflowKind}/${state.step}`);
-    void window.yibiao?.ui?.setCurrentView({ section: workflowKind, step: state.step });
-  }, [hydrated, state.step, workflowKind]);
-
-  useEffect(() => {
-    if (!hydrated || state.workflowKind === workflowKind) return;
-    if (skippedWorkflowSwitchPromptRef.current === workflowKind) return;
-    if (lastExecutedWorkflowSwitchRef.current === state.workflowKind) return;
-    if (workflowSwitchRequest || switchingWorkflow) return;
-
-    const run = async () => {
-      if (hasRunningTechnicalPlanTask(state)) {
-        showToast('当前有技术方案任务正在运行，请等待任务结束后再切换模式', 'info');
-        onSectionChange?.(state.workflowKind);
-        return;
-      }
-
-      if (hasWorkflowSpecificProgress(state)) {
-        await openWorkflowSwitchDialog(workflowKind, true);
-        return;
-      }
-
-      const switched = await executeWorkflowSwitch(workflowKind);
-      if (!switched) {
-        onSectionChange?.(state.workflowKind);
-      }
-    };
-
-    void run();
-  }, [executeWorkflowSwitch, hydrated, onSectionChange, openWorkflowSwitchDialog, showToast, state, switchingWorkflow, workflowKind, workflowSwitchRequest]);
-
-  useEffect(() => {
-    if (state.workflowKind === workflowKind) {
-      skippedWorkflowSwitchPromptRef.current = null;
-      lastExecutedWorkflowSwitchRef.current = null;
-    }
-  }, [state.workflowKind, workflowKind]);
+    const analyticsSection = state.originalPlanFile ? 'existing-plan-expansion' : 'technical-plan';
+    trackPageView(`${analyticsSection}/${state.step}`);
+    void window.yibiao?.ui?.setCurrentView({ section: 'technical-plan', step: state.step });
+  }, [hydrated, state.originalPlanFile, state.step]);
 
   useEffect(() => {
     if (!hydrated || wordControlWarningDialog) return;
@@ -610,22 +341,12 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
           .find((candidate) => candidate?.task_id === pendingWordControlWarningTaskId)
       : currentStepTask;
     if (!task || task.status !== 'success' || shownWordControlWarningTaskIdsRef.current.has(task.task_id)) return;
-    const dialog = buildWordControlWarningDialog(task, state);
+    const dialog = buildWordControlWarningDialog(task);
     if (!dialog) return;
     shownWordControlWarningTaskIdsRef.current.add(task.task_id);
     setPendingWordControlWarningTaskId(null);
     setWordControlWarningDialog(dialog);
   }, [hydrated, pendingWordControlWarningTaskId, state, wordControlWarningDialog]);
-
-  useEffect(() => {
-    let cancelled = false;
-    window.yibiao?.config.load().then((cfg) => {
-      if (!cancelled && cfg?.export_format) {
-        setExportFormat(cfg.export_format);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     if (!registerLeaveGuard) return;
@@ -667,6 +388,10 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
       }
     }
 
+    if (state.step === 'generation-settings') {
+      setGenerationSettingsInitialTab('content');
+    }
+
     setState((prev) => ({ ...prev, step }));
     window.yibiao?.technicalPlan.updateStep(step).catch((error) => {
       showToast(error instanceof Error ? error.message : '保存技术方案步骤失败', 'error');
@@ -695,7 +420,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
       }
 
       if (latestTask?.status === 'success' && !shownWordControlWarningTaskIdsRef.current.has(latestTask.task_id)) {
-        const warning = latestTask.stats?.outline?.word_adjustment_warning || latestTask.stats?.content?.word_control_warning;
+        const warning = latestTask.stats?.outline?.word_adjustment_warning;
         if (warning) {
           setPendingWordControlWarningTaskId(latestTask.task_id);
         }
@@ -727,7 +452,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationOptions: hasOwnField(technicalPlan, 'contentGenerationOptions') ? technicalPlan.contentGenerationOptions : prev.contentGenerationOptions,
             contentGenerationSections: hasOwnField(technicalPlan, 'contentGenerationSections') ? (technicalPlan.contentGenerationSections || {}) : prev.contentGenerationSections,
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : prev.contentGenerationPlans,
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : prev.contentIllustrationPlan,
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : prev.contentGenerationRuntime,
           };
         }
@@ -757,7 +481,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationOptions: outlineDataReset ? undefined : prev.contentGenerationOptions,
             contentGenerationSections: outlineDataReset ? {} : prev.contentGenerationSections,
             contentGenerationPlans: outlineDataReset ? {} : prev.contentGenerationPlans,
-            contentIllustrationPlan: outlineDataReset ? undefined : prev.contentIllustrationPlan,
             contentGenerationRuntime: outlineDataReset ? undefined : prev.contentGenerationRuntime,
             outlineWordControlSnapshot: outlineDataReset ? undefined : prev.outlineWordControlSnapshot,
             outlineData: hasOwnField(technicalPlan, 'outlineData') ? (technicalPlan.outlineData || null) : prev.outlineData,
@@ -786,7 +509,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationTask: hasOwnField(technicalPlan, 'contentGenerationTask') ? trimTaskLogs(technicalPlan.contentGenerationTask) : (outlineDataChanged ? undefined : prev.contentGenerationTask),
             contentGenerationSections: hasOwnField(technicalPlan, 'contentGenerationSections') ? (technicalPlan.contentGenerationSections || {}) : (outlineDataChanged ? {} : prev.contentGenerationSections),
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : (outlineDataChanged ? {} : prev.contentGenerationPlans),
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : (outlineDataChanged ? undefined : prev.contentIllustrationPlan),
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : (outlineDataChanged ? undefined : prev.contentGenerationRuntime),
             bidTemplateExists: hasOwnField(technicalPlan, 'bidTemplateExists') ? Boolean(technicalPlan.bidTemplateExists) : prev.bidTemplateExists,
           };
@@ -801,7 +523,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationTask: hasOwnField(technicalPlan, 'contentGenerationTask') ? trimTaskLogs(technicalPlan.contentGenerationTask) : prev.contentGenerationTask,
             contentGenerationSections: hasOwnField(technicalPlan, 'contentGenerationSections') ? (technicalPlan.contentGenerationSections || {}) : prev.contentGenerationSections,
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : prev.contentGenerationPlans,
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : prev.contentIllustrationPlan,
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : prev.contentGenerationRuntime,
           };
         }
@@ -816,7 +537,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationTask: hasOwnField(technicalPlan, 'contentGenerationTask') ? trimTaskLogs(technicalPlan.contentGenerationTask) : prev.contentGenerationTask,
             contentGenerationSections: hasOwnField(technicalPlan, 'contentGenerationSections') ? (technicalPlan.contentGenerationSections || {}) : prev.contentGenerationSections,
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : prev.contentGenerationPlans,
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : prev.contentIllustrationPlan,
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : prev.contentGenerationRuntime,
           };
         }
@@ -830,7 +550,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             contentGenerationTask: hasOwnField(technicalPlan, 'contentGenerationTask') ? trimTaskLogs(technicalPlan.contentGenerationTask) : prev.contentGenerationTask,
             contentGenerationSections: hasOwnField(technicalPlan, 'contentGenerationSections') ? (technicalPlan.contentGenerationSections || {}) : prev.contentGenerationSections,
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : prev.contentGenerationPlans,
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : prev.contentIllustrationPlan,
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : prev.contentGenerationRuntime,
           };
         }
@@ -859,7 +578,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
               : prev.referenceKnowledgeDocumentIds,
             contentGenerationSections: nextSections,
             contentGenerationPlans: hasOwnField(technicalPlan, 'contentGenerationPlans') ? (technicalPlan.contentGenerationPlans || {}) : prev.contentGenerationPlans,
-            contentIllustrationPlan: hasOwnField(technicalPlan, 'contentIllustrationPlan') ? technicalPlan.contentIllustrationPlan : prev.contentIllustrationPlan,
             contentGenerationRuntime: hasOwnField(technicalPlan, 'contentGenerationRuntime') ? technicalPlan.contentGenerationRuntime : prev.contentGenerationRuntime,
             outlineData: nextOutlineData,
           };
@@ -894,61 +612,31 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     };
   }, [showToast, state.step, state.tenderFile]);
 
-  useEffect(() => {
-    if (state.step !== 'document-analysis' || !requiresOriginalPlan) {
-      setOriginalPlanMarkdown('');
-      return;
-    }
-    if (!state.originalPlanFile) {
-      setOriginalPlanMarkdown('');
-      return;
-    }
-    let mounted = true;
-    window.yibiao?.technicalPlan.readOriginalPlanMarkdown().then((markdown) => {
-      if (mounted) setOriginalPlanMarkdown(markdown || '');
-    }).catch((error) => {
-      if (mounted) showToast(error instanceof Error ? error.message : '读取原方案 Markdown 失败', 'error');
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [requiresOriginalPlan, showToast, state.originalPlanFile, state.step]);
-
   const loadExportTemplates = useCallback(async () => {
     setExportTemplatesLoading(true);
     try {
       const templates = await window.yibiao?.templates.list();
       const nextTemplates = templates || [];
       setExportTemplates(nextTemplates);
-      setSelectedExportTemplateId((prev) => nextTemplates.some((template) => template.template_id === prev) ? prev : nextTemplates[0]?.template_id || '');
     } catch (error) {
       setExportTemplates([]);
-      setSelectedExportTemplateId('');
       showToast(error instanceof Error ? error.message : '读取导出模板失败', 'error');
     } finally {
       setExportTemplatesLoading(false);
     }
   }, [showToast]);
 
-  const openExportTemplateDialog = async () => {
-    if (!state.outlineData?.outline?.length) {
-      showToast('请先生成目录', 'info');
-      return;
-    }
+  useEffect(() => {
+    if (state.step === 'generation-settings') void loadExportTemplates();
+  }, [loadExportTemplates, state.step]);
 
-    setExportTemplateDialogOpen(true);
-    setExportTemplateSearch('');
-    await loadExportTemplates();
-  };
-
-  const runExportWord = async (latestExportFormat: ExportFormatConfig) => {
+  const runExportWord = async () => {
     if (!state.outlineData?.outline?.length) {
       showToast('请先生成目录', 'info');
       return;
     }
 
     const requestId = `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const mermaidCount = countOutlineMermaidDiagrams(state.outlineData.outline);
     let unsubscribe: (() => void) | undefined;
 
     try {
@@ -956,11 +644,8 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
         open: true,
         running: true,
         progress: 2,
-        message: mermaidCount
-          ? `检测到 ${mermaidCount} 张 Mermaid 图，导出时会转换为 Word 图片，可能需要稍等。`
-          : '正在准备导出 Word。',
+        message: '正在准备导出 Word。',
         warnings: [],
-        mermaidCount,
       });
 
       unsubscribe = window.yibiao?.export.onWordExportProgress((event: WordExportProgressEvent) => {
@@ -981,9 +666,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
 
       const result = await window.yibiao?.export.exportWord({
         requestId,
-        project_name: state.outlineData.project_name,
-        outline: state.outlineData.outline,
-        export_format: latestExportFormat,
+        source: 'technical-plan',
       });
       if (result?.canceled) {
         setExportProgress(initialExportProgress);
@@ -1027,24 +710,18 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     }
   };
 
-  const confirmExportTemplate = async () => {
-    if (!selectedExportTemplate) {
-      showToast('请先选择导出模板', 'info');
+  // 使用“长嘛样”保存的模板直接导出，不再临时改选。
+  const exportWordWithConfiguredTemplate = async () => {
+    const templateId = state.exportTemplateId.trim();
+    if (!templateId) {
+      showToast('请先到生成设置的“长嘛样”选择导出模板', 'info');
       return;
     }
-
-    setExportTemplateDialogOpen(false);
-    await runExportWord(selectedExportTemplate.config);
+    await runExportWord();
   };
 
   const createExportTemplate = () => {
-    if (!onSectionChange) {
-      showToast('请从左侧菜单进入模板设置新建模板', 'info');
-      return;
-    }
-
-    setExportTemplateDialogOpen(false);
-    onSectionChange('new-template');
+    setExportTemplateEditorOpen(true);
   };
 
   const saveChapterContent = async (item: OutlineItem, content: string) => {
@@ -1060,6 +737,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
       ...state.contentGenerationSections,
       [item.id]: {
         id: item.id,
+        number: item.number,
         title: item.title || '未命名章节',
         status: content.trim() ? 'success' as const : 'idle' as const,
         content,
@@ -1076,6 +754,28 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     if (saved) setState((prev) => ({ ...prev, ...saved }));
   };
 
+  // 无论操作成功或失败，都读取后台完整快照，让正文及 Word 缓存跟随实际状态。
+  const runAndRefreshTechnicalPlan = async <T,>(action: () => Promise<T>): Promise<T> => {
+    let operationFailed = false;
+    try {
+      return await action();
+    } catch (error) {
+      operationFailed = true;
+      throw error;
+    } finally {
+      try {
+        const latestState = await window.yibiao!.technicalPlan.loadState();
+        setState(latestState);
+      } catch (error) {
+        const message = `刷新技术方案状态失败：${error instanceof Error ? error.message : String(error)}`;
+        // 刷新失败不能覆盖原操作异常；操作成功时则阻止调用方继续提示成功。
+        if (!operationFailed) throw new Error(message);
+        showToast(message, 'error');
+      }
+    }
+  };
+
+  // 重置整个投标流程，并在成功、失败时同步后台实际状态。
   const resetTechnicalPlan = async () => {
     if (isResetting) return;
     if (!window.confirm('会清空整个技术方案编写进度，是否确认？')) {
@@ -1085,11 +785,12 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     setIsResetting(true);
     showToast('正在重置技术方案，将停止后台任务并清理工作区文件，请稍候…', 'info');
     try {
-      const result = await window.yibiao?.technicalPlan.clear();
-      setState({ ...resetState, workflowKind });
-      setTenderMarkdown('');
-      setOriginalPlanMarkdown('');
-      showToast(result?.message || '技术方案已重置', 'success');
+      const result = await runAndRefreshTechnicalPlan(async () => {
+        const response = await window.yibiao!.technicalPlan.clear();
+        if (!response.success) throw new Error(response.message || '重置技术方案失败');
+        return response;
+      });
+      showToast(result.message || '技术方案已重置', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : '重置技术方案失败', 'error');
     } finally {
@@ -1102,42 +803,68 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     setState((prev) => ({ ...prev, ...(saved || {}), contentGenerationOptions }));
   };
 
+  // 重置正文阶段；清理报错后也同步已提交的正文状态。
+  const resetContentGeneration = async () => {
+    await runAndRefreshTechnicalPlan(() => window.yibiao!.technicalPlan.resetContentGeneration());
+  };
+
+  // 保存全局事实后同步快照，包含已失效的正文与任务。
   const saveGlobalFacts = async (globalFacts: GlobalFactGroupState[]) => {
-    const saved = await window.yibiao?.technicalPlan.saveGlobalFacts(globalFacts);
-    setState((prev) => ({ ...prev, ...(saved || {}), globalFacts }));
+    await runAndRefreshTechnicalPlan(() => window.yibiao!.technicalPlan.saveGlobalFacts(globalFacts));
   };
 
-  const saveGlobalFactsConfig = async (globalFactsMode: GlobalFactsMode) => {
-    const saved = await window.yibiao?.technicalPlan.saveGlobalFactsConfig({ globalFactsMode });
-    setState((prev) => ({ ...prev, ...(saved || {}), globalFactsMode }));
-  };
-
+  // 保存目录后同步快照，不用提交前的目录覆盖后台实际结果。
   const saveOutline = async (request: SaveOutlineRequest) => {
-    const saved = await window.yibiao?.technicalPlan.saveOutline(request);
-    setState((prev) => {
-      if (request.reason !== 'sort') {
-        return { ...prev, ...(saved || {}), outlineData: saved?.outlineData || request.outlineData };
-      }
-      const contentGenerationSections = Object.fromEntries(Object.entries(prev.contentGenerationSections).map(([nodeId, section]) => {
-        const nextId = request.idMap?.[nodeId] || nodeId;
-        return [nextId, { ...section, id: nextId }];
-      }));
-      const contentGenerationPlans = Object.fromEntries(Object.entries(prev.contentGenerationPlans).map(([nodeId, plan]) => [
-        request.idMap?.[nodeId] || nodeId,
-        plan,
-      ]));
-      return {
-        ...prev,
-        ...(saved || {}),
-        outlineData: saved?.outlineData || request.outlineData,
-        contentGenerationSections,
-        contentGenerationPlans,
-      };
-    });
+    await runAndRefreshTechnicalPlan(() => window.yibiao!.technicalPlan.saveOutline(request));
   };
 
   const saveOutlineSelection = async (request: SaveOutlineSelectionRequest) => {
     await window.yibiao?.technicalPlan.saveOutlineSelection(request);
+  };
+
+  const saveGenerationOutlineMode = async (outlineMode: TechnicalPlanState['outlineMode']) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ outlineMode });
+    setState((prev) => ({ ...prev, outlineMode: saved.outlineMode }));
+  };
+
+  const saveGenerationOutlineExpansionMode = async (outlineExpansionMode: TechnicalPlanState['outlineExpansionMode']) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ outlineExpansionMode });
+    setState((prev) => ({ ...prev, outlineExpansionMode: saved.outlineExpansionMode }));
+  };
+
+  const saveGenerationWordControlOptions = async (outlineWordControlOptions: OutlineWordControlOptions) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ outlineWordControlOptions });
+    setState((prev) => ({ ...prev, outlineWordControlOptions: saved.outlineWordControlOptions }));
+  };
+
+  const saveGenerationReferenceKnowledge = async (referenceKnowledgeDocumentIds: string[]) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ referenceKnowledgeDocumentIds });
+    setState((prev) => ({ ...prev, referenceKnowledgeDocumentIds: saved.referenceKnowledgeDocumentIds }));
+  };
+
+  const saveGenerationGlobalFactsMode = async (globalFactsMode: GlobalFactsMode) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ globalFactsMode });
+    setState((prev) => ({ ...prev, globalFactsMode: saved.globalFactsMode }));
+  };
+
+  const saveGenerationExportTemplate = async (exportTemplateId: string) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ exportTemplateId });
+    setState((prev) => ({ ...prev, exportTemplateId: saved.exportTemplateId }));
+  };
+
+  // 独立保存模板样式范围，只合并本字段，避免覆盖同时保存的模板和任务状态。
+  const saveGenerationExportTemplateScope = async (exportTemplateScope: ExportTemplateScope) => {
+    const saved = await window.yibiao!.technicalPlan.saveGenerationConfig({ exportTemplateScope });
+    setState((prev) => ({ ...prev, exportTemplateScope: saved.exportTemplateScope }));
+  };
+
+  const handleExportTemplateSaved = async (template: ExportTemplateRecord) => {
+    await loadExportTemplates();
+    try {
+      await saveGenerationExportTemplate(template.template_id);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '保存导出模板选择失败', 'error');
+    }
   };
 
   const openBidTemplate = async () => {
@@ -1147,30 +874,15 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     }
   };
 
-  const saveOutlineConfig = async (config: {
-    referenceKnowledgeDocumentIds: string[];
-    outlineMode: TechnicalPlanState['outlineMode'];
-    outlineExpansionMode: TechnicalPlanState['outlineExpansionMode'];
-    wordControlOptions: OutlineWordControlOptions;
-  }) => {
-    await window.yibiao!.technicalPlan.saveOutlineConfig(config);
-    setState((prev) => ({
-      ...prev,
-      outlineMode: config.outlineMode,
-      outlineExpansionMode: config.outlineExpansionMode,
-      outlineWordControlOptions: config.wordControlOptions,
-      referenceKnowledgeDocumentIds: config.referenceKnowledgeDocumentIds,
-    }));
-  };
-
-  const generatedContentCount = state.outlineData?.outline
-    ? collectLeafItems(state.outlineData.outline).filter((item) => item.content?.trim()).length
-    : 0;
   const outlineGenerationStatus = state.outlineGenerationTask?.status;
   const isOutlineGenerating = outlineGenerationStatus === 'running' || outlineGenerationStatus === 'pausing';
   const outlineAdjustmentStatus = state.outlineAdjustmentTask?.status;
   const isOutlineAdjusting = outlineAdjustmentStatus === 'running' || outlineAdjustmentStatus === 'pausing';
+  const generationConfigLocked = Boolean(state.contentGenerationRuntime?.generation_started || state.contentGenerationTask);
+  const outlineConfigLocked = generationConfigLocked || isOutlineGenerating;
   const isGlobalFactsGenerating = state.globalFactsTask?.status === 'running' || state.globalFactsTask?.status === 'pausing';
+  const globalFactsConfigLocked = generationConfigLocked || isGlobalFactsGenerating || isGlobalFactsAdjusting;
+  const contentConfigLocked = generationConfigLocked;
   const isFactsAiStep = state.step === 'global-facts';
   const isAiAdjusting = isFactsAiStep ? isGlobalFactsAdjusting : isOutlineAdjusting;
   const aiAdjustDisabled = isFactsAiStep
@@ -1234,10 +946,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
       setInstallingPetPlugin(false);
     }
   }, [openPetAiChat, showToast]);
-  const workflowSwitchClearText = workflowSwitchRequest?.to === 'technical-plan'
-    ? '原方案、目录、全局事实、正文和生成进度'
-    : '目录、全局事实、正文和生成进度';
-
   const navigationActions = state.step === 'content-edit'
     ? [
       {
@@ -1253,9 +961,9 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
         label: isExporting ? '导出中...' : '导出 Word',
         icon: <ToolbarDocumentIcon />,
         variant: 'primary' as const,
-        disabled: isContentGenerating || isExporting || !state.outlineData,
-        tooltip: isContentGenerating ? '正文生成或暂停处理中，完成暂停后再导出' : isExporting ? 'Word 正在导出，请稍候' : isContentPaused ? '正文生成已暂停，可导出当前已完成内容' : generatedContentCount ? '导出当前技术方案正文' : '可导出空目录文档，建议先生成正文',
-        onClick: () => { void openExportTemplateDialog(); },
+        disabled: contentBlocksExport || isExporting || !state.outlineData,
+        tooltip: contentTaskStatus === 'paused' ? '正文任务已暂停，请继续完成后导出' : contentBlocksExport ? '正文生成或暂停处理中，暂不能导出' : isExporting ? 'Word 正在导出，请稍候' : '导出整本 Word，需要全部 AI 小节正文及引用图片齐全',
+        onClick: () => { void exportWordWithConfiguredTemplate(); },
       },
     ]
     : [
@@ -1323,25 +1031,61 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
     <div className="page-stack technical-workbench">
       {state.step === 'document-analysis' && (
         <DocumentAnalysisPage
-          workflowKind={workflowKind}
           tenderFile={state.tenderFile}
           tenderFiles={state.tenderFiles || []}
           tenderMarkdown={tenderMarkdown}
-          originalPlanFile={state.originalPlanFile}
-          originalPlanMarkdown={originalPlanMarkdown}
           onFileImported={(nextState, markdown) => {
             setState((prev) => ({ ...prev, ...nextState }));
             setTenderMarkdown(markdown);
           }}
-          onOriginalPlanImported={(nextState, markdown) => {
-            setState((prev) => ({ ...prev, ...nextState }));
-            setOriginalPlanMarkdown(markdown);
-          }}
         />
       )}
 
+      {state.step === 'generation-settings' && (
+        <GenerationSettingsPage
+          initialTab={generationSettingsInitialTab}
+          originalPlanFile={state.originalPlanFile}
+          outlineMode={state.outlineMode}
+          outlineModeRequiresRegeneration={outlineModeRequiresRegeneration}
+          outlineExpansionMode={state.outlineExpansionMode || 'ai-complement'}
+          outlineWordControlOptions={state.outlineWordControlOptions}
+          outlineWordControlSnapshot={state.outlineWordControlSnapshot}
+          referenceKnowledgeDocumentIds={state.referenceKnowledgeDocumentIds}
+          globalFactsMode={state.globalFactsMode || 'fabricate'}
+          exportTemplateId={state.exportTemplateId}
+          exportTemplateScope={state.exportTemplateScope}
+          exportTemplates={exportTemplates}
+          exportTemplatesLoading={exportTemplatesLoading}
+          contentGenerationOptions={state.contentGenerationOptions}
+          hasOutlineData={Boolean(state.outlineData)}
+          outlineConfigLocked={outlineConfigLocked}
+          globalFactsConfigLocked={globalFactsConfigLocked}
+          contentConfigLocked={contentConfigLocked}
+          generationConfigLocked={generationConfigLocked}
+          onOriginalPlanChanged={(nextState) => setState((prev) => ({ ...prev, ...nextState }))}
+          onOutlineModeChange={saveGenerationOutlineMode}
+          onOutlineExpansionModeChange={saveGenerationOutlineExpansionMode}
+          onOutlineWordControlOptionsChange={saveGenerationWordControlOptions}
+          onReferenceKnowledgeDocumentIdsChange={saveGenerationReferenceKnowledge}
+          onGlobalFactsModeChange={saveGenerationGlobalFactsMode}
+          onExportTemplateIdChange={saveGenerationExportTemplate}
+          onExportTemplateScopeChange={saveGenerationExportTemplateScope}
+          onCreateExportTemplate={createExportTemplate}
+          onContentGenerationOptionsChange={saveContentGenerationOptions}
+        />
+      )}
+
+      <ExportTemplateEditorDialog
+        open={exportTemplateEditorOpen}
+        mode="create"
+        returnLabel="返回生成设置"
+        onOpenChange={setExportTemplateEditorOpen}
+        onSaved={handleExportTemplateSaved}
+      />
+
       {state.step === 'bid-analysis' && (
         <BidAnalysisPage
+          stepNumber={activeStepNumber}
           hasTenderFile={Boolean(state.tenderFile)}
           mode={state.bidAnalysisMode}
           selectedTaskIds={state.bidAnalysisSelectedTaskIds}
@@ -1360,19 +1104,21 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
         />
       )}
       {state.step === 'outline-generation' && (
-          <OutlineEditPage
-            workflowKind={workflowKind}
-            projectOverview={state.projectOverview}
-            outlineMode={state.outlineMode}
-            outlineExpansionMode={state.outlineExpansionMode || 'ai-complement'}
+        <OutlineEditPage
+          stepNumber={activeStepNumber}
+          hasOriginalPlan={Boolean(state.originalPlanFile)}
+          projectOverview={state.projectOverview}
+          bidAnalysisReady={bidAnalysisReady && !firstMissingBidAnalysisTask}
+          technicalScoreMissing={technicalScoreMissing}
+          outlineMode={state.outlineMode}
+          outlineModeRequiresRegeneration={outlineModeRequiresRegeneration}
+          outlineExpansionMode={state.outlineExpansionMode || 'ai-complement'}
           outlineWordControlOptions={state.outlineWordControlOptions}
-          outlineWordControlSnapshot={state.outlineWordControlSnapshot}
           referenceKnowledgeDocumentIds={state.referenceKnowledgeDocumentIds}
           outlineData={state.outlineData}
           task={state.outlineGenerationTask}
           contentTaskStatus={state.contentGenerationTask?.status}
           aiAdjustmentRunning={isOutlineAdjusting}
-          onOutlineConfigChange={saveOutlineConfig}
           onOutlineSaved={saveOutline}
           onOutlineSelectionSaved={saveOutlineSelection}
           bidTemplateExists={Boolean(state.bidTemplateExists)}
@@ -1384,26 +1130,35 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
       )}
       {state.step === 'global-facts' && (
         <GlobalFactsPage
+          stepNumber={activeStepNumber}
           outlineData={state.outlineData}
           globalFacts={state.globalFacts}
           globalFactsMode={state.globalFactsMode || 'fabricate'}
           task={state.globalFactsTask}
           aiAdjustmentRunning={isGlobalFactsAdjusting}
+          contentTaskStatus={contentTaskStatus}
+          hasGeneratedBody={hasGeneratedBody}
           focusGroupRequest={globalFactsFocusRequest}
           onGlobalFactsSaved={saveGlobalFacts}
-          onGlobalFactsConfigChange={saveGlobalFactsConfig}
         />
       )}
       {state.step === 'content-edit' && (
         <ContentEditPage
-          workflowKind={workflowKind}
+          stepNumber={activeStepNumber}
+          hasOriginalPlan={Boolean(state.originalPlanFile?.markdownPath)}
+          originalPlanContentHash={state.originalPlanFile?.contentHash}
           outlineWordControlSnapshot={state.outlineWordControlSnapshot}
           outlineData={state.outlineData}
           task={state.contentGenerationTask}
+          contentGenerationRuntime={state.contentGenerationRuntime}
           contentGenerationOptions={state.contentGenerationOptions}
-          contentIllustrationPlan={state.contentIllustrationPlan}
+          exportTemplateId={state.exportTemplateId}
           sections={state.contentGenerationSections}
-          onContentGenerationOptionsChange={saveContentGenerationOptions}
+          onOpenGenerationSettingsAppearance={() => {
+            setGenerationSettingsInitialTab('appearance');
+            void switchStep('generation-settings');
+          }}
+          onContentGenerationReset={resetContentGeneration}
           onContentSaved={saveChapterContent}
         />
       )}
@@ -1413,7 +1168,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
             <strong>正在开发中，敬请期待</strong>
             <span>此功能尚未完成，请先不要使用。</span>
           </div>
-          <span className="section-kicker">STEP 06</span>
+          <span className="section-kicker">STEP {activeStepNumber}</span>
           <h3>扩写改写</h3>
           <p>后续接入旧方案导入、章节扩写和人工校准。</p>
         </section>
@@ -1464,22 +1219,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
                   </section>
                 ))}
               </div>
-              {wordControlWarningDialog?.sections.length ? (
-                <section className="word-control-result-sections">
-                  <div className="word-control-result-sections-head">
-                    <strong>未达标小节</strong>
-                    <span>{wordControlWarningDialog.sections.length} 个</span>
-                  </div>
-                  <div className="word-control-result-section-list">
-                    {wordControlWarningDialog.sections.map((section) => (
-                      <div className="word-control-result-section" key={section.id}>
-                        <span>{section.id} {section.title}</span>
-                        <strong>{section.words.toLocaleString('zh-CN')} 字</strong>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
         </div>
       </AppDialog>
 
@@ -1513,106 +1252,6 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
         )}
       />
 
-      <AppDialog
-        open={Boolean(workflowSwitchRequest)}
-        onOpenChange={(open) => !open && !switchingWorkflow && cancelWorkflowSwitch()}
-        kicker="切换模式"
-        title={`确认切换到${workflowSwitchRequest ? workflowLabel(workflowSwitchRequest.to) : '新模式'}`}
-        description={workflowSwitchRequest
-          ? `当前保存的进度是「${workflowLabel(workflowSwitchRequest.from)}」模式生成的。切换到「${workflowLabel(workflowSwitchRequest.to)}」会清空之前的已有进度。是否继续？`
-          : '切换模式会清空当前模式下的生成进度。'}
-        cardClassName="workflow-switch-card"
-        actions={(
-          <>
-            <button type="button" className="secondary-action" onClick={cancelWorkflowSwitch} disabled={switchingWorkflow}>取消</button>
-            <button type="button" className="primary-action" onClick={() => { void confirmWorkflowSwitch(); }} disabled={switchingWorkflow}>
-              {switchingWorkflow ? '正在切换...' : '继续切换'}
-            </button>
-          </>
-        )}
-      >
-        <div className="workflow-switch-summary">
-          <span>保留：招标文件、招标文件解析结果、参考知识库选择</span>
-          <span>清空：{workflowSwitchClearText}</span>
-        </div>
-      </AppDialog>
-
-      <Dialog.Root open={exportTemplateDialogOpen} onOpenChange={(open) => !open && !isExporting && setExportTemplateDialogOpen(false)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="content-regenerate-modal" />
-          <Dialog.Content className="export-template-select-dialog">
-            <div className="export-template-select-head">
-              <div>
-                <span className="section-kicker">Word 导出</span>
-                <Dialog.Title>选择导出模板</Dialog.Title>
-                <Dialog.Description>选择一个已保存模板后继续导出。模板样式应用范围保持现有导出逻辑。</Dialog.Description>
-              </div>
-              <Dialog.Close className="detail-help-close" type="button" aria-label="关闭模板选择" disabled={isExporting}>×</Dialog.Close>
-            </div>
-
-            <div className="export-template-select-body">
-              <section className="export-template-select-list-panel" aria-label="模板列表">
-                <input
-                  className="export-template-select-search"
-                  type="text"
-                  value={exportTemplateSearch}
-                  onChange={(event) => setExportTemplateSearch(event.target.value)}
-                  placeholder="搜索模板名称"
-                />
-                <div className="export-template-select-list">
-                  {exportTemplatesLoading ? (
-                    <div className="export-template-select-empty"><strong>正在读取模板</strong><span>请稍候...</span></div>
-                  ) : null}
-                  {!exportTemplatesLoading && filteredExportTemplates.length === 0 ? (
-                    <div className="export-template-select-empty">
-                      <strong>{exportTemplates.length ? '没有匹配模板' : '暂无可用模板'}</strong>
-                      <span>{exportTemplates.length ? '请换个关键词搜索，或新建一个模板。' : '请先新建并保存模板，保存后再返回导出。'}</span>
-                      <button type="button" className="secondary-action" onClick={createExportTemplate} disabled={isExporting}>新建模板</button>
-                    </div>
-                  ) : null}
-                  {!exportTemplatesLoading && filteredExportTemplates.map((template) => {
-                    const selected = selectedExportTemplate?.template_id === template.template_id;
-                    return (
-                      <button
-                        type="button"
-                        className={`export-template-select-row${selected ? ' is-active' : ''}`}
-                        key={template.template_id}
-                        onClick={() => setSelectedExportTemplateId(template.template_id)}
-                      >
-                        <strong>{template.template_name}</strong>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section className="export-template-select-preview" aria-label="模板预览">
-                {selectedExportTemplate ? (
-                  <>
-                    <div className="export-template-select-preview-head">
-                      <span className="section-kicker">预览</span>
-                      <strong>{selectedExportTemplate.template_name}</strong>
-                    </div>
-                    <TemplatePreview config={selectedExportTemplate.config} previewStyle={exportTemplatePreviewStyle} />
-                  </>
-                ) : (
-                  <div className="export-template-select-preview-empty">
-                    <strong>暂无模板预览</strong>
-                    <span>选择模板后会在这里显示预览。</span>
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <div className="content-regenerate-actions export-template-select-actions">
-              <button type="button" className="secondary-action" onClick={createExportTemplate} disabled={isExporting}>新建模板</button>
-              <Dialog.Close className="secondary-action" type="button" disabled={isExporting}>取消</Dialog.Close>
-              <button type="button" className="primary-action" onClick={() => { void confirmExportTemplate(); }} disabled={exportTemplatesLoading || !selectedExportTemplate || isExporting}>继续导出</button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
       <Dialog.Root
         open={exportProgress.open}
         onOpenChange={(open) => {
@@ -1628,9 +1267,7 @@ function TechnicalPlanHome({ workflowKind, registerLeaveGuard, onSectionChange }
               <span className="section-kicker">Word 导出</span>
               <Dialog.Title>{exportProgress.running ? '正在导出 Word' : exportProgress.error ? '导出失败' : '导出完成'}</Dialog.Title>
               <Dialog.Description>
-                {exportProgress.mermaidCount > 0
-                  ? `本次包含 ${exportProgress.mermaidCount} 张 Mermaid 图，导出时会在本地转换成 Word 图片。`
-                  : '正在将正文、表格和图片写入 Word 文档。'}
+                正在按当前模板将正文、表格和图片写入整本 Word 文档。
               </Dialog.Description>
             </div>
             <div className="export-progress-body">

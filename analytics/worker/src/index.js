@@ -5,7 +5,8 @@ import { handleClients, handleClientDetail, handleIpStats } from './routes/clien
 import { handleConfigUsage, handleModelUsage } from './routes/configUsage.js';
 import { handleGitHubRepoStats } from './routes/githubRepoStats.js';
 import { handleHealth } from './routes/health.js';
-import { handleAdminBlockRules, handlePublicIpBlocks } from './routes/ipBlocks.js';
+import { handleAdminIpBlocks, handlePublicIpBlocks } from './routes/ipBlocks.js';
+import { handleAdminVersionBlocks } from './routes/versionBlocks.js';
 import { handleLatest } from './routes/latest.js';
 import { handleLicenseActivate, handleLicenseConfig, handleOfflineLicense } from './routes/license.js';
 import { handleAdminModelInfoCache, handleAdminModelInfoOverride, handlePublicModelInfo } from './routes/modelInfo.js';
@@ -15,6 +16,7 @@ import { handleProjects } from './routes/projects.js';
 import { handleRetention } from './routes/retention.js';
 import { handleAdminResources, handlePublicResources, handleResourceImage } from './routes/resources.js';
 import { handleAdminPluginSync, handleAdminPlugins, handlePublicPluginDownload, handlePublicPlugins } from './routes/plugins.js';
+import { handleAdminSystemSettings, handlePublicSystemSettings } from './routes/systemSettings.js';
 import { handleTrack } from './routes/track.js';
 import { handleTraffic } from './routes/traffic.js';
 import { MODEL_INFO_SYNC_CRON } from './constants.js';
@@ -38,6 +40,7 @@ const routes = new Map([
   ['/model-info', handlePublicModelInfo],
   ['/resources', handlePublicResources],
   ['/resource-image', handleResourceImage],
+  ['/system-settings', handlePublicSystemSettings],
   ['/plugins', handlePublicPlugins],
   ['/plugins/download', handlePublicPluginDownload],
   ['/api/projects', handleProjects],
@@ -47,6 +50,7 @@ const routes = new Map([
   ['/api/resources', handleAdminResources],
   ['/api/plugins', handleAdminPlugins],
   ['/api/plugins/sync', handleAdminPluginSync],
+  ['/api/system-settings', handleAdminSystemSettings],
   ['/api/overview', handleOverview],
   ['/api/clients', handleClients],
   ['/api/client-detail', handleClientDetail],
@@ -63,7 +67,8 @@ const routes = new Map([
   ['/api/agent-errors/download', handleAdminAgentErrorDownload],
   ['/api/agent-errors', handleAdminAgentErrors],
   ['/api/github-repo-stats', handleGitHubRepoStats],
-  ['/api/block-rules', handleAdminBlockRules],
+  ['/api/ip-blocks', handleAdminIpBlocks],
+  ['/api/version-blocks', handleAdminVersionBlocks],
 ]);
 
 export default {

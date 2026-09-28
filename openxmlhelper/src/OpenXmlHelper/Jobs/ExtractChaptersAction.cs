@@ -68,7 +68,9 @@ static class ExtractChaptersAction
             }
 
             var outputPath = WordWorkspace.ResolveWorkspacePath(workspace, request.Output);
+            var chaptersOutputPath = Path.ChangeExtension(outputPath, ".chapters.json");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            if (File.Exists(chaptersOutputPath)) File.Delete(chaptersOutputPath);
 
             var session = WordWorkspace.OpenSources(workspace, sourcePaths);
             try
@@ -97,6 +99,7 @@ static class ExtractChaptersAction
                 var sectPr = destBody.Elements<Wp.SectionProperties>().LastOrDefault()?.CloneNode(true);
                 destBody.RemoveAllChildren();
                 var importContexts = new Dictionary<string, CrossDocumentImportContext>(StringComparer.OrdinalIgnoreCase);
+                var chapterRanges = new List<TemplateChapterRange>();
 
                 foreach (var match in matches)
                 {
@@ -110,6 +113,7 @@ static class ExtractChaptersAction
                         source.Blocks,
                         match.Range ?? GetRange(source.Blocks, hit.BlockIndex, otherStarts),
                         otherStarts);
+                    var startBlock = destBody.ChildElements.Count;
                     var titleReplaced = false;
                     foreach (var block in range)
                     {
@@ -134,6 +138,13 @@ static class ExtractChaptersAction
 
                         destBody.AppendChild(cloned);
                     }
+                    chapterRanges.Add(new TemplateChapterRange
+                    {
+                        Id = match.Chapter.Id.Length > 0 ? match.Chapter.Id : null,
+                        Title = match.Chapter.Title,
+                        StartBlock = startBlock,
+                        EndBlock = destBody.ChildElements.Count,
+                    });
                 }
 
                 if (sectPr is not null)
@@ -142,6 +153,11 @@ static class ExtractChaptersAction
                 }
 
                 destPart.Document.Save();
+                var chapterRangeFile = new TemplateChapterRangeFile { Chapters = chapterRanges };
+                File.WriteAllText(
+                    chaptersOutputPath,
+                    JsonSerializer.Serialize(chapterRangeFile, JsonOptions.Signal) + "\n",
+                    new UTF8Encoding(false));
                 return JobResult.Success(Name, WordWorkspace.ToRelativePath(workspace, outputPath));
             }
             finally
@@ -178,19 +194,18 @@ static class ExtractChaptersAction
                     continue;
                 }
 
-                var endBlock = chapter.EndBlock;
-                List<BlockInfo>? range = null;
-                if (endBlock is int end)
+                if (chapter.EndBlock is not int end)
                 {
-                    if (end <= startBlock || end > source.Blocks.Count)
-                    {
-                        result.Add(new ChapterMatch(chapter, null, null, $"结束块号无效：{chapter.Title}"));
-                        continue;
-                    }
-
-                    range = source.Blocks.GetRange(startBlock, end - startBlock);
+                    result.Add(new ChapterMatch(chapter, null, null, $"块号定位必须同时提供结束块号：{chapter.Title}"));
+                    continue;
+                }
+                if (end <= startBlock || end > source.Blocks.Count)
+                {
+                    result.Add(new ChapterMatch(chapter, null, null, $"结束块号无效：{chapter.Title}"));
+                    continue;
                 }
 
+                var range = source.Blocks.GetRange(startBlock, end - startBlock);
                 result.Add(new ChapterMatch(chapter, source.Blocks[startBlock], range, null));
                 continue;
             }
@@ -203,9 +218,17 @@ static class ExtractChaptersAction
             }
 
             var hit = FindByTitle(session, lookupTitle, chapter.Source, workspace);
-            result.Add(hit is null
-                ? new ChapterMatch(chapter, null, null, $"招标原文中找不到：{lookupTitle}")
-                : new ChapterMatch(chapter, hit, null, null));
+            if (hit is null)
+            {
+                result.Add(new ChapterMatch(chapter, null, null, $"招标原文中找不到：{lookupTitle}"));
+                continue;
+            }
+            if (!hit.IsHeading)
+            {
+                result.Add(new ChapterMatch(chapter, null, null, $"原文标题未设置标题样式，请使用 startBlock 和 endBlock 明确范围：{chapter.Title}"));
+                continue;
+            }
+            result.Add(new ChapterMatch(chapter, hit, null, null));
         }
 
         return result;

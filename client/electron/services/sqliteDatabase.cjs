@@ -3,13 +3,25 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 23;
+const schemaVersion = 35;
+
+// 保存当前工作区的一份开票信息。
+function createOfficialInvoiceSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS official_invoice_info (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      title_type TEXT NOT NULL DEFAULT 'enterprise',
+      buyer TEXT NOT NULL DEFAULT '',
+      tax_number TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT ''
+    );
+  `);
+}
 
 function createInitialSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS technical_plan_meta (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      workflow_kind TEXT NOT NULL DEFAULT 'technical-plan',
       step TEXT NOT NULL DEFAULT 'document-analysis',
       tender_file_name TEXT,
       tender_markdown_path TEXT,
@@ -33,20 +45,12 @@ function createInitialSchema(db) {
       pending_tender_sections_json TEXT,
       pending_tender_total_declared INTEGER,
       pending_tender_created_at TEXT,
-      bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
-      bid_analysis_selected_task_ids_json TEXT,
-      bid_section_mode TEXT NOT NULL DEFAULT 'single',
       bid_sections_json TEXT,
       bid_section_extraction_status TEXT NOT NULL DEFAULT 'idle',
       bid_section_extraction_error TEXT,
-      outline_mode TEXT NOT NULL DEFAULT 'aligned',
-      outline_expansion_mode TEXT NOT NULL DEFAULT 'ai-complement',
-      global_facts_mode TEXT NOT NULL DEFAULT 'fabricate',
-      outline_word_control_options_json TEXT,
       outline_word_control_snapshot_json TEXT,
       outline_project_name TEXT,
       outline_project_overview TEXT,
-      content_generation_options_json TEXT,
       content_generation_runtime_json TEXT,
       selected_section_id TEXT,
       selected_section_title TEXT,
@@ -79,14 +83,6 @@ function createInitialSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_technical_plan_bid_items_order
     ON technical_plan_bid_items(sort_order);
-
-    CREATE TABLE IF NOT EXISTS technical_plan_reference_docs (
-      document_id TEXT PRIMARY KEY,
-      sort_order INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_technical_plan_reference_docs_order
-    ON technical_plan_reference_docs(sort_order);
 
     CREATE TABLE IF NOT EXISTS technical_plan_outline_nodes (
       node_id TEXT PRIMARY KEY,
@@ -141,6 +137,49 @@ function createInitialSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_technical_plan_global_fact_groups_order
     ON technical_plan_global_fact_groups(sort_order);
+  `);
+
+  createTechnicalPlanGenerationConfigSchema(db);
+}
+
+// 技术方案生成配置统一使用单例配置表，列表选择使用关联表保存顺序。
+function createTechnicalPlanGenerationConfigSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS technical_plan_generation_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
+      bid_section_mode TEXT NOT NULL DEFAULT 'single',
+      outline_mode TEXT NOT NULL DEFAULT 'response-file',
+      outline_expansion_mode TEXT NOT NULL DEFAULT 'ai-complement',
+      minimum_words INTEGER NOT NULL DEFAULT 0,
+      maximum_words INTEGER NOT NULL DEFAULT 0,
+      section_words INTEGER NOT NULL DEFAULT 0,
+      global_facts_mode TEXT NOT NULL DEFAULT 'fabricate',
+      export_template_id TEXT NOT NULL DEFAULT '',
+      use_ai_images INTEGER NOT NULL DEFAULT 1,
+      use_mermaid_images INTEGER NOT NULL DEFAULT 1,
+      use_html_images INTEGER NOT NULL DEFAULT 1,
+      html_image_types TEXT NOT NULL DEFAULT '',
+      table_requirement TEXT NOT NULL DEFAULT 'heavy',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS technical_plan_generation_bid_tasks (
+      task_id TEXT PRIMARY KEY,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_technical_plan_generation_bid_tasks_order
+    ON technical_plan_generation_bid_tasks(sort_order);
+
+    CREATE TABLE IF NOT EXISTS technical_plan_generation_reference_docs (
+      document_id TEXT PRIMARY KEY,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_technical_plan_generation_reference_docs_order
+    ON technical_plan_generation_reference_docs(sort_order);
   `);
 }
 
@@ -200,14 +239,13 @@ function addTechnicalPlanPendingTenderSelection(db) {
   addIfMissing('pending_tender_created_at', 'TEXT');
 }
 
-function addTechnicalPlanWorkflowAndOriginalPlan(db) {
+function addTechnicalPlanOriginalPlan(db) {
   const cols = db.prepare("PRAGMA table_info(technical_plan_meta)").all().map((row) => row.name);
   const addIfMissing = (name, type) => {
     if (!cols.includes(name)) {
       db.exec(`ALTER TABLE technical_plan_meta ADD COLUMN ${name} ${type}`);
     }
   };
-  addIfMissing('workflow_kind', "TEXT NOT NULL DEFAULT 'technical-plan'");
   addIfMissing('original_plan_file_name', 'TEXT');
   addIfMissing('original_plan_markdown_path', 'TEXT');
   addIfMissing('original_plan_markdown_hash', 'TEXT');
@@ -249,10 +287,33 @@ function addTechnicalPlanIllustrationPlan(db) {
   removeLegacyTechnicalPlanIllustrationType(db);
 }
 
-// 为 Step03 当前设置和目录生效快照分别增加存储字段。
+// 为目录生成当前设置和目录生效快照分别增加存储字段。
 function addTechnicalPlanOutlineWordControl(db) {
   addColumnIfMissing(db, 'technical_plan_meta', 'outline_word_control_options_json', 'TEXT');
   addColumnIfMissing(db, 'technical_plan_meta', 'outline_word_control_snapshot_json', 'TEXT');
+}
+
+// v25 不迁移旧配置值，直接启用新的统一配置表并移除旧存储位置。
+function unifyTechnicalPlanGenerationConfig(db) {
+  createTechnicalPlanGenerationConfigSchema(db);
+  db.exec('DROP TABLE IF EXISTS technical_plan_reference_docs;');
+
+  const columns = getExistingColumns(db, 'technical_plan_meta');
+  const legacyConfigColumns = [
+    'bid_analysis_mode',
+    'bid_analysis_selected_task_ids_json',
+    'bid_section_mode',
+    'outline_mode',
+    'outline_expansion_mode',
+    'global_facts_mode',
+    'outline_word_control_options_json',
+    'content_generation_options_json',
+  ];
+  for (const column of legacyConfigColumns) {
+    if (columns.has(column)) {
+      db.exec(`ALTER TABLE technical_plan_meta DROP COLUMN ${column}`);
+    }
+  }
 }
 
 // 目录叶子内容处理模式；父节点保持为空，旧测试目录不补默认值。
@@ -261,7 +322,7 @@ function addTechnicalPlanOutlineContentMode(db) {
   addColumnIfMissing(db, 'technical_plan_outline_nodes', 'content_mode_note', 'TEXT');
 }
 
-function createTaskLogsAndIllustrationItemsSchema(db) {
+function createTaskLogsSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,35 +381,6 @@ function createTaskLogsAndIllustrationItemsSchema(db) {
       WHERE task_domain = 'duplicate-check' AND task_type = OLD.type AND task_id = OLD.task_id;
     END;
 
-    CREATE TABLE IF NOT EXISTS technical_plan_illustration_plans (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      plan_version INTEGER NOT NULL,
-      revision TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS technical_plan_illustration_items (
-      item_id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      image_type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      section_ids_json TEXT NOT NULL,
-      placement TEXT NOT NULL,
-      priority INTEGER NOT NULL DEFAULT 0,
-      generation_status TEXT,
-      generation_mode TEXT,
-      generation_code TEXT,
-      generation_source_path TEXT,
-      generation_asset_url TEXT,
-      generation_attempts INTEGER,
-      generation_error TEXT,
-      generation_updated_at TEXT,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_technical_plan_illustration_items_order
-    ON technical_plan_illustration_items(sort_order);
   `);
 }
 
@@ -968,12 +1000,171 @@ function createKnowledgeBaseSchema(db) {
   `);
 }
 
+/** 创建单企业资信库及其图片索引。 */
+function createCredentialLibrarySchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credential_library_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      company_name TEXT,
+      unified_social_credit_code TEXT,
+      phone TEXT,
+      email TEXT,
+      legal_representative TEXT,
+      registered_capital TEXT,
+      operating_period_start TEXT,
+      operating_period_end TEXT,
+      address TEXT,
+      business_scope TEXT,
+      industry TEXT,
+      company_type TEXT,
+      insured_employee_count TEXT,
+      company_intro TEXT,
+      tax_certificate_date TEXT,
+      tax_certificate_note TEXT,
+      audit_report_date TEXT,
+      audit_report_note TEXT,
+      social_security_certificate_date TEXT,
+      social_security_certificate_note TEXT,
+      bank_account_name TEXT,
+      bank_account_number TEXT,
+      bank_name TEXT,
+      bank_routing_number TEXT,
+      watermark_enabled INTEGER NOT NULL DEFAULT 0,
+      watermark_content TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS credential_library_certificates (
+      certificate_id TEXT PRIMARY KEY,
+      name TEXT,
+      number TEXT,
+      validity_mode TEXT,
+      valid_from TEXT,
+      valid_to TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS credential_library_employees (
+      employee_id TEXT PRIMARY KEY,
+      name TEXT,
+      id_number TEXT,
+      position TEXT,
+      professional_title TEXT,
+      gender TEXT,
+      phone TEXT,
+      id_validity_mode TEXT,
+      id_valid_from TEXT,
+      id_valid_to TEXT,
+      education TEXT,
+      school TEXT,
+      major TEXT,
+      introduction TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS credential_library_projects (
+      project_id TEXT PRIMARY KEY,
+      project_name TEXT,
+      project_number TEXT,
+      customer_name TEXT,
+      project_type TEXT,
+      project_manager TEXT,
+      contract_amount TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      project_status TEXT,
+      introduction TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS credential_library_other_materials (
+      material_id TEXT PRIMARY KEY,
+      name TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS credential_library_images (
+      image_id TEXT PRIMARY KEY,
+      owner_type TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      field_key TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      custom_name TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_credential_library_images_owner
+    ON credential_library_images(owner_type, owner_id, field_key, sort_order, created_at);
+  `);
+}
+
+/** 为员工档案增加身份证有效期模式，并按产品约定清除旧日期。 */
+function addCredentialEmployeeIdValidityMode(db) {
+  addColumnIfMissing(db, 'credential_library_employees', 'id_validity_mode', 'TEXT');
+  db.exec(`
+    UPDATE credential_library_employees
+    SET id_validity_mode = '', id_valid_from = '', id_valid_to = '';
+  `);
+}
+
+/** 为技术方案生成配置增加正文模板选择。 */
+function addTechnicalPlanContentGenerationTemplate(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'content_generation_template_id', "TEXT NOT NULL DEFAULT 'standard-document'");
+}
+
+/** 合并导出模板与排版风格后，移除不再使用的正文模板选择。 */
+function removeTechnicalPlanContentGenerationTemplate(db) {
+  if (!getExistingTables(db).has('technical_plan_generation_config')) return;
+  if (!getExistingColumns(db, 'technical_plan_generation_config').has('content_generation_template_id')) return;
+  db.exec('ALTER TABLE technical_plan_generation_config DROP COLUMN content_generation_template_id');
+}
+
+/** 为技术方案生成配置增加 Word 导出模板选择。 */
+function addTechnicalPlanExportTemplate(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'export_template_id', "TEXT NOT NULL DEFAULT ''");
+}
+
+/** 为导出模板增加系统预设标记，系统预设模板不可编辑不可删除。 */
+function addExportTemplateIsSystem(db) {
+  addColumnIfMissing(db, 'export_templates', 'is_system', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+/** 为项目增加模板样式范围，新旧项目未设置时均仅应用于 AI 生成目录。 */
+function addTechnicalPlanExportTemplateScope(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'export_template_scope', "TEXT NOT NULL DEFAULT 'ai-only'");
+}
+
+/** 保存图片数量档位，暂不参与图片生成。 */
+function addTechnicalPlanImageQuantity(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'image_quantity', "TEXT NOT NULL DEFAULT 'light'");
+}
+
+/** 保存正文可选修复开关；默认不执行二次优化或字数修复。 */
+function addTechnicalPlanRepairOptions(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'html_image_optimization', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'word_count_repair', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+/** 保存正文格式自检开关；默认跳过格式自检补写，直接转换 Word。 */
+function addTechnicalPlanLayoutCheckOption(db) {
+  addColumnIfMissing(db, 'technical_plan_generation_config', 'layout_check', 'INTEGER NOT NULL DEFAULT 0');
+}
+
 function createExportTemplatesSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS export_templates (
       template_id TEXT PRIMARY KEY,
       template_name TEXT NOT NULL,
       config_json TEXT NOT NULL,
+      is_system INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -1042,7 +1233,6 @@ const schemaHealthTableGroups = [
       'technical_plan_meta',
       'technical_plan_tasks',
       'technical_plan_bid_items',
-      'technical_plan_reference_docs',
       'technical_plan_outline_nodes',
       'technical_plan_content_sections',
       'technical_plan_content_plans',
@@ -1111,13 +1301,31 @@ const schemaHealthTableGroups = [
   },
   {
     version: 20,
-    tables: ['task_logs', 'technical_plan_illustration_plans', 'technical_plan_illustration_items'],
-    repair: createTaskLogsAndIllustrationItemsSchema,
+    tables: ['task_logs'],
+    repair: createTaskLogsSchema,
   },
   {
     version: 23,
     tables: ['feasibility_report_meta', 'feasibility_report_tasks', 'feasibility_report_outline_nodes'],
     repair: createFeasibilityReportSchema,
+  },
+  { version: 24, tables: ['official_invoice_info'], repair: createOfficialInvoiceSchema },
+  {
+    version: 25,
+    tables: ['technical_plan_generation_config', 'technical_plan_generation_bid_tasks', 'technical_plan_generation_reference_docs'],
+    repair: createTechnicalPlanGenerationConfigSchema,
+  },
+  {
+    version: 26,
+    tables: [
+      'credential_library_profile',
+      'credential_library_certificates',
+      'credential_library_employees',
+      'credential_library_projects',
+      'credential_library_other_materials',
+      'credential_library_images',
+    ],
+    repair: createCredentialLibrarySchema,
   },
 ];
 
@@ -1137,11 +1345,8 @@ const schemaHealthColumnGroups = [
       tender_markdown_chars: 'INTEGER',
       tender_parser_label: 'TEXT',
       tender_imported_at: 'TEXT',
-      bid_analysis_mode: 'TEXT',
-      outline_mode: 'TEXT',
       outline_project_name: 'TEXT',
       outline_project_overview: 'TEXT',
-      content_generation_options_json: 'TEXT',
       content_generation_runtime_json: 'TEXT',
       created_at: 'TEXT',
       updated_at: 'TEXT',
@@ -1180,20 +1385,12 @@ const schemaHealthColumnGroups = [
     version: 9,
     table: 'technical_plan_meta',
     columns: {
-      workflow_kind: "TEXT NOT NULL DEFAULT 'technical-plan'",
       original_plan_file_name: 'TEXT',
       original_plan_markdown_path: 'TEXT',
       original_plan_markdown_hash: 'TEXT',
       original_plan_markdown_chars: 'INTEGER NOT NULL DEFAULT 0',
       original_plan_parser_label: 'TEXT',
       original_plan_imported_at: 'TEXT',
-    },
-  },
-  {
-    version: 10,
-    table: 'technical_plan_meta',
-    columns: {
-      bid_analysis_selected_task_ids_json: 'TEXT',
     },
   },
   {
@@ -1232,27 +1429,12 @@ const schemaHealthColumnGroups = [
     },
   },
   {
-    version: 13,
-    table: 'technical_plan_meta',
-    columns: {
-      outline_expansion_mode: "TEXT NOT NULL DEFAULT 'ai-complement'",
-    },
-  },
-  {
-    version: 22,
-    table: 'technical_plan_meta',
-    columns: {
-      global_facts_mode: "TEXT NOT NULL DEFAULT 'fabricate'",
-    },
-  },
-  {
     version: 14,
     table: 'technical_plan_meta',
     columns: {
       tender_original_markdown_path: 'TEXT',
       tender_original_markdown_hash: 'TEXT',
       tender_original_markdown_chars: 'INTEGER NOT NULL DEFAULT 0',
-      bid_section_mode: "TEXT NOT NULL DEFAULT 'single'",
       bid_sections_json: 'TEXT',
       bid_section_extraction_status: "TEXT NOT NULL DEFAULT 'idle'",
       bid_section_extraction_error: 'TEXT',
@@ -1269,7 +1451,6 @@ const schemaHealthColumnGroups = [
     version: 18,
     table: 'technical_plan_meta',
     columns: {
-      outline_word_control_options_json: 'TEXT',
       outline_word_control_snapshot_json: 'TEXT',
     },
   },
@@ -1279,6 +1460,77 @@ const schemaHealthColumnGroups = [
     columns: {
       content_mode: 'TEXT',
       content_mode_note: 'TEXT',
+    },
+  },
+  {
+    version: 25,
+    table: 'technical_plan_generation_config',
+    columns: {
+      bid_analysis_mode: "TEXT NOT NULL DEFAULT 'key'",
+      bid_section_mode: "TEXT NOT NULL DEFAULT 'single'",
+      outline_mode: "TEXT NOT NULL DEFAULT 'response-file'",
+      outline_expansion_mode: "TEXT NOT NULL DEFAULT 'ai-complement'",
+      minimum_words: 'INTEGER NOT NULL DEFAULT 0',
+      maximum_words: 'INTEGER NOT NULL DEFAULT 0',
+      section_words: 'INTEGER NOT NULL DEFAULT 0',
+      global_facts_mode: "TEXT NOT NULL DEFAULT 'fabricate'",
+      use_ai_images: 'INTEGER NOT NULL DEFAULT 1',
+      use_mermaid_images: 'INTEGER NOT NULL DEFAULT 1',
+      use_html_images: 'INTEGER NOT NULL DEFAULT 1',
+      html_image_types: "TEXT NOT NULL DEFAULT ''",
+      table_requirement: "TEXT NOT NULL DEFAULT 'heavy'",
+      created_at: 'TEXT',
+      updated_at: 'TEXT',
+    },
+  },
+  {
+    version: 27,
+    table: 'credential_library_employees',
+    columns: {
+      id_validity_mode: 'TEXT',
+    },
+  },
+  {
+    version: 29,
+    table: 'technical_plan_generation_config',
+    columns: {
+      export_template_id: "TEXT NOT NULL DEFAULT ''",
+    },
+  },
+  {
+    version: 31,
+    table: 'export_templates',
+    columns: {
+      is_system: 'INTEGER NOT NULL DEFAULT 0',
+    },
+  },
+  {
+    version: 32,
+    table: 'technical_plan_generation_config',
+    columns: {
+      export_template_scope: "TEXT NOT NULL DEFAULT 'ai-only'",
+    },
+  },
+  {
+    version: 33,
+    table: 'technical_plan_generation_config',
+    columns: {
+      image_quantity: "TEXT NOT NULL DEFAULT 'light'",
+    },
+  },
+  {
+    version: 34,
+    table: 'technical_plan_generation_config',
+    columns: {
+      html_image_optimization: 'INTEGER NOT NULL DEFAULT 0',
+      word_count_repair: 'INTEGER NOT NULL DEFAULT 0',
+    },
+  },
+  {
+    version: 35,
+    table: 'technical_plan_generation_config',
+    columns: {
+      layout_check: 'INTEGER NOT NULL DEFAULT 0',
     },
   },
 ];
@@ -1387,8 +1639,8 @@ const migrations = [
   },
   {
     version: 9,
-    description: '技术方案新增工作流类型和原方案文件状态',
-    up: addTechnicalPlanWorkflowAndOriginalPlan,
+    description: '技术方案新增原方案文件状态',
+    up: addTechnicalPlanOriginalPlan,
   },
   {
     version: 10,
@@ -1442,8 +1694,8 @@ const migrations = [
   },
   {
     version: 20,
-    description: '任务日志按行存储并拆分全文图片计划项目',
-    up: createTaskLogsAndIllustrationItemsSchema,
+    description: '任务日志按行存储',
+    up: createTaskLogsSchema,
   },
   {
     version: 21,
@@ -1459,6 +1711,62 @@ const migrations = [
     version: 23,
     description: '新增可行性研究报告工作区表结构',
     up: createFeasibilityReportSchema,
+  },
+  { version: 24, description: '新增官方 API 开票信息', up: createOfficialInvoiceSchema },
+  {
+    version: 25,
+    description: '统一技术方案生成配置存储',
+    up: unifyTechnicalPlanGenerationConfig,
+  },
+  {
+    version: 26,
+    description: '新增单企业资信库表结构',
+    up: createCredentialLibrarySchema,
+  },
+  {
+    version: 27,
+    description: '员工档案新增身份证有效期模式',
+    up: addCredentialEmployeeIdValidityMode,
+  },
+  {
+    version: 28,
+    description: '技术方案新增正文生成模板配置',
+    up: addTechnicalPlanContentGenerationTemplate,
+  },
+  {
+    version: 29,
+    description: '技术方案新增 Word 导出模板配置',
+    up: addTechnicalPlanExportTemplate,
+  },
+  {
+    version: 30,
+    description: '技术方案移除正文生成模板配置',
+    up: removeTechnicalPlanContentGenerationTemplate,
+  },
+  {
+    version: 31,
+    description: '导出模板新增系统预设标记',
+    up: addExportTemplateIsSystem,
+  },
+  {
+    version: 32,
+    description: '技术方案新增导出模板样式范围配置',
+    up: addTechnicalPlanExportTemplateScope,
+  },
+  {
+    version: 33,
+    description: '技术方案新增图片数量配置',
+    up: addTechnicalPlanImageQuantity,
+  },
+  {
+    version: 34,
+    description: '技术方案新增 HTML 图片二次优化和字数不达标修复开关',
+    up: addTechnicalPlanRepairOptions,
+  },
+  {
+    version: 35,
+    description: '技术方案新增格式自检及修复开关',
+    up: addTechnicalPlanLayoutCheckOption,
   },
 ];
 

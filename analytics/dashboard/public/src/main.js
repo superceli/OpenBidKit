@@ -4,12 +4,13 @@ import { loadAgentErrors, setupAgentErrorsPage } from './pages/agentErrors.js';
 import { loadClients, loadClientDetail, loadIpStats, setupIpStatsActions } from './pages/clients.js';
 import { loadConfigUsage, loadModelUsage } from './pages/configUsage.js';
 import { loadLatest } from './pages/latest.js';
-import { loadBlockRules, setupBlockRulesPage } from './pages/ipBlocks.js';
+import { loadIpBlocks, loadVersionBlocksSafely, setupIpBlocksPage } from './pages/ipBlocks.js';
 import { loadModelInfoCache, setupModelInfoCachePage, syncModelInfoCache } from './pages/modelInfoCache.js';
 import { downloadOfflineLicense, generateOfflineLicense, loadLicenseConfig, saveLicenseConfig } from './pages/license.js';
 import { bindNoticeEvents, loadNotices } from './pages/notice.js';
 import { loadOverview } from './pages/overview.js';
 import { bindResourceEvents, loadResources } from './pages/resources.js';
+import { bindSystemSettingsEvents, loadSystemSettings } from './pages/systemSettings.js';
 import { loadPlugins, setupPluginsPage } from './pages/plugins.js';
 import { loadTraffic } from './pages/traffic.js';
 import { setError, setStatus, updateClientsPager, updateIpPager, updateLatestPager } from './render.js';
@@ -25,7 +26,8 @@ const tabLoaders = {
   models: () => loadModelUsage(),
   agent: (options = {}) => Promise.all([loadAgentRuntime(), loadAgentErrors({ resetPage: options.resetAgentErrorPage })]),
   latest: (options = {}) => loadLatest(options),
-  'ip-blocks': () => loadBlockRules(),
+  'system-settings': () => loadSystemSettings(),
+  'ip-blocks': () => Promise.all([loadIpBlocks(), loadVersionBlocksSafely()]),
   notice: () => loadNotices(),
   license: () => loadLicenseConfig(),
   resources: () => loadResources(),
@@ -128,6 +130,7 @@ async function refreshActiveTab(options = {}) {
 
 function bindEvents() {
   state.refreshButton.addEventListener('click', () => refreshActiveTab({ resetClientsPage: true, resetLatestPage: true, resetIpPage: true, forceRefresh: true }));
+  bindSystemSettingsEvents();
   bindNoticeEvents();
   state.loadLicenseConfigButton.addEventListener('click', () => loadLicenseConfig().catch(() => undefined));
   state.saveLicenseConfigButton.addEventListener('click', saveLicenseConfig);
@@ -137,7 +140,7 @@ function bindEvents() {
   setupPluginsPage();
   setupModelInfoCachePage();
   setupAgentErrorsPage();
-  setupBlockRulesPage();
+  setupIpBlocksPage();
   setupIpStatsActions();
   state.syncModelInfoCacheButton.addEventListener('click', syncModelInfoCache);
   state.prevLatestPage.addEventListener('click', () => {

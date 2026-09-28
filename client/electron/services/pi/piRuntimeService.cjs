@@ -120,6 +120,20 @@ async function writeWorkspaceFilesAsync(workspaceDir, files = []) {
   }
 }
 
+// 阶段开始时预建空白产物，已有输入、输出及失败现场均不覆盖。
+async function prepareOutputFilesAsync(workspaceDir, files = []) {
+  for (const file of files) {
+    const relative = safeRelativePath(file);
+    const target = ensureInsideRoot(workspaceDir, path.join(workspaceDir, relative), file);
+    await fs.promises.mkdir(path.dirname(target), { recursive: true });
+    try {
+      await fs.promises.writeFile(target, '', { encoding: 'utf-8', flag: 'wx' });
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+    }
+  }
+}
+
 async function readOutputAsync(workspaceDir, outputFile) {
   const relative = safeRelativePath(outputFile);
   const target = ensureInsideRoot(workspaceDir, path.join(workspaceDir, relative), outputFile);
@@ -194,7 +208,7 @@ function getAssistantErrorDetails(messages = []) {
 function buildRetryPrompt(outputFile, error, attempt, maxRetries) {
   return `上一轮执行未通过程序校验或执行失败：${compactText(error?.message || error, 800)}
 
-请继续使用当前会话和工作区，只做必要修复，并将最终结果写入 ${outputFile}。
+本次结果文件：${outputFile}。在当前会话和工作区中，根据上述错误修复该文件。继续遵守当前阶段的可修改范围、工具权限及完成条件；已有文件优先局部修正，不因重试扩大修改范围或重新执行已完成阶段。
 这是第 ${attempt}/${maxRetries} 次自动修复机会。`;
 }
 
@@ -694,6 +708,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
     const outputFile = payload.output_file || 'agent-result.md';
     const timeoutMs = normalizeTimeoutMs(payload.timeout_ms);
     const maxRetries = normalizeMaxRetries(payload.max_retries);
+    const summaryEnabled = payload.summary_enabled !== false;
     const retryAttempts = [];
     const modelRetryStats = { count: 0 };
     const taskToken = crypto.randomUUID();
@@ -720,7 +735,9 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
       }
     }
     const transientTaskDir = path.join(layout.tasksRoot, safeTaskSegment(taskId));
-    const workspaceDir = persistentTask?.paths.workspaceDir || path.join(transientTaskDir, 'workspace');
+    // 借用已有工作区的子任务只拥有自己的会话目录，不能清空父任务文件。
+    const sharedWorkspace = Boolean(payload.workspace_dir);
+    const workspaceDir = payload.workspace_dir || persistentTask?.paths.workspaceDir || path.join(transientTaskDir, 'workspace');
     const persistentSessionFile = persistentConfig?.mode === 'resume'
       ? getPersistentAgentSessionPath(app, persistentConfig.task_key, persistentTask.state.session_file)
       : '';
@@ -770,18 +787,22 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
     const watchdog = startWatchdog(activeController, timeoutMs, taskToken);
 
     try {
-      if (!persistentTask) await clearDirectoryAsync(workspaceDir);
+      if (!persistentTask && !sharedWorkspace) await clearDirectoryAsync(workspaceDir);
       await writeWorkspaceFilesAsync(workspaceDir, payload.files || []);
+      await prepareOutputFilesAsync(workspaceDir, payload.prepare_output_files);
       await ensureStarted();
       const created = await createPiSession({
         workspaceDir,
-        sessionsDir: persistentTask?.paths.sessionsDir,
+        sessionsDir: persistentTask?.paths.sessionsDir || (sharedWorkspace ? path.join(transientTaskDir, 'sessions') : undefined),
         sessionFile: persistentSessionFile,
         environment,
         proxyInfo,
         config: configStore.load(),
         timeoutMs: DEFAULT_PI_HTTP_IDLE_TIMEOUT_MS,
         jsonValidationSchemas: payload.json_validation_schemas,
+        summaryEnabled,
+        autoValidateJson: payload.auto_validate_json === true,
+        isFinalToolCall: payload.is_final_tool_call,
         requestUserQuestion: (request, signal) => waitForUserQuestion(request, signal, taskToken),
         reportTaskFailure: (reason) => {
           const error = new Error(String(reason || '').trim() || 'Agent 无法继续当前任务');
@@ -789,6 +810,11 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
           if (!activeController.signal.aborted) activeController.abort(error);
         },
         openXmlTool: payload.open_xml_tool,
+        createTools: payload.create_tools,
+        activeTools: payload.active_tools,
+        fixedToolList: payload.fixed_tool_list === true,
+        beforeToolCall: payload.before_tool_call,
+        beforeFileWrite: payload.before_file_write,
       });
       session = created.session;
       sessionSnapshot = created.snapshot;
@@ -831,6 +857,11 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
         output_file: outputFile,
         workspace_dir: workspaceDir,
         session_id: session.sessionId,
+        signal: activeController.signal,
+        // 程序交接中的真实活动归属父任务，沿用现有无进展计时和取消机制。
+        onActivity: (event = {}) => touchActivity({
+          ...event, task_token: taskToken, task_id: taskId, session_id: session.sessionId, title, workspace_dir: workspaceDir,
+        }),
         user_question_answers: activeTask.user_question_answers.map((item) => ({ ...item })),
         readFile: async (filePath) => (await readOutputAsync(workspaceDir, filePath)).content,
         writeFiles: async (files) => writeWorkspaceFilesAsync(workspaceDir, files),
@@ -856,7 +887,8 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
               error.piAssistantError = getAssistantErrorDetails(session.messages);
               throw error;
             }
-            assistantText = extractAssistantText(session.messages);
+            created.assertJsonValidationPassed();
+            assistantText = summaryEnabled ? extractAssistantText(session.messages) : '';
             const output = await readOutputAsync(workspaceDir, outputFile);
             checkpointPersistentTask({
               status: 'running',
@@ -882,6 +914,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
                 validationResult = await payload.validateOutput(candidate, {
                   attempt: attemptIndex + 1,
                   stage: stageIndex,
+                  workflow_stage: activeTask.workflow_stage,
                   max_retries: maxRetries,
                   task_id: taskId,
                   title,
@@ -889,6 +922,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
                   workspace_dir: workspaceDir,
                   session_id: session.sessionId,
                   retry_attempts: [...retryAttempts],
+                  readFile: createWorkflowMeta().readFile,
                 });
               } catch (validationError) {
                 if (validationError && typeof validationError === 'object') {
@@ -902,6 +936,15 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
           } catch (error) {
             if (activeController.signal.aborted) throw activeController.signal.reason || error;
             if (attemptIndex >= maxRetries) throw error;
+            const retryPrompt = typeof payload.buildRetryPrompt === 'function'
+              ? await payload.buildRetryPrompt(error, {
+                ...createWorkflowMeta(),
+                attempt: attemptIndex + 1,
+                max_retries: maxRetries,
+                retry_attempts: [...retryAttempts],
+              })
+              : buildRetryPrompt(outputFile, error, attemptIndex + 1, maxRetries);
+            if (retryPrompt === null) throw error;
             const output = await readOutputAsync(workspaceDir, outputFile);
             retryAttempts.push(createRetrySummary(retryAttempts.length + 1, error, output.content));
             retryCount = retryAttempts.length;
@@ -913,7 +956,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
               visible: true,
               activity: true,
             });
-            stagePrompt = buildRetryPrompt(outputFile, error, attemptIndex + 1, maxRetries);
+            stagePrompt = retryPrompt;
             emitMonitorEvent({
               type: 'retry',
               task_id: taskId,
@@ -929,7 +972,10 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
         if (typeof payload.continueTask !== 'function') break;
         const completedStageIndex = stageIndex;
         const completedWorkflowStage = activeTask.workflow_stage;
-        const continuation = await payload.continueTask(candidate, createWorkflowMeta());
+        const continuation = await payload.continueTask(candidate, {
+          ...createWorkflowMeta(),
+          validation_result: validationResult,
+        });
         if (!continuation || continuation.complete === true || !continuation.prompt) break;
         emitMonitorEvent({
           type: 'task_output',
@@ -945,6 +991,7 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
         if (continuationFiles.length) {
           await writeWorkspaceFilesAsync(workspaceDir, continuationFiles);
         }
+        await prepareOutputFilesAsync(workspaceDir, continuation.prepare_output_files);
         stageIndex = Number.isFinite(Number(continuation.stage_index))
           ? Number(continuation.stage_index)
           : stageIndex + 1;
@@ -981,12 +1028,14 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
             });
           } catch (error) {
             if (activeController.signal.aborted) throw activeController.signal.reason;
-            if (!isCompactionNoopError(error)) throw error;
+            const noop = isCompactionNoopError(error);
+            // 可选压缩只用于缩减上下文，失败时保留原上下文继续下一阶段。
+            if (!noop && continuation.compaction_optional !== true) throw error;
             touchActivity({
               task_token: taskToken,
               stage: compactionStage,
-              message: '当前上下文无需压缩，继续执行下一阶段',
-              source: 'pi.workflow.compaction.skipped',
+              message: noop ? '当前上下文无需压缩，继续执行下一阶段' : `上下文压缩失败，按原上下文继续：${compactText(error?.message || error, 160)}`,
+              source: noop ? 'pi.workflow.compaction.skipped' : 'pi.workflow.compaction.failed',
               visible: true,
               activity: true,
             });

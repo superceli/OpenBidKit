@@ -1,4 +1,4 @@
-export type TextModelProvider = 'jinlong' | 'volcengine' | 'deepseek' | 'agnes' | 'custom';
+export type TextModelProvider = 'official' | 'jinlong' | 'volcengine' | 'deepseek' | 'agnes' | 'custom';
 export type AiRequestMode = 'normal' | 'stream';
 export type UpdateChannel = 'github' | 'cloudflare' | 'atomgit';
 
@@ -9,6 +9,7 @@ export interface TextModelConfig {
   multimodal_enabled: boolean;
   reasoning_effort: string;
   context_length_limit: number;
+  output_token_limit: number;
   concurrency_limit: number;
   temperature_enabled: boolean;
   temperature: number;
@@ -77,15 +78,11 @@ export interface ComponentsConfig {
   html_concurrency_limit: number;
 }
 
-export interface AgentModeScenariosConfig {
-  existing_plan_expansion_original_outline_extraction: boolean;
-}
-
 export interface ClientConfig extends AiConfig {
+  official_api_model_type: 'cost-effective' | 'high-quality';
   image_model: ImageModelConfig;
   image_model_profiles: ImageModelProfiles;
   components: ComponentsConfig;
-  agent_mode_scenarios: AgentModeScenariosConfig;
   agent_auto_answer_enabled?: boolean;
   update_channel?: UpdateChannel;
   gpu_hardware_acceleration_enabled?: boolean;

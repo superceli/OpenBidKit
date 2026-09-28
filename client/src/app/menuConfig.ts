@@ -1,28 +1,17 @@
 import type { AppMenuItem, SectionId } from '../shared/types/navigation';
-
-const githubStarNotice = {
-  message: '正在开发中，在github给作者点个star，可以加速开发。',
-  actionLabel: '点此直达',
-  externalUrl: 'https://github.com/superceli/OpenBidKit',
-};
+import { githubStarNotice } from '../shared/ui/useNoticeToast';
 
 export const appMenuItems: AppMenuItem[] = [
   {
     id: 'bid-generation',
-    label: '标书生成',
-    description: '技术方案、可研报告与商务标编制',
+    label: '内容生成',
+    description: '标书与可研报告内容编制',
     children: [
       {
         id: 'technical-plan',
-        label: '生成技术方案',
-        description: '根据招标文件重头编写一份标书',
+        label: '投标文件',
+        description: '根据招标文件生成技术方案、商务标等投标内容，或导入已有方案继续优化扩写',
         icon: 'document',
-      },
-      {
-        id: 'existing-plan-expansion',
-        label: '已有方案扩写',
-        description: '解决人写技术方案太薄的问题，上传写好的方案，进行优化和扩充，遵从原方案真实可落地，又能扩写出厚厚的标书',
-        icon: 'expand',
       },
       {
         id: 'feasibility-report',
@@ -31,33 +20,12 @@ export const appMenuItems: AppMenuItem[] = [
         icon: 'document',
         badge: 'Beta',
       },
-      {
-        id: 'business-bid',
-        label: '商务标',
-        description: '整理商务响应、报价口径和合同偏离材料。',
-        icon: 'briefcase',
-        notice: githubStarNotice,
-      },
     ],
   },
   {
     id: 'template-settings',
     label: '模版设置',
     description: '标书导出模板与排版配置',
-    children: [
-      {
-        id: 'my-templates',
-        label: '我的模板',
-        description: '管理已保存的标书导出模板',
-        icon: 'document',
-      },
-      {
-        id: 'new-template',
-        label: '新建模板',
-        description: '配置 Word 文档排版与编号格式',
-        icon: 'export',
-      },
-    ],
   },
   {
     id: 'knowledge-base',
@@ -69,6 +37,12 @@ export const appMenuItems: AppMenuItem[] = [
         label: '文档知识库',
         description: '管理文档资料、案例素材和可复用知识条目',
         icon: 'document',
+      },
+      {
+        id: 'credential-library',
+        label: '资信库',
+        description: '管理单家企业的资质、人员、业绩和财务资料',
+        icon: 'shield',
       },
       {
         id: 'image-knowledge-base',
@@ -116,67 +90,11 @@ export const appMenuItems: AppMenuItem[] = [
     label: '插件管理',
     description: '安装和管理插件，扩展软件功能',
   },
-  {
-    id: 'resources',
-    label: '资源下载',
-    description: '投标相关资料、工具下载',
-  },
-];
-
-const developerMenuItems: AppMenuItem[] = [
-  {
-    id: 'developer-test',
-    label: '测试页',
-    description: '开发者验证与问题复现',
-    children: [
-      {
-        id: 'developer-json-test',
-        label: 'Json请求测试',
-        description: '通过通用 AI 请求验证模型 JSON 响应和修复流程。',
-        icon: 'code',
-      },
-      {
-        id: 'developer-multimodal-test',
-        label: '多模态测试',
-        description: '上传图片并使用自定义提示词验证文本模型的图片理解能力。',
-        icon: 'code',
-      },
-      {
-        id: 'developer-prompt-lab',
-        label: 'Prompt调试台',
-        description: '集中观察 Prompt 版本、变量注入和输出约束，便于后续调参。',
-        icon: 'prompt',
-      },
-      {
-        id: 'developer-parser-sandbox',
-        label: '文件解析沙盘',
-        description: '模拟本地解析、MinerU 解析和图片资产入库的调试入口。',
-        icon: 'file',
-      },
-      {
-        id: 'developer-export-preview',
-        label: '导出链路预演',
-        description: '预览 Word、Markdown、Mermaid 图片转换的导出检查路径。',
-        icon: 'export',
-      },
-      {
-        id: 'developer-expansion-replace-test',
-        label: '扩写替换测试',
-        description: '使用真实扩写 patch 应用逻辑，复现 replace 锚点未命中后的追加问题。',
-        icon: 'tool',
-      },
-      {
-        id: 'developer-agent-test',
-        label: 'Pi Agent 链路测试',
-        description: '验证 Pi Agent 的状态、自检、任务输出和诊断。',
-        icon: 'tool',
-      },
-    ],
-  },
 ];
 
 export function getAppMenuItems(developerMode: boolean): AppMenuItem[] {
-  return developerMode ? [...appMenuItems, ...developerMenuItems] : appMenuItems;
+  void developerMode;
+  return appMenuItems;
 }
 
 export function getSectionOrder(developerMode: boolean): SectionId[] {

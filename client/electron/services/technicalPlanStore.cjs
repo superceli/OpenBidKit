@@ -1,17 +1,18 @@
+const { numberOutline } = require('./technicalPlanOutline.cjs');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { getBidAnalysisTasks } = require('./bidAnalysisTask.cjs');
 const {
+  getTechnicalPlanDir,
   getTechnicalPlanBidTemplatePath,
   getTechnicalPlanBidTemplateSourcePath,
   getTechnicalPlanBidTemplateFieldsPath,
-  getTechnicalPlanGeneratedIllustrationsDir,
-  getTechnicalPlanIllustrationsDir,
   getTechnicalPlanOriginalPlanMarkdownPath,
   getTechnicalPlanTenderMarkdownPath,
   getTechnicalPlanTenderOriginalsDir,
   getGeneratedImagesDir,
+  getImportedImagesDir,
   getWorkspaceTrashDir,
 } = require('../utils/paths.cjs');
 const { deleteImportedImageBatches } = require('../utils/importedImages.cjs');
@@ -24,6 +25,9 @@ const {
   TEMPLATE_EXTRACTION_AGENT_TASK_KEY,
 } = require('./outlineGenerationAgentV2Config.cjs');
 const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
+const { ORIGINAL_RESTORATION_AGENT_TASK_KEY } = require('./originalPlanRestorationAgentConfig.cjs');
+const { CONTENT_GENERATION_AGENT_TASK_KEY } = require('./contentGenerationAgent.cjs');
+const { originalImageReferences } = require('./originalPlanRestoration.cjs');
 
 const tenderMarkdownRelativePath = path.join('technical-plan', 'tender.md').replace(/\\/g, '/');
 const tenderOriginalMarkdownRelativePath = path.join('technical-plan', 'tender-original.md').replace(/\\/g, '/');
@@ -39,11 +43,22 @@ const defaultOutlineWordControlOptions = Object.freeze({
   minimumWords: 0,
   maximumWords: 0,
   sectionWords: 0,
-  strictSectionWords: false,
+});
+const defaultHtmlImageTypes = '甘特图、进度网络图、组织架构图、泳道图、RACI 职责矩阵、风险矩阵、系统架构与拓扑图、WBS 工作分解结构图、鱼骨图、柱状图、折线图、饼图';
+const defaultExportTemplateId = 'tpl-system-standard-bid';
+const defaultContentGenerationOptions = Object.freeze({
+  imageQuantity: 'light',
+  useAiImages: true,
+  useMermaidImages: true,
+  useHtmlImages: true,
+  htmlImageOptimization: false,
+  wordCountRepair: false,
+  layoutCheck: false,
+  htmlImageTypes: defaultHtmlImageTypes,
+  tableRequirement: 'heavy',
 });
 
 const initialState = {
-  workflowKind: 'technical-plan',
   step: 'document-analysis',
   tenderFile: null,
   tenderFiles: [],
@@ -58,7 +73,7 @@ const initialState = {
   bidSections: [],
   bidSectionExtractionStatus: 'idle',
   bidSectionExtractionError: undefined,
-  outlineMode: 'aligned',
+  outlineMode: 'standalone-technical',
   outlineExpansionMode: 'ai-complement',
   outlineWordControlOptions: { ...defaultOutlineWordControlOptions },
   outlineWordControlSnapshot: undefined,
@@ -70,10 +85,11 @@ const initialState = {
   globalFactsTask: undefined,
   globalFacts: [],
   contentGenerationTask: undefined,
-  contentGenerationOptions: undefined,
+  exportTemplateId: defaultExportTemplateId,
+  exportTemplateScope: 'ai-only',
+  contentGenerationOptions: { ...defaultContentGenerationOptions },
   contentGenerationSections: {},
   contentGenerationPlans: {},
-  contentIllustrationPlan: undefined,
   contentGenerationRuntime: undefined,
   bidTemplateExists: false,
   outlineData: null,
@@ -90,14 +106,6 @@ const taskFieldTypes = {
 };
 
 const taskTypeFields = Object.fromEntries(Object.entries(taskFieldTypes).map(([field, type]) => [type, field]));
-const originalPlanDownstreamTaskTypes = Object.freeze([
-  'outline-generation',
-  'outline-adjustment',
-  'global-facts-generation',
-  'global-facts-adjustment',
-  'content-generation',
-]);
-
 function appendImportFailureParts(messageParts, errors) {
   const failed = Array.isArray(errors)
     ? errors.map((item) => String(item || '').trim()).filter(Boolean)
@@ -170,28 +178,23 @@ function normalizeStatus(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
-function normalizeWorkflowKind(value) {
-  return value === 'existing-plan-expansion' ? 'existing-plan-expansion' : 'technical-plan';
-}
-
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
 }
 
-// 统一 Step03 当前设置和目录快照的字段语义。
+// 统一目录生成当前设置和目录快照的字段语义。
 function normalizeOutlineWordControlOptions(value) {
   const sectionWords = normalizeNonNegativeInteger(value?.sectionWords);
   return {
     minimumWords: normalizeNonNegativeInteger(value?.minimumWords),
     maximumWords: normalizeNonNegativeInteger(value?.maximumWords),
     sectionWords,
-    strictSectionWords: sectionWords > 0 && Boolean(value?.strictSectionWords),
   };
 }
 
 function isValidStep(value) {
-  return ['document-analysis', 'bid-analysis', 'outline-generation', 'global-facts', 'content-edit', 'expand'].includes(value);
+  return ['document-analysis', 'generation-settings', 'bid-analysis', 'outline-generation', 'global-facts', 'content-edit', 'expand'].includes(value);
 }
 
 function normalizeGlobalFactId(value, index) {
@@ -259,7 +262,7 @@ function expandLineRanges(ranges, totalLines) {
 }
 
 function buildSelectedSectionMarkdown(markdown, sections, selectedSectionId) {
-  const sourceLines = String(markdown || '').split(/\r?\n/);
+  const sourceLines = String(markdown ?? '').replace(/\r\n?/g, '\n').split('\n');
   const totalLines = sourceLines.length;
   const selected = sections.find((section) => section.id === selectedSectionId);
   if (!selected) {
@@ -328,10 +331,6 @@ function getBidAnalysisTaskIdsForConfig(mode, selectedTaskIds) {
   return normalizeBidAnalysisConfig(mode, selectedTaskIds).selectedTaskIds;
 }
 
-function isValidOutlineMode(value) {
-  return value === 'aligned' || value === 'response-file' || value === 'standalone-technical';
-}
-
 function isValidOutlineExpansionMode(value) {
   return value === 'original-only' || value === 'ai-complement';
 }
@@ -342,6 +341,63 @@ function isValidGlobalFactsMode(value) {
 
 function normalizeGlobalFactsMode(value) {
   return isValidGlobalFactsMode(value) ? value : 'fabricate';
+}
+
+function normalizeGenerationDocumentIds(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function normalizeContentGenerationOptions(options) {
+  const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+  return {
+    imageQuantity: source.imageQuantity ?? defaultContentGenerationOptions.imageQuantity,
+    useAiImages: hasOwn(source, 'useAiImages') ? Boolean(source.useAiImages) : defaultContentGenerationOptions.useAiImages,
+    useMermaidImages: hasOwn(source, 'useMermaidImages') ? Boolean(source.useMermaidImages) : defaultContentGenerationOptions.useMermaidImages,
+    useHtmlImages: hasOwn(source, 'useHtmlImages') ? Boolean(source.useHtmlImages) : defaultContentGenerationOptions.useHtmlImages,
+    htmlImageOptimization: Boolean(source.htmlImageOptimization),
+    wordCountRepair: Boolean(source.wordCountRepair),
+    layoutCheck: Boolean(source.layoutCheck),
+    htmlImageTypes: String(source.htmlImageTypes || defaultContentGenerationOptions.htmlImageTypes),
+    tableRequirement: ['none', 'light', 'moderate', 'heavy'].includes(source.tableRequirement) ? source.tableRequirement : defaultContentGenerationOptions.tableRequirement,
+  };
+}
+
+function createDefaultGenerationConfig() {
+  const bidAnalysis = normalizeBidAnalysisConfig('key', []);
+  return {
+    bidAnalysisMode: bidAnalysis.mode,
+    bidAnalysisSelectedTaskIds: bidAnalysis.selectedTaskIds,
+    bidSectionMode: 'single',
+    outlineMode: 'standalone-technical',
+    outlineExpansionMode: 'ai-complement',
+    outlineWordControlOptions: { ...defaultOutlineWordControlOptions },
+    referenceKnowledgeDocumentIds: [],
+    globalFactsMode: 'fabricate',
+    exportTemplateId: defaultExportTemplateId,
+    exportTemplateScope: 'ai-only',
+    contentGenerationOptions: { ...defaultContentGenerationOptions },
+  };
+}
+
+function normalizeGenerationConfig(config) {
+  const source = config && typeof config === 'object' && !Array.isArray(config) ? config : {};
+  const defaults = createDefaultGenerationConfig();
+  const bidAnalysis = normalizeBidAnalysisConfig(source.bidAnalysisMode, source.bidAnalysisSelectedTaskIds);
+  return {
+    bidAnalysisMode: bidAnalysis.mode,
+    bidAnalysisSelectedTaskIds: bidAnalysis.selectedTaskIds,
+    bidSectionMode: normalizeBidSectionMode(source.bidSectionMode),
+    outlineMode: ['response-file', 'standalone-technical', 'standalone-business'].includes(source.outlineMode)
+      ? source.outlineMode
+      : defaults.outlineMode,
+    outlineExpansionMode: isValidOutlineExpansionMode(source.outlineExpansionMode) ? source.outlineExpansionMode : defaults.outlineExpansionMode,
+    outlineWordControlOptions: normalizeOutlineWordControlOptions(source.outlineWordControlOptions),
+    referenceKnowledgeDocumentIds: normalizeGenerationDocumentIds(source.referenceKnowledgeDocumentIds),
+    globalFactsMode: normalizeGlobalFactsMode(source.globalFactsMode),
+    exportTemplateId: String(source.exportTemplateId || '').trim(),
+    exportTemplateScope: source.exportTemplateScope ?? defaults.exportTemplateScope,
+    contentGenerationOptions: normalizeContentGenerationOptions(source.contentGenerationOptions),
+  };
 }
 
 function collectLeafItems(items) {
@@ -392,29 +448,10 @@ function normalizeOutlineSaveReason(value) {
   return outlineSaveReasons.has(value) ? value : 'replace';
 }
 
-function normalizeStringMap(value) {
-  const entries = value && typeof value === 'object' ? Object.entries(value) : [];
-  const map = new Map();
-  for (const [from, to] of entries) {
-    const fromId = String(from || '').trim();
-    const toId = String(to || '').trim();
-    if (fromId && toId) map.set(fromId, toId);
-  }
-  return map;
-}
-
 function normalizeStringSet(value) {
   return new Set((Array.isArray(value) ? value : [])
     .map((item) => String(item || '').trim())
     .filter(Boolean));
-}
-
-function reverseIdMap(idMap) {
-  const reversed = new Map();
-  for (const [oldId, newId] of idMap.entries()) {
-    reversed.set(newId, oldId);
-  }
-  return reversed;
 }
 
 function mapOutlineItems(items, mapper) {
@@ -427,43 +464,12 @@ function mapOutlineItems(items, mapper) {
   });
 }
 
-function remapStringId(value, idMap) {
-  const id = String(value || '').trim();
-  return idMap.get(id) || id;
-}
-
-function remapContentRuntimeIds(runtime, idMap) {
-  if (!runtime || typeof runtime !== 'object') return runtime;
-  const remapIds = (value) => Array.isArray(value) ? value.map((id) => remapStringId(id, idMap)) : value;
-  const itemRounds = runtime.word_adjustment_item_rounds && typeof runtime.word_adjustment_item_rounds === 'object'
-    ? Object.fromEntries(Object.entries(runtime.word_adjustment_item_rounds).map(([id, rounds]) => [remapStringId(id, idMap), rounds]))
-    : runtime.word_adjustment_item_rounds;
-  return {
-    ...runtime,
-    touched_item_ids: remapIds(runtime.touched_item_ids),
-    word_adjustment_item_id: remapStringId(runtime.word_adjustment_item_id, idMap),
-    word_adjustment_item_rounds: itemRounds,
-    word_adjustment_completed_item_ids: remapIds(runtime.word_adjustment_completed_item_ids),
-    target_item_id: remapStringId(runtime.target_item_id, idMap),
-  };
-}
-
-function remapContentTaskStats(stats, idMap) {
-  if (!stats?.content) return stats;
-  return {
-    ...stats,
-    content: {
-      ...stats.content,
-      section_adjustment_item_id: remapStringId(stats.content.section_adjustment_item_id, idMap),
-      total_adjustment_item_id: remapStringId(stats.content.total_adjustment_item_id, idMap),
-    },
-  };
-}
-
 function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogStore, configStore }) {
   function deleteOutlineAgentTask() {
     agentService.deletePersistentTask(OUTLINE_AGENT_TASK_KEY);
     agentService.deletePersistentTask(TEMPLATE_EXTRACTION_AGENT_TASK_KEY);
+    agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+    agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
   }
   function deleteGlobalFactsAgentTask() {
     agentService.deletePersistentTask(GLOBAL_FACTS_AGENT_TASK_KEY);
@@ -477,7 +483,8 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     const meta = ensureMetaRow();
     const hasOutline = Boolean(db.prepare('SELECT 1 FROM technical_plan_outline_nodes LIMIT 1').get());
     const hasFacts = Boolean(db.prepare('SELECT 1 FROM technical_plan_global_fact_groups LIMIT 1').get());
-    return `${meta.step || ''}|${hasOutline ? 1 : 0}|${hasFacts ? 1 : 0}`;
+    const hasContentPlans = Boolean(db.prepare('SELECT 1 FROM technical_plan_content_plans LIMIT 1').get());
+    return `${meta.step || ''}|${hasOutline ? 1 : 0}|${hasFacts ? 1 : 0}|${hasContentPlans ? 1 : 0}`;
   }
   function notifyAgentWorkspaceChange(options = {}) {
     const signal = getAgentWorkspaceSignal();
@@ -499,8 +506,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
   const bidTemplateFieldsPath = getTechnicalPlanBidTemplateFieldsPath(app);
   const originalPlanMarkdownPath = getTechnicalPlanOriginalPlanMarkdownPath(app);
   const originalOutlineRuntimePath = path.join(path.dirname(originalPlanMarkdownPath), originalOutlineRuntimeFileName);
-  const illustrationsDir = getTechnicalPlanIllustrationsDir(app);
-  const generatedIllustrationsDir = getTechnicalPlanGeneratedIllustrationsDir(app);
   const workspaceDir = path.dirname(path.dirname(tenderMarkdownPath));
   const tenderOriginalLogger = createDeveloperLogger({
     app,
@@ -525,72 +530,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     const resolvedPath = path.resolve(String(filePath || ''));
     if (filePathKey(path.dirname(resolvedPath)) !== filePathKey(tenderOriginalsDir)) return '';
     return path.relative(workspaceDir, resolvedPath).replace(/\\/g, '/');
-  }
-
-  function normalizeIllustrationFilePart(value) {
-    return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'illustration';
-  }
-
-  function writeIllustrationFile(filePath, content) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
-    if (typeof content === 'string') {
-      fs.writeFileSync(tempPath, content, 'utf-8');
-    } else {
-      fs.writeFileSync(tempPath, content);
-    }
-    fs.renameSync(tempPath, filePath);
-  }
-
-  // 根据计划版本和图片项 ID 计算 HTML 源文件的确定性路径。
-  function getIllustrationHtmlFile({ revision, itemId }) {
-    const safeRevision = normalizeIllustrationFilePart(revision);
-    const safeItemId = normalizeIllustrationFilePart(itemId);
-    const relativePath = path.join('illustrations', safeRevision, 'html', `${safeItemId}.html`).replace(/\\/g, '/');
-    return {
-      relativePath,
-      filePath: path.join(path.dirname(originalPlanMarkdownPath), relativePath),
-    };
-  }
-
-  // 独立保存 HTML 图片源文件，供转图失败或任务恢复时复用。
-  function saveIllustrationHtml({ revision, itemId, content }) {
-    const { relativePath, filePath } = getIllustrationHtmlFile({ revision, itemId });
-    writeIllustrationFile(filePath, String(content || ''));
-    return { relativePath, filePath };
-  }
-
-  // 读取此前已生成的 HTML 图片源文件。
-  function readIllustrationHtml(relativePath) {
-    const resolvedPath = path.resolve(path.dirname(originalPlanMarkdownPath), String(relativePath || ''));
-    const root = `${path.resolve(illustrationsDir)}${path.sep}`;
-    if (!resolvedPath.startsWith(root) || !fs.existsSync(resolvedPath)) return '';
-    return fs.readFileSync(resolvedPath, 'utf-8');
-  }
-
-  // 在计划尚未记录 source_path 时按确定性路径探测已落盘的 HTML。
-  function findIllustrationHtml({ revision, itemId }) {
-    const entry = getIllustrationHtmlFile({ revision, itemId });
-    if (!fs.existsSync(entry.filePath)) return null;
-    return { ...entry, content: fs.readFileSync(entry.filePath, 'utf-8') };
-  }
-
-  // 保存 HTML 截图 PNG，并返回 Renderer/导出层均可读取的资产 URL。
-  function saveIllustrationPng({ revision, itemId, buffer }) {
-    const safeRevision = normalizeIllustrationFilePart(revision);
-    const safeItemId = normalizeIllustrationFilePart(itemId);
-    const filePath = path.join(generatedIllustrationsDir, safeRevision, `${safeItemId}.png`);
-    writeIllustrationFile(filePath, buffer);
-    return {
-      filePath,
-      assetUrl: `yibiao-asset://generated-images/technical-plan/illustrations/${encodeURIComponent(safeRevision)}/${encodeURIComponent(`${safeItemId}.png`)}`,
-    };
-  }
-
-  // 清理技术方案专属的图片源文件和生成图片。
-  function clearIllustrationFiles() {
-    removeWorkspacePathSync(illustrationsDir);
-    removeWorkspacePathSync(generatedIllustrationsDir);
   }
   function resolvePendingTenderMarkdownPath(filePath) {
     return path.resolve(resolveMarkdownPath(filePath));
@@ -702,8 +641,8 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     if (existing) return existing;
     const timestamp = now();
     db.prepare(`
-      INSERT INTO technical_plan_meta (id, workflow_kind, step, bid_analysis_mode, outline_mode, outline_expansion_mode, created_at, updated_at)
-      VALUES (1, 'technical-plan', 'document-analysis', 'key', 'aligned', 'ai-complement', @timestamp, @timestamp)
+      INSERT INTO technical_plan_meta (id, step, created_at, updated_at)
+      VALUES (1, 'document-analysis', @timestamp, @timestamp)
     `).run({ timestamp });
     return db.prepare('SELECT * FROM technical_plan_meta WHERE id = 1').get();
   }
@@ -725,6 +664,162 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     });
   }
 
+  function ensureGenerationConfigRow() {
+    const existing = db.prepare('SELECT * FROM technical_plan_generation_config WHERE id = 1').get();
+    if (existing) return existing;
+    const timestamp = now();
+    const defaults = createDefaultGenerationConfig();
+    const content = defaults.contentGenerationOptions;
+    db.prepare(`
+      INSERT INTO technical_plan_generation_config (
+        id, bid_analysis_mode, bid_section_mode, outline_mode, outline_expansion_mode,
+        minimum_words, maximum_words, section_words, global_facts_mode, export_template_id, export_template_scope,
+        use_ai_images, use_mermaid_images,
+        use_html_images, html_image_types, table_requirement, image_quantity, html_image_optimization, word_count_repair, layout_check,
+        created_at, updated_at
+      ) VALUES (
+        1, @bid_analysis_mode, @bid_section_mode, @outline_mode, @outline_expansion_mode,
+        @minimum_words, @maximum_words, @section_words, @global_facts_mode, @export_template_id, @export_template_scope,
+        @use_ai_images, @use_mermaid_images,
+        @use_html_images, @html_image_types, @table_requirement, @image_quantity, @html_image_optimization, @word_count_repair, @layout_check,
+        @created_at, @updated_at
+      )
+    `).run({
+      bid_analysis_mode: defaults.bidAnalysisMode,
+      bid_section_mode: defaults.bidSectionMode,
+      outline_mode: defaults.outlineMode,
+      outline_expansion_mode: defaults.outlineExpansionMode,
+      minimum_words: defaults.outlineWordControlOptions.minimumWords,
+      maximum_words: defaults.outlineWordControlOptions.maximumWords,
+      section_words: defaults.outlineWordControlOptions.sectionWords,
+      global_facts_mode: defaults.globalFactsMode,
+      export_template_id: defaults.exportTemplateId,
+      export_template_scope: defaults.exportTemplateScope,
+      use_ai_images: toDbBool(content.useAiImages),
+      use_mermaid_images: toDbBool(content.useMermaidImages),
+      use_html_images: toDbBool(content.useHtmlImages),
+      html_image_types: content.htmlImageTypes,
+      table_requirement: content.tableRequirement,
+      image_quantity: content.imageQuantity,
+      html_image_optimization: toDbBool(content.htmlImageOptimization),
+      word_count_repair: toDbBool(content.wordCountRepair),
+      layout_check: toDbBool(content.layoutCheck),
+      created_at: timestamp,
+      updated_at: timestamp,
+    });
+    return db.prepare('SELECT * FROM technical_plan_generation_config WHERE id = 1').get();
+  }
+
+  function loadGenerationBidTaskIds() {
+    return db.prepare('SELECT task_id FROM technical_plan_generation_bid_tasks ORDER BY sort_order ASC').all().map((row) => row.task_id);
+  }
+
+  function loadGenerationReferenceDocumentIds() {
+    return db.prepare('SELECT document_id FROM technical_plan_generation_reference_docs ORDER BY sort_order ASC').all().map((row) => row.document_id);
+  }
+
+  function replaceGenerationList(tableName, columnName, values) {
+    db.prepare(`DELETE FROM ${tableName}`).run();
+    const insert = db.prepare(`INSERT INTO ${tableName} (${columnName}, sort_order) VALUES (@value, @sort_order)`);
+    normalizeGenerationDocumentIds(values).forEach((value, index) => insert.run({ value, sort_order: index }));
+  }
+
+  // 读取并规范化当前项目全部生成配置。
+  function loadGenerationConfig() {
+    const row = ensureGenerationConfigRow();
+    return normalizeGenerationConfig({
+      bidAnalysisMode: row.bid_analysis_mode,
+      bidAnalysisSelectedTaskIds: loadGenerationBidTaskIds(),
+      bidSectionMode: row.bid_section_mode,
+      outlineMode: row.outline_mode,
+      outlineExpansionMode: row.outline_expansion_mode,
+      outlineWordControlOptions: {
+        minimumWords: row.minimum_words,
+        maximumWords: row.maximum_words,
+        sectionWords: row.section_words,
+      },
+      referenceKnowledgeDocumentIds: loadGenerationReferenceDocumentIds(),
+      globalFactsMode: row.global_facts_mode,
+      exportTemplateId: row.export_template_id,
+      exportTemplateScope: row.export_template_scope,
+      contentGenerationOptions: {
+        useAiImages: fromDbBool(row.use_ai_images),
+        useMermaidImages: fromDbBool(row.use_mermaid_images),
+        useHtmlImages: fromDbBool(row.use_html_images),
+        htmlImageTypes: row.html_image_types,
+        tableRequirement: row.table_requirement,
+        imageQuantity: row.image_quantity,
+        htmlImageOptimization: fromDbBool(row.html_image_optimization),
+        wordCountRepair: fromDbBool(row.word_count_repair),
+        layoutCheck: fromDbBool(row.layout_check),
+      },
+    });
+  }
+
+  function writeGenerationConfig(config) {
+    ensureGenerationConfigRow();
+    const normalized = normalizeGenerationConfig(config);
+    const wordControl = normalized.outlineWordControlOptions;
+    const content = normalized.contentGenerationOptions;
+    db.prepare(`
+      UPDATE technical_plan_generation_config SET
+        bid_analysis_mode = @bid_analysis_mode,
+        bid_section_mode = @bid_section_mode,
+        outline_mode = @outline_mode,
+        outline_expansion_mode = @outline_expansion_mode,
+        minimum_words = @minimum_words,
+        maximum_words = @maximum_words,
+        section_words = @section_words,
+        global_facts_mode = @global_facts_mode,
+        export_template_id = @export_template_id,
+        export_template_scope = @export_template_scope,
+        use_ai_images = @use_ai_images,
+        use_mermaid_images = @use_mermaid_images,
+        use_html_images = @use_html_images,
+        html_image_types = @html_image_types,
+        table_requirement = @table_requirement,
+        image_quantity = @image_quantity,
+        html_image_optimization = @html_image_optimization,
+        word_count_repair = @word_count_repair,
+        layout_check = @layout_check,
+        updated_at = @updated_at
+      WHERE id = 1
+    `).run({
+      bid_analysis_mode: normalized.bidAnalysisMode,
+      bid_section_mode: normalized.bidSectionMode,
+      outline_mode: normalized.outlineMode,
+      outline_expansion_mode: normalized.outlineExpansionMode,
+      minimum_words: wordControl.minimumWords,
+      maximum_words: wordControl.maximumWords,
+      section_words: wordControl.sectionWords,
+      global_facts_mode: normalized.globalFactsMode,
+      export_template_id: normalized.exportTemplateId,
+      export_template_scope: normalized.exportTemplateScope,
+      use_ai_images: toDbBool(content.useAiImages),
+      use_mermaid_images: toDbBool(content.useMermaidImages),
+      use_html_images: toDbBool(content.useHtmlImages),
+      html_image_types: content.htmlImageTypes,
+      table_requirement: content.tableRequirement,
+      image_quantity: content.imageQuantity,
+      html_image_optimization: toDbBool(content.htmlImageOptimization),
+      word_count_repair: toDbBool(content.wordCountRepair),
+      layout_check: toDbBool(content.layoutCheck),
+      updated_at: now(),
+    });
+    replaceGenerationList('technical_plan_generation_bid_tasks', 'task_id', normalized.bidAnalysisSelectedTaskIds);
+    replaceGenerationList('technical_plan_generation_reference_docs', 'document_id', normalized.referenceKnowledgeDocumentIds);
+    return normalized;
+  }
+
+  function updateGenerationConfig(partial = {}) {
+    const current = loadGenerationConfig();
+    const merged = { ...current };
+    for (const key of Object.keys(current)) {
+      if (hasOwn(partial, key)) merged[key] = partial[key];
+    }
+    return writeGenerationConfig(merged);
+  }
+
   function resolveMarkdownPath(relativeOrAbsolutePath) {
     const value = String(relativeOrAbsolutePath || '').trim();
     if (!value) return tenderMarkdownPath;
@@ -738,6 +833,17 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       return '';
     }
     return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  // 读取独立保存的小节 Word；缺失与读取失败分别交给展示页处理。
+  async function readContentWord(sectionId) {
+    const filePath = path.join(getTechnicalPlanDir(app), `${encodeURIComponent(sectionId)}.docx`);
+    try {
+      return await fs.promises.readFile(filePath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
   }
 
   function loadTenderSourceFiles(meta = readMetaRow()) {
@@ -903,7 +1009,13 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
   }
 
   function clearBidTemplate() {
-    const templateFiles = [bidTemplatePath, bidTemplateSourcePath, bidTemplateFieldsPath];
+    const sourcePathParts = path.parse(bidTemplateSourcePath);
+    const templateFiles = [
+      bidTemplatePath,
+      bidTemplateSourcePath,
+      path.join(sourcePathParts.dir, `${sourcePathParts.name}.chapters.json`),
+      bidTemplateFieldsPath,
+    ];
     const templateDir = path.dirname(bidTemplatePath);
     if (fs.existsSync(templateDir)) {
       const tempPrefixes = [
@@ -998,18 +1110,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
       throw error;
     }
-  }
-
-  function loadReferenceDocumentIds() {
-    return db.prepare('SELECT document_id FROM technical_plan_reference_docs ORDER BY sort_order ASC').all()
-      .map((row) => row.document_id);
-  }
-
-  function replaceReferenceDocumentIds(documentIds) {
-    db.prepare('DELETE FROM technical_plan_reference_docs').run();
-    const insert = db.prepare('INSERT INTO technical_plan_reference_docs (document_id, sort_order) VALUES (@document_id, @sort_order)');
-    [...new Set((Array.isArray(documentIds) ? documentIds : []).map((id) => String(id || '').trim()).filter(Boolean))]
-      .forEach((documentId, index) => insert.run({ document_id: documentId, sort_order: index }));
   }
 
   function taskFromRow(row) {
@@ -1219,7 +1319,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
 
     return {
-      outline: roots.map(cleanup),
+      outline: numberOutline(roots.map(cleanup)),
       project_name: meta.outline_project_name || undefined,
       project_overview: meta.outline_project_overview || undefined,
     };
@@ -1282,7 +1382,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       acc[row.node_id] = {
         id: row.node_id,
         title: row.title || '未命名章节',
-        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error'], 'idle'),
         content: row.content || '',
         error: row.error || undefined,
         updated_at: row.updated_at || undefined,
@@ -1325,7 +1425,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     for (const [nodeId, section] of entries) {
       upsert.run({
         node_id: nodeId,
-        status: normalizeStatus(section?.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        status: normalizeStatus(section?.status, ['idle', 'running', 'success', 'error'], 'idle'),
         error: section?.error ? String(section.error) : null,
         updated_at: section?.updated_at || timestamp,
       });
@@ -1353,189 +1453,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       }
       return acc;
     }, {});
-  }
-
-  function loadGeneratedIllustrationAssetUrls() {
-    return db.prepare(`
-      SELECT generation_asset_url
-      FROM technical_plan_illustration_items
-      WHERE generation_asset_url IS NOT NULL AND generation_asset_url <> ''
-    `).all().map((row) => row.generation_asset_url);
-  }
-
-  function deleteGeneratedIllustrationAssets(assetUrls) {
-    const generatedImagesDir = path.resolve(getGeneratedImagesDir(app));
-    const prefix = 'yibiao-asset://generated-images/';
-    for (const assetUrl of new Set(assetUrls || [])) {
-      const originalSource = String(assetUrl || '');
-      const retainedByPlan = db.prepare('SELECT 1 FROM technical_plan_illustration_items WHERE generation_asset_url = ? LIMIT 1').get(originalSource);
-      const stillReferenced = db.prepare('SELECT 1 FROM technical_plan_outline_nodes WHERE instr(content, ?) > 0 LIMIT 1').get(originalSource);
-      if (retainedByPlan || stillReferenced) continue;
-      const source = originalSource.split('?')[0];
-      if (!source.startsWith(prefix)) continue;
-      let relativePath;
-      try {
-        relativePath = decodeURIComponent(source.slice(prefix.length));
-      } catch {
-        continue;
-      }
-      const filePath = path.resolve(generatedImagesDir, relativePath);
-      if (filePath === generatedImagesDir || !filePath.startsWith(`${generatedImagesDir}${path.sep}`)) continue;
-      fs.rmSync(filePath, { force: true });
-    }
-  }
-
-  const pendingGeneratedAssetCleanup = new Set();
-  let generatedAssetCleanupScheduled = false;
-  function scheduleGeneratedAssetCleanup(assetUrls) {
-    (assetUrls || []).filter(Boolean).forEach((assetUrl) => pendingGeneratedAssetCleanup.add(assetUrl));
-    if (!pendingGeneratedAssetCleanup.size || generatedAssetCleanupScheduled) return;
-    generatedAssetCleanupScheduled = true;
-    setImmediate(() => {
-      generatedAssetCleanupScheduled = false;
-      const queuedAssetUrls = [...pendingGeneratedAssetCleanup];
-      pendingGeneratedAssetCleanup.clear();
-      try {
-        deleteGeneratedIllustrationAssets(queuedAssetUrls);
-      } catch (error) {
-        console.warn('[technical-plan] 清理旧生图失败', error?.message || String(error));
-      }
-    });
-  }
-
-  function clearUnreferencedRootGeneratedImages() {
-    const generatedImagesDir = getGeneratedImagesDir(app);
-    if (!fs.existsSync(generatedImagesDir)) return;
-    const assetUrls = fs.readdirSync(generatedImagesDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => `yibiao-asset://generated-images/${encodeURIComponent(entry.name)}`);
-    scheduleGeneratedAssetCleanup(assetUrls);
-  }
-
-  function deleteContentIllustrationPlanRows() {
-    db.prepare('DELETE FROM technical_plan_illustration_items').run();
-    db.prepare('DELETE FROM technical_plan_illustration_plans').run();
-  }
-
-  function clearContentIllustrationPlan() {
-    const assetUrls = loadGeneratedIllustrationAssetUrls();
-    deleteContentIllustrationPlanRows();
-    scheduleGeneratedAssetCleanup(assetUrls);
-  }
-
-  function illustrationItemValues(item, sortOrder, timestamp) {
-    const generation = item?.generation;
-    return {
-      item_id: String(item.item_id),
-      kind: String(item.kind || ''),
-      image_type: String(item.image_type || ''),
-      title: String(item.title || ''),
-      section_ids_json: JSON.stringify(Array.isArray(item.section_ids) ? item.section_ids : []),
-      placement: String(item.placement || 'after'),
-      priority: Number(item.priority || 0),
-      generation_status: generation?.status ? String(generation.status) : null,
-      generation_mode: generation?.mode ? String(generation.mode) : null,
-      generation_code: generation?.code ? String(generation.code) : null,
-      generation_source_path: generation?.source_path ? String(generation.source_path) : null,
-      generation_asset_url: generation?.asset_url ? String(generation.asset_url) : null,
-      generation_attempts: generation?.attempts === undefined ? null : Number(generation.attempts || 0),
-      generation_error: generation?.error ? String(generation.error) : null,
-      generation_updated_at: generation?.updated_at || null,
-      sort_order: Number(sortOrder || 0),
-      updated_at: item.updated_at || timestamp,
-    };
-  }
-
-  const upsertIllustrationItem = db.prepare(`
-    INSERT INTO technical_plan_illustration_items (
-      item_id, kind, image_type, title, section_ids_json, placement, priority,
-      generation_status, generation_mode, generation_code, generation_source_path,
-      generation_asset_url, generation_attempts, generation_error, generation_updated_at,
-      sort_order, updated_at
-    ) VALUES (
-      @item_id, @kind, @image_type, @title, @section_ids_json, @placement, @priority,
-      @generation_status, @generation_mode, @generation_code, @generation_source_path,
-      @generation_asset_url, @generation_attempts, @generation_error, @generation_updated_at,
-      @sort_order, @updated_at
-    ) ON CONFLICT(item_id) DO UPDATE SET
-      kind = excluded.kind,
-      image_type = excluded.image_type,
-      title = excluded.title,
-      section_ids_json = excluded.section_ids_json,
-      placement = excluded.placement,
-      priority = excluded.priority,
-      generation_status = excluded.generation_status,
-      generation_mode = excluded.generation_mode,
-      generation_code = excluded.generation_code,
-      generation_source_path = excluded.generation_source_path,
-      generation_asset_url = excluded.generation_asset_url,
-      generation_attempts = excluded.generation_attempts,
-      generation_error = excluded.generation_error,
-      generation_updated_at = excluded.generation_updated_at,
-      sort_order = excluded.sort_order,
-      updated_at = excluded.updated_at
-  `);
-
-  function replaceContentIllustrationPlan(plan) {
-    const previousAssetUrls = loadGeneratedIllustrationAssetUrls();
-    deleteContentIllustrationPlanRows();
-    if (!plan || !Array.isArray(plan.items)) {
-      scheduleGeneratedAssetCleanup(previousAssetUrls);
-      return;
-    }
-    const timestamp = plan.updated_at || now();
-    db.prepare(`
-      INSERT INTO technical_plan_illustration_plans (id, plan_version, revision, updated_at)
-      VALUES (1, ?, ?, ?)
-    `).run(Number(plan.plan_version || 0), String(plan.revision || ''), timestamp);
-    plan.items.forEach((item, index) => {
-      if (item?.item_id) upsertIllustrationItem.run(illustrationItemValues(item, index, timestamp));
-    });
-    const retainedAssetUrls = new Set(loadGeneratedIllustrationAssetUrls());
-    scheduleGeneratedAssetCleanup(previousAssetUrls.filter((assetUrl) => !retainedAssetUrls.has(assetUrl)));
-  }
-
-  function saveContentIllustrationItem(item) {
-    if (!item?.item_id) return;
-    const existing = db.prepare('SELECT sort_order, generation_asset_url FROM technical_plan_illustration_items WHERE item_id = ?').get(item.item_id);
-    upsertIllustrationItem.run(illustrationItemValues(item, existing?.sort_order || 0, now()));
-    const nextAssetUrl = item?.generation?.asset_url ? String(item.generation.asset_url) : '';
-    if (existing?.generation_asset_url && existing.generation_asset_url !== nextAssetUrl) {
-      scheduleGeneratedAssetCleanup([existing.generation_asset_url]);
-    }
-  }
-
-  function loadContentIllustrationPlan() {
-    const plan = db.prepare('SELECT * FROM technical_plan_illustration_plans WHERE id = 1').get();
-    if (!plan) return undefined;
-    const items = db.prepare('SELECT * FROM technical_plan_illustration_items ORDER BY sort_order ASC, item_id ASC').all().map((row) => {
-      const generation = row.generation_status ? {
-        status: row.generation_status,
-        ...(row.generation_mode ? { mode: row.generation_mode } : {}),
-        ...(row.generation_code ? { code: row.generation_code } : {}),
-        ...(row.generation_source_path ? { source_path: row.generation_source_path } : {}),
-        ...(row.generation_asset_url ? { asset_url: row.generation_asset_url } : {}),
-        ...(row.generation_attempts === null ? {} : { attempts: Number(row.generation_attempts || 0) }),
-        ...(row.generation_error ? { error: row.generation_error } : {}),
-        ...(row.generation_updated_at ? { updated_at: row.generation_updated_at } : {}),
-      } : undefined;
-      return {
-        item_id: row.item_id,
-        kind: row.kind,
-        image_type: row.image_type,
-        title: row.title,
-        section_ids: safeJsonParse(row.section_ids_json, []),
-        placement: row.placement,
-        priority: Number(row.priority || 0),
-        ...(generation ? { generation } : {}),
-      };
-    });
-    return {
-      plan_version: Number(plan.plan_version || 0),
-      revision: plan.revision,
-      items,
-      updated_at: plan.updated_at || undefined,
-    };
   }
 
   function normalizeGlobalFactGroups(groups) {
@@ -1646,7 +1563,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       updateGeneratedContent.run(String(section.content || ''), timestamp, nodeId);
       upsertGeneratedSection.run({
         node_id: nodeId,
-        status: normalizeStatus(section.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        status: normalizeStatus(section.status, ['idle', 'running', 'success', 'error'], 'idle'),
         error: section.error ? String(section.error) : null,
         updated_at: section.updated_at || timestamp,
       });
@@ -1667,28 +1584,22 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
   }
 
-  function clearDownstreamFromTender() {
+  function clearDownstreamFromTender(wordChanges) {
+    stageContentWordRemoval(wordChanges);
     deleteOutlineAgentTask();
     deleteGlobalFactsAgentTask();
     db.prepare('DELETE FROM technical_plan_tasks').run();
     db.prepare('DELETE FROM technical_plan_bid_items').run();
-    db.prepare('DELETE FROM technical_plan_reference_docs').run();
     db.prepare('DELETE FROM technical_plan_outline_nodes').run();
     db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
-    clearContentIllustrationPlan();
     clearOriginalOutlineRuntime();
     clearTechnicalPlanMermaidCache();
+    writeGenerationConfig(createDefaultGenerationConfig());
     updateMeta({
       step: 'document-analysis',
-      bid_analysis_mode: 'key',
-      bid_analysis_selected_task_ids_json: null,
-      outline_mode: 'aligned',
-      outline_expansion_mode: 'ai-complement',
       outline_word_control_snapshot_json: null,
       outline_project_name: null,
       outline_project_overview: null,
-      global_facts_mode: 'fabricate',
-      content_generation_options_json: null,
       content_generation_runtime_json: null,
       pending_tender_markdown_path: null,
       pending_tender_file_name: null,
@@ -1696,7 +1607,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       pending_tender_sections_json: null,
       pending_tender_total_declared: null,
       pending_tender_created_at: null,
-      bid_section_mode: 'single',
       bid_sections_json: null,
       bid_section_extraction_status: 'idle',
       bid_section_extraction_error: null,
@@ -1706,21 +1616,23 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     notifyAgentWorkspaceChange({ force: true });
   }
 
-  function clearDownstreamFromBidSectionChange() {
+  function clearDownstreamFromBidSectionChange(wordChanges) {
+    stageContentWordRemoval(wordChanges);
     clearBidTemplate();
     deleteOutlineAgentTask();
     deleteGlobalFactsAgentTask();
     db.prepare('DELETE FROM technical_plan_tasks').run();
     db.prepare('DELETE FROM technical_plan_bid_items').run();
-    db.prepare('DELETE FROM technical_plan_reference_docs').run();
     db.prepare('DELETE FROM technical_plan_outline_nodes').run();
     db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
-    clearContentIllustrationPlan();
     clearOriginalOutlineRuntime();
     clearTechnicalPlanMermaidCache();
+    updateGenerationConfig({
+      referenceKnowledgeDocumentIds: [],
+      contentGenerationOptions: createDefaultGenerationConfig().contentGenerationOptions,
+    });
     updateMeta({
       step: 'bid-analysis',
-      content_generation_options_json: null,
       content_generation_runtime_json: null,
       outline_word_control_snapshot_json: null,
       outline_project_name: null,
@@ -1729,42 +1641,16 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     notifyAgentWorkspaceChange({ force: true });
   }
 
-  function clearContentGenerationState() {
+  function clearContentGenerationState(wordChanges) {
+    stageContentWordRemoval(wordChanges);
+    agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+    agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
     db.prepare("UPDATE technical_plan_outline_nodes SET content = '', updated_at = ?").run(now());
     db.prepare('DELETE FROM technical_plan_content_sections').run();
     db.prepare('DELETE FROM technical_plan_content_plans').run();
     db.prepare("DELETE FROM technical_plan_tasks WHERE type = 'content-generation'").run();
-    clearContentIllustrationPlan();
     clearTechnicalPlanMermaidCache();
     updateMeta({ content_generation_runtime_json: null });
-  }
-
-  function clearDownstreamFromOriginalPlan() {
-    deleteOutlineAgentTask();
-    deleteGlobalFactsAgentTask();
-    db.prepare(`DELETE FROM technical_plan_tasks WHERE type IN (${originalPlanDownstreamTaskTypes.map(() => '?').join(', ')})`).run(...originalPlanDownstreamTaskTypes);
-    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
-    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
-    db.prepare('DELETE FROM technical_plan_content_sections').run();
-    db.prepare('DELETE FROM technical_plan_content_plans').run();
-    clearContentIllustrationPlan();
-    clearOriginalOutlineRuntime();
-    clearTechnicalPlanMermaidCache();
-    updateMeta({
-      step: 'document-analysis',
-      outline_project_name: null,
-      outline_project_overview: null,
-      content_generation_runtime_json: null,
-      outline_word_control_snapshot_json: null,
-    });
-    notifyAgentWorkspaceChange({ force: true });
-  }
-
-  function assertNoTechnicalPlanTaskRunning() {
-    const row = db.prepare("SELECT type FROM technical_plan_tasks WHERE status IN ('running', 'pausing') LIMIT 1").get();
-    if (row) {
-      throw new Error('当前有技术方案任务正在运行，请等待任务结束后再切换模式');
-    }
   }
 
   // 正文任务活动或暂停期间禁止手工保存，避免清空待恢复的图片计划。
@@ -1775,42 +1661,10 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
   }
 
-  function clearWorkflowSpecificState(workflowKind) {
-    deleteOutlineAgentTask();
-    deleteGlobalFactsAgentTask();
-    db.prepare(`DELETE FROM technical_plan_tasks WHERE type IN (${originalPlanDownstreamTaskTypes.map(() => '?').join(', ')})`).run(...originalPlanDownstreamTaskTypes);
-    db.prepare('DELETE FROM technical_plan_content_sections').run();
-    db.prepare('DELETE FROM technical_plan_content_plans').run();
-    db.prepare('DELETE FROM technical_plan_outline_nodes').run();
-    db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
-    clearContentIllustrationPlan();
-    clearOriginalOutlineRuntime();
-    clearTechnicalPlanMermaidCache();
-    updateMeta({
-      workflow_kind: normalizeWorkflowKind(workflowKind),
-      step: 'document-analysis',
-      outline_expansion_mode: 'ai-complement',
-      global_facts_mode: 'fabricate',
-      original_plan_file_name: null,
-      original_plan_markdown_path: null,
-      original_plan_markdown_hash: null,
-      original_plan_markdown_chars: 0,
-      original_plan_parser_label: null,
-      original_plan_imported_at: null,
-      outline_project_name: null,
-      outline_project_overview: null,
-      outline_word_control_options_json: null,
-      outline_word_control_snapshot_json: null,
-      content_generation_options_json: null,
-      content_generation_runtime_json: null,
-    });
-    notifyAgentWorkspaceChange({ force: true });
-  }
-
   function loadOutlinePersistenceSnapshot() {
     return {
-      nodes: db.prepare('SELECT node_id, content FROM technical_plan_outline_nodes').all().reduce((acc, row) => {
-        acc[row.node_id] = { content: row.content || '' };
+      nodes: db.prepare('SELECT node_id, parent_node_id, content FROM technical_plan_outline_nodes').all().reduce((acc, row) => {
+        acc[row.node_id] = { content: row.content || '', parentId: row.parent_node_id };
         return acc;
       }, {}),
       sections: db.prepare('SELECT node_id, status, error, updated_at FROM technical_plan_content_sections').all(),
@@ -1825,19 +1679,18 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
   }
 
-  function shouldClearSavedNode({ clearAll, oldId, newId, affectedIds }) {
-    return clearAll || affectedIds.has(oldId) || (!oldId && affectedIds.has(newId));
+  function shouldClearSavedNode({ clearAll, id, affectedIds }) {
+    return clearAll || affectedIds.has(id);
   }
 
-  function buildOutlineWithPersistedContent(outlineData, { snapshot, reverseMap, affectedIds, clearAll }) {
+  function buildOutlineWithPersistedContent(outlineData, { snapshot, affectedIds, clearAll }) {
     if (!outlineData?.outline?.length) return outlineData;
     return {
       ...outlineData,
       outline: mapOutlineItems(outlineData.outline, (item) => {
-        const newId = String(item?.id || '').trim();
-        const oldId = reverseMap.get(newId) || newId;
-        const clearContent = shouldClearSavedNode({ clearAll, oldId, newId, affectedIds });
-        const oldContent = snapshot.nodes[oldId]?.content;
+        const id = item.id;
+        const clearContent = shouldClearSavedNode({ clearAll, id, affectedIds });
+        const oldContent = snapshot.nodes[id]?.content;
         return {
           ...item,
           content: clearContent ? '' : String(oldContent ?? item?.content ?? ''),
@@ -1846,7 +1699,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     };
   }
 
-  function restoreMappedContentRows({ snapshot, idMap, affectedIds, nextIds, clearAll }) {
+  function restoreRetainedContentRows({ snapshot, affectedIds, nextIds, clearAll }) {
     db.prepare('DELETE FROM technical_plan_content_sections').run();
     db.prepare('DELETE FROM technical_plan_content_plans').run();
 
@@ -1858,14 +1711,13 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     `);
     const seenSections = new Set();
     for (const row of snapshot.sections) {
-      const oldId = String(row.node_id || '').trim();
-      const newId = idMap.get(oldId) || oldId;
-      if (!newId || !nextIds.has(newId) || seenSections.has(newId)) continue;
-      if (shouldClearSavedNode({ clearAll, oldId, newId, affectedIds })) continue;
-      seenSections.add(newId);
+      const id = row.node_id;
+      if (!id || !nextIds.has(id) || seenSections.has(id)) continue;
+      if (shouldClearSavedNode({ clearAll, id, affectedIds })) continue;
+      seenSections.add(id);
       insertSection.run({
-        node_id: newId,
-        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error', 'ignored'], 'idle'),
+        node_id: id,
+        status: normalizeStatus(row.status, ['idle', 'running', 'success', 'error'], 'idle'),
         error: row.error || null,
         updated_at: row.updated_at || now(),
       });
@@ -1877,112 +1729,135 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     `);
     const seenPlans = new Set();
     for (const row of snapshot.plans) {
-      const oldId = String(row.node_id || '').trim();
-      const newId = idMap.get(oldId) || oldId;
-      if (!newId || !nextIds.has(newId) || seenPlans.has(newId)) continue;
-      if (shouldClearSavedNode({ clearAll, oldId, newId, affectedIds })) continue;
+      const id = row.node_id;
+      if (!id || !nextIds.has(id) || seenPlans.has(id)) continue;
+      if (shouldClearSavedNode({ clearAll, id, affectedIds })) continue;
       if (!row.plan_json) continue;
-      seenPlans.add(newId);
+      seenPlans.add(id);
       insertPlan.run({
-        node_id: newId,
+        node_id: id,
         plan_json: row.plan_json,
         updated_at: row.updated_at || now(),
       });
     }
   }
 
-  // 目录排序时使用临时编号同步主键和外键，避免删除重建正文状态与计划。
-  function saveSortedOutline(outlineData, idMap) {
-    const rows = flattenOutlineItems(outlineData?.outline || []);
-    const rowOrder = new Map(rows.map((row, index) => [row.node_id, index]));
-    const changedIds = [...idMap.entries()].filter(([oldId, newId]) => oldId !== newId);
-    const temporaryIds = new Map(changedIds.map(([oldId], index) => [oldId, `__outline_sort_${crypto.randomUUID()}_${index}`]));
-    db.pragma('defer_foreign_keys = ON');
+  // 将正文文件移动与数据库修改放在同一业务操作中，提交失败时逆序恢复文件。
+  function createContentWordTransaction(callback) {
+    const transaction = db.transaction(callback);
+    return (...args) => {
+      const changes = { moves: [], removed: [] };
+      let result;
+      try {
+        result = transaction(changes, ...args);
+      } catch (error) {
+        const restoreErrors = [];
+        for (const [source, target] of changes.moves.reverse()) {
+          try {
+            if (fs.existsSync(source)) throw new Error(`恢复正文文件时原位置被占用：${source}`);
+            fs.renameSync(target, source);
+          } catch (restoreError) {
+            restoreErrors.push(restoreError);
+          }
+        }
+        if (restoreErrors.length) throw new AggregateError([error, ...restoreErrors], '正文变更失败，部分正文文件未能恢复，请保留目录中的临时文件。');
+        throw error;
+      }
+      // 到此数据库已提交，暂存文件已失效且不能再按小节 ID 读取。
+      for (const temporary of changes.removed) fs.unlinkSync(temporary);
+      return result;
+    };
+  }
 
-    for (const [oldId] of changedIds) {
-      const temporaryId = temporaryIds.get(oldId);
-      db.prepare('UPDATE technical_plan_outline_nodes SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
-      db.prepare('UPDATE technical_plan_content_sections SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
-      db.prepare('UPDATE technical_plan_content_plans SET node_id = ? WHERE node_id = ?').run(temporaryId, oldId);
-    }
-    for (const [oldId] of changedIds) {
-      db.prepare('UPDATE technical_plan_outline_nodes SET parent_node_id = ? WHERE parent_node_id = ?').run(temporaryIds.get(oldId), oldId);
-    }
-    for (const [oldId, newId] of changedIds) {
-      const temporaryId = temporaryIds.get(oldId);
-      db.prepare('UPDATE technical_plan_outline_nodes SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
-      db.prepare('UPDATE technical_plan_content_sections SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
-      db.prepare('UPDATE technical_plan_content_plans SET node_id = ? WHERE node_id = ?').run(newId, temporaryId);
-      db.prepare('UPDATE technical_plan_outline_nodes SET parent_node_id = ? WHERE parent_node_id = ?').run(newId, temporaryId);
-    }
+  // 先移出正式文件名；复用事务的回滚和提交后清理，HTML 与 Word 一致失效。
+  function stageContentFileRemoval(changes, source) {
+    if (!fs.existsSync(source)) return;
+    const temporary = path.join(path.dirname(source), `__content_word_${crypto.randomUUID()}.tmp`);
+    fs.renameSync(source, temporary);
+    changes.moves.push([source, temporary]);
+    changes.removed.push(temporary);
+  }
 
-    const updateNode = db.prepare(`
-      UPDATE technical_plan_outline_nodes
-      SET parent_node_id = @parent_node_id,
-        sort_order = @sort_order,
-        level = @level,
-        updated_at = @updated_at
-      WHERE node_id = @node_id
-    `);
-    const timestamp = now();
-    rows.forEach((row) => updateNode.run({ ...row, updated_at: timestamp }));
-    updateMeta({
-      outline_project_name: outlineData?.project_name || null,
-      outline_project_overview: outlineData?.project_overview || null,
-    });
-
-    const updateIllustration = db.prepare('UPDATE technical_plan_illustration_items SET section_ids_json = ?, updated_at = ? WHERE item_id = ?');
-    for (const item of db.prepare('SELECT item_id, section_ids_json FROM technical_plan_illustration_items').all()) {
-      const sectionIds = safeJsonParse(item.section_ids_json, [])
-        .map((sectionId) => idMap.get(String(sectionId)) || String(sectionId))
-        .sort((left, right) => (rowOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
-      updateIllustration.run(JSON.stringify(sectionIds), timestamp, item.item_id);
+  // 只暂存小节 Word，绝不按 *.docx 清空业务目录中的投标模板或原件。
+  function stageContentWordRemoval(changes, sectionIds) {
+    const directory = getTechnicalPlanDir(app);
+    let files;
+    if (sectionIds) {
+      files = [...sectionIds].map(id => `${encodeURIComponent(id)}.docx`);
+    } else {
+      files = db.prepare('SELECT node_id FROM technical_plan_outline_nodes').all()
+        .map(row => `${encodeURIComponent(row.node_id)}.docx`);
     }
-
-    const meta = readMetaRow();
-    if (meta.content_generation_runtime_json) {
-      const runtime = remapContentRuntimeIds(safeJsonParse(meta.content_generation_runtime_json, {}), idMap);
-      db.prepare('UPDATE technical_plan_meta SET content_generation_runtime_json = ?, updated_at = ? WHERE id = 1')
-        .run(JSON.stringify(runtime), timestamp);
-    }
-    const contentTask = db.prepare("SELECT stats_json FROM technical_plan_tasks WHERE type = 'content-generation'").get();
-    if (contentTask?.stats_json) {
-      const stats = remapContentTaskStats(safeJsonParse(contentTask.stats_json, {}), idMap);
-      db.prepare("UPDATE technical_plan_tasks SET stats_json = ? WHERE type = 'content-generation'").run(JSON.stringify(stats));
+    for (const file of files) {
+      stageContentFileRemoval(changes, path.join(directory, file));
     }
   }
 
-  function applyPartial(partial) {
-    const meta = ensureMetaRow();
+  // 与目录正文使用同一失效范围，稳定 ID 无需给有效文件换名。
+  function reconcileContentWords(changes, { snapshot, affectedIds, nextIds, clearAll }) {
+    if (clearAll) {
+      stageContentWordRemoval(changes);
+      return;
+    }
+    // 被删节点的文件允许留存；仍在目录中的身份变化节点才需要清空。
+    const removed = Object.keys(snapshot.nodes).filter(id => nextIds.has(id) && affectedIds.has(id));
+    stageContentWordRemoval(changes, removed);
+    if (removed.length) {
+      const workspaceDir = agentService.loadPersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY)?.paths.workspaceDir;
+      if (workspaceDir) {
+        for (const id of removed) stageContentFileRemoval(changes, path.join(workspaceDir, '正文', `${encodeURIComponent(id)}.html`));
+      }
+    }
+  }
+
+  // 排序只更新位置，不修改节点身份、正文及任务中的引用。
+  function saveSortedOutline(outlineData) {
+    const updateNode = db.prepare(`
+      UPDATE technical_plan_outline_nodes
+      SET parent_node_id = @parent_node_id, sort_order = @sort_order, level = @level, updated_at = @updated_at
+      WHERE node_id = @node_id
+    `);
+    const timestamp = now();
+    flattenOutlineItems(outlineData.outline).forEach(row => updateNode.run({ ...row, updated_at: timestamp }));
+    updateMeta({
+      outline_project_name: outlineData.project_name || null,
+      outline_project_overview: outlineData.project_overview || null,
+    });
+  }
+
+  function applyPartial(partial, wordChanges) {
+    ensureMetaRow();
     const metaUpdates = {};
+    const generationConfigPatch = {};
     const invalidatesContentGeneration = partial.invalidateContentGeneration === true;
 
-    if (hasOwn(partial, 'workflowKind')) metaUpdates.workflow_kind = normalizeWorkflowKind(partial.workflowKind);
     if (hasOwn(partial, 'step') && isValidStep(partial.step)) metaUpdates.step = partial.step;
-    if (hasOwn(partial, 'bidAnalysisMode') && isValidBidMode(partial.bidAnalysisMode)) metaUpdates.bid_analysis_mode = partial.bidAnalysisMode;
-    if (hasOwn(partial, 'bidAnalysisSelectedTaskIds')) metaUpdates.bid_analysis_selected_task_ids_json = jsonOrNull(normalizeBidAnalysisTaskIds(partial.bidAnalysisSelectedTaskIds));
-    if (hasOwn(partial, 'bidSectionMode')) metaUpdates.bid_section_mode = normalizeBidSectionMode(partial.bidSectionMode);
+    if (hasOwn(partial, 'bidAnalysisMode')) generationConfigPatch.bidAnalysisMode = partial.bidAnalysisMode;
+    if (hasOwn(partial, 'bidAnalysisSelectedTaskIds')) generationConfigPatch.bidAnalysisSelectedTaskIds = partial.bidAnalysisSelectedTaskIds;
+    if (hasOwn(partial, 'bidSectionMode')) generationConfigPatch.bidSectionMode = partial.bidSectionMode;
     if (hasOwn(partial, 'bidSections')) metaUpdates.bid_sections_json = jsonOrNull(normalizeBidSections(partial.bidSections));
     if (hasOwn(partial, 'bidSectionExtractionStatus')) metaUpdates.bid_section_extraction_status = normalizeBidSectionExtractionStatus(partial.bidSectionExtractionStatus);
     if (hasOwn(partial, 'bidSectionExtractionError')) metaUpdates.bid_section_extraction_error = partial.bidSectionExtractionError ? String(partial.bidSectionExtractionError) : null;
-    if (hasOwn(partial, 'outlineMode') && isValidOutlineMode(partial.outlineMode)) metaUpdates.outline_mode = partial.outlineMode;
-    if (hasOwn(partial, 'outlineExpansionMode') && isValidOutlineExpansionMode(partial.outlineExpansionMode)) metaUpdates.outline_expansion_mode = partial.outlineExpansionMode;
-    if (hasOwn(partial, 'globalFactsMode')) metaUpdates.global_facts_mode = normalizeGlobalFactsMode(partial.globalFactsMode);
-    if (hasOwn(partial, 'outlineWordControlOptions')) metaUpdates.outline_word_control_options_json = jsonOrNull(normalizeOutlineWordControlOptions(partial.outlineWordControlOptions));
+    if (hasOwn(partial, 'outlineMode')) generationConfigPatch.outlineMode = partial.outlineMode;
+    if (hasOwn(partial, 'outlineExpansionMode')) generationConfigPatch.outlineExpansionMode = partial.outlineExpansionMode;
+    if (hasOwn(partial, 'globalFactsMode')) generationConfigPatch.globalFactsMode = partial.globalFactsMode;
+    if (hasOwn(partial, 'outlineWordControlOptions')) generationConfigPatch.outlineWordControlOptions = partial.outlineWordControlOptions;
+    if (hasOwn(partial, 'referenceKnowledgeDocumentIds')) generationConfigPatch.referenceKnowledgeDocumentIds = partial.referenceKnowledgeDocumentIds;
+    if (hasOwn(partial, 'exportTemplateScope')) generationConfigPatch.exportTemplateScope = partial.exportTemplateScope;
+    if (hasOwn(partial, 'contentGenerationOptions')) generationConfigPatch.contentGenerationOptions = partial.contentGenerationOptions;
     if (hasOwn(partial, 'outlineWordControlSnapshot')) {
       metaUpdates.outline_word_control_snapshot_json = partial.outlineWordControlSnapshot === undefined || partial.outlineWordControlSnapshot === null
         ? null
         : JSON.stringify(normalizeOutlineWordControlOptions(partial.outlineWordControlSnapshot));
     }
-    if (hasOwn(partial, 'contentGenerationOptions')) metaUpdates.content_generation_options_json = jsonOrNull(partial.contentGenerationOptions);
     if (!invalidatesContentGeneration && hasOwn(partial, 'contentGenerationRuntime')) metaUpdates.content_generation_runtime_json = jsonOrNull(partial.contentGenerationRuntime);
 
     if (Object.keys(metaUpdates).length) updateMeta(metaUpdates);
 
-    const nextBidMode = isValidBidMode(partial.bidAnalysisMode) ? partial.bidAnalysisMode : meta.bid_analysis_mode;
-    if (hasOwn(partial, 'referenceKnowledgeDocumentIds')) replaceReferenceDocumentIds(partial.referenceKnowledgeDocumentIds);
-    if (!invalidatesContentGeneration && hasOwn(partial, 'contentIllustrationPlan')) replaceContentIllustrationPlan(partial.contentIllustrationPlan);
-    if (hasOwn(partial, 'contentIllustrationItem')) saveContentIllustrationItem(partial.contentIllustrationItem);
+    const generationConfig = Object.keys(generationConfigPatch).length
+      ? updateGenerationConfig(generationConfigPatch)
+      : loadGenerationConfig();
+    const nextBidMode = generationConfig.bidAnalysisMode;
     if (hasOwn(partial, 'bidAnalysisTasks')) saveBidItems(partial.bidAnalysisTasks, nextBidMode);
     if (hasOwn(partial, 'bidAnalysisItem')) saveBidItem(partial.bidAnalysisItem, nextBidMode);
     if (hasOwn(partial, 'projectOverview')) upsertDerivedBidItem('projectOverview', partial.projectOverview, nextBidMode);
@@ -1991,7 +1866,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       replaceGlobalFacts(partial.globalFacts);
     }
 
-    if (invalidatesContentGeneration) clearContentGenerationState();
+    if (invalidatesContentGeneration) clearContentGenerationState(wordChanges);
 
     for (const [field, type] of Object.entries(taskFieldTypes)) {
       if (invalidatesContentGeneration && field === 'contentGenerationTask') continue;
@@ -1999,6 +1874,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
 
     if (hasOwn(partial, 'outlineData')) {
+      if (!partial.outlineData?.outline?.length) stageContentWordRemoval(wordChanges);
       if (partial.outlineData === null) {
         db.prepare('DELETE FROM technical_plan_outline_nodes').run();
         updateMeta({
@@ -2021,11 +1897,9 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
 
   function loadTechnicalPlan() {
     const meta = readMetaRow();
-    const bidAnalysisMode = isValidBidMode(meta.bid_analysis_mode) ? meta.bid_analysis_mode : 'key';
-    const bidAnalysisSelectedTaskIds = getBidAnalysisTaskIdsForConfig(
-      bidAnalysisMode,
-      safeJsonParse(meta.bid_analysis_selected_task_ids_json, []),
-    );
+    const generationConfig = loadGenerationConfig();
+    const bidAnalysisMode = generationConfig.bidAnalysisMode;
+    const bidAnalysisSelectedTaskIds = generationConfig.bidAnalysisSelectedTaskIds;
     const bidAnalysisTasks = loadBidItems();
     const outlineData = loadOutlineData(meta);
     const tasks = loadTasks();
@@ -2058,7 +1932,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
 
     return {
       ...initialState,
-      workflowKind: normalizeWorkflowKind(meta.workflow_kind),
       step: isValidStep(meta.step) ? meta.step : 'document-analysis',
       tenderFile,
       tenderFiles,
@@ -2069,25 +1942,26 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       bidAnalysisSelectedTaskIds,
       bidAnalysisTasks,
       bidAnalysisProgress: calculateBidProgress(bidAnalysisMode, bidAnalysisTasks, bidAnalysisSelectedTaskIds),
-      bidSectionMode: normalizeBidSectionMode(meta.bid_section_mode),
+      bidSectionMode: generationConfig.bidSectionMode,
       bidSections,
       bidSectionExtractionStatus: bidSectionExtractionTask?.status
         ? normalizeBidSectionExtractionStatus(bidSectionExtractionTask.status)
         : normalizeBidSectionExtractionStatus(meta.bid_section_extraction_status),
       bidSectionExtractionError: bidSectionExtractionTask?.error || meta.bid_section_extraction_error || undefined,
-      outlineMode: isValidOutlineMode(meta.outline_mode) ? meta.outline_mode : 'aligned',
-      outlineExpansionMode: isValidOutlineExpansionMode(meta.outline_expansion_mode) ? meta.outline_expansion_mode : 'ai-complement',
-      globalFactsMode: normalizeGlobalFactsMode(meta.global_facts_mode),
-      outlineWordControlOptions: normalizeOutlineWordControlOptions(safeJsonParse(meta.outline_word_control_options_json, defaultOutlineWordControlOptions)),
+      outlineMode: generationConfig.outlineMode,
+      outlineExpansionMode: generationConfig.outlineExpansionMode,
+      globalFactsMode: generationConfig.globalFactsMode,
+      outlineWordControlOptions: generationConfig.outlineWordControlOptions,
       outlineWordControlSnapshot: meta.outline_word_control_snapshot_json
         ? normalizeOutlineWordControlOptions(safeJsonParse(meta.outline_word_control_snapshot_json, defaultOutlineWordControlOptions))
         : undefined,
-      referenceKnowledgeDocumentIds: loadReferenceDocumentIds(),
+      referenceKnowledgeDocumentIds: generationConfig.referenceKnowledgeDocumentIds,
       ...tasks,
       globalFacts: loadGlobalFacts(),
-      contentGenerationOptions: safeJsonParse(meta.content_generation_options_json, undefined),
+      exportTemplateId: generationConfig.exportTemplateId,
+      exportTemplateScope: generationConfig.exportTemplateScope,
+      contentGenerationOptions: generationConfig.contentGenerationOptions,
       contentGenerationRuntime: safeJsonParse(meta.content_generation_runtime_json, undefined),
-      contentIllustrationPlan: loadContentIllustrationPlan(),
       bidTemplateExists: fs.existsSync(bidTemplatePath) && fs.existsSync(bidTemplateFieldsPath),
       contentGenerationSections: loadContentSections(outlineData),
       contentGenerationPlans: loadContentPlans(),
@@ -2095,15 +1969,23 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     };
   }
 
-  const updateTechnicalPlanTransaction = db.transaction((partial) => {
-    applyPartial(partial || {});
+  const updateTechnicalPlanTransaction = createContentWordTransaction((wordChanges, partial) => {
+    applyPartial(partial || {}, wordChanges);
   });
 
   // 应用技术方案局部更新，但不重新加载完整工作区状态。
   function updateTechnicalPlanWithoutReload(partial) {
     const shouldClearMermaidCache = shouldClearMermaidCacheForPartial(partial);
     updateTechnicalPlanTransaction(partial || {});
+    // 正文与任务状态提交后再回收；普通进度和编排更新不扫描图片目录。
+    const contentChanged = hasOwn(partial, 'outlineData') || partial.invalidateContentGeneration === true
+      || Boolean(partial.contentGenerationItem?.section)
+      || Object.values(partial.contentGenerationSections || {}).some(section => hasOwn(section, 'content'));
+    const taskSettled = Object.keys(taskFieldTypes).some(field => hasOwn(partial, field)
+      && (!partial[field] || ['success', 'error', 'idle'].includes(partial[field].status)));
+    if (contentChanged || taskSettled) cleanupOriginalImageBatches();
     const deletedAgentSessions = hasOwn(partial, 'outlineData') && partial.outlineData === null;
+    const contentPlanningChanged = hasOwn(partial, 'contentGenerationPlans') || partial.invalidateContentGeneration === true;
     if (deletedAgentSessions) {
       deleteOutlineAgentTask();
       deleteGlobalFactsAgentTask();
@@ -2111,8 +1993,8 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     if (shouldClearMermaidCache) {
       clearTechnicalPlanMermaidCache();
     }
-    if (deletedAgentSessions || hasOwn(partial, 'step') || hasOwn(partial, 'outlineData') || hasOwn(partial, 'globalFacts')) {
-      notifyAgentWorkspaceChange({ force: deletedAgentSessions });
+    if (deletedAgentSessions || contentPlanningChanged || hasOwn(partial, 'step') || hasOwn(partial, 'outlineData') || hasOwn(partial, 'globalFacts')) {
+      notifyAgentWorkspaceChange({ force: deletedAgentSessions || contentPlanningChanged });
     }
   }
 
@@ -2124,37 +2006,34 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     return updateTechnicalPlan({ step });
   }
 
-  function setWorkflowKind(workflowKind) {
-    return updateTechnicalPlan({ workflowKind: normalizeWorkflowKind(workflowKind) });
-  }
+  // 局部保存统一生成配置；普通配置只更新存储，标段变化继续沿用现有下游清理规则。
+  function saveGenerationConfig(partial = {}) {
+    let saved;
+    let sectionModeChanged = false;
+    const transaction = createContentWordTransaction((wordChanges) => {
+      const current = loadGenerationConfig();
+      const nextSectionMode = hasOwn(partial, 'bidSectionMode')
+        ? normalizeBidSectionMode(partial.bidSectionMode)
+        : current.bidSectionMode;
+      sectionModeChanged = nextSectionMode !== current.bidSectionMode;
 
-  function switchWorkflowKind(workflowKind) {
-    const nextWorkflowKind = normalizeWorkflowKind(workflowKind);
-    const meta = ensureMetaRow();
-    if (normalizeWorkflowKind(meta.workflow_kind) === nextWorkflowKind) {
-      return;
-    }
+      if (sectionModeChanged) {
+        clearDownstreamFromBidSectionChange(wordChanges);
+        resetTenderWorkingCopyToOriginal();
+        updateMeta({
+          bid_sections_json: null,
+          bid_section_extraction_status: 'idle',
+          bid_section_extraction_error: null,
+          selected_section_id: null,
+          selected_section_title: null,
+        });
+      }
 
-    const originalPlanFilePath = meta.original_plan_markdown_path
-      ? resolveMarkdownPath(meta.original_plan_markdown_path)
-      : originalPlanMarkdownPath;
-    const transaction = db.transaction(() => {
-      assertNoTechnicalPlanTaskRunning();
-      clearWorkflowSpecificState(nextWorkflowKind);
+      saved = updateGenerationConfig(partial);
     });
     transaction();
-    if (fs.existsSync(originalPlanFilePath)) {
-      fs.rmSync(originalPlanFilePath, { force: true });
-    }
-  }
-
-  function saveOutlineConfig({ referenceKnowledgeDocumentIds, outlineMode, outlineExpansionMode, wordControlOptions } = {}) {
-    updateTechnicalPlan({
-      outlineMode: isValidOutlineMode(outlineMode) ? outlineMode : 'aligned',
-      outlineExpansionMode: isValidOutlineExpansionMode(outlineExpansionMode) ? outlineExpansionMode : 'ai-complement',
-      outlineWordControlOptions: normalizeOutlineWordControlOptions(wordControlOptions),
-      referenceKnowledgeDocumentIds,
-    });
+    if (sectionModeChanged) cleanupOriginalImageBatches();
+    return saved;
   }
 
   // 保存用户确认后的一级目录待扩展选择，不写入正式目录树。
@@ -2195,42 +2074,19 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
 
   function saveBidAnalysisConfig({ mode, selectedTaskIds, bidSectionMode } = {}) {
     const config = normalizeBidAnalysisConfig(mode, selectedTaskIds);
-    const nextSectionMode = bidSectionMode === undefined ? null : normalizeBidSectionMode(bidSectionMode);
-    const meta = ensureMetaRow();
-    const shouldChangeSectionMode = nextSectionMode && nextSectionMode !== normalizeBidSectionMode(meta.bid_section_mode);
-    if (!shouldChangeSectionMode) {
-      updateTechnicalPlan({
-        bidAnalysisMode: config.mode,
-        bidAnalysisSelectedTaskIds: config.selectedTaskIds,
-      });
-      return;
-    }
-
-    const transaction = db.transaction(() => {
-      clearDownstreamFromBidSectionChange();
-      if (nextSectionMode === 'single' || nextSectionMode === 'multiple') {
-        resetTenderWorkingCopyToOriginal();
-      }
-      updateMeta({
-        bid_analysis_mode: config.mode,
-        bid_analysis_selected_task_ids_json: jsonOrNull(config.selectedTaskIds),
-        bid_section_mode: nextSectionMode,
-        bid_sections_json: null,
-        bid_section_extraction_status: 'idle',
-        bid_section_extraction_error: null,
-        selected_section_id: null,
-        selected_section_title: null,
-      });
+    saveGenerationConfig({
+      bidAnalysisMode: config.mode,
+      bidAnalysisSelectedTaskIds: config.selectedTaskIds,
+      ...(bidSectionMode === undefined ? {} : { bidSectionMode }),
     });
-    transaction();
   }
 
   function prepareBidSectionExtraction() {
-    const transaction = db.transaction(() => {
-      clearDownstreamFromBidSectionChange();
+    const transaction = createContentWordTransaction((wordChanges) => {
+      clearDownstreamFromBidSectionChange(wordChanges);
       resetTenderWorkingCopyToOriginal();
+      updateGenerationConfig({ bidSectionMode: 'multiple' });
       updateMeta({
-        bid_section_mode: 'multiple',
         bid_sections_json: null,
         bid_section_extraction_status: 'running',
         bid_section_extraction_error: null,
@@ -2239,75 +2095,104 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       });
     });
     transaction();
+    cleanupOriginalImageBatches();
   }
 
   function saveOutline(payload) {
     const request = payload?.outlineData ? payload : { outlineData: payload, reason: 'replace' };
     const outlineData = request?.outlineData;
     const reason = normalizeOutlineSaveReason(request?.reason);
-    const idMap = normalizeStringMap(request?.idMap);
-    const reverseMap = reverseIdMap(idMap);
     const affectedIds = normalizeStringSet(request?.affectedNodeIds);
     const clearAll = reason === 'replace';
-    const invalidatesContentTask = reason !== 'sort';
+    const preservesContentTask = reason === 'sort' || reason === 'edit';
+    const invalidatesContentTask = !preservesContentTask;
 
     let savedOutlineData = outlineData;
-    let savedIllustrationPlan;
-    const transaction = db.transaction(() => {
+    const transaction = createContentWordTransaction((wordChanges) => {
       assertOutlineMutationAllowed();
-      if (reason === 'sort') {
-        saveSortedOutline(outlineData, idMap);
-        savedIllustrationPlan = loadContentIllustrationPlan();
+      if (preservesContentTask) {
+        if (reason === 'edit') {
+          // 改名只写标题，不更新正文、说明、处理模式或编排。
+          const updateTitle = db.prepare('UPDATE technical_plan_outline_nodes SET title = ?, updated_at = ? WHERE node_id = ? AND title <> ?');
+          const timestamp = now();
+          for (const row of flattenOutlineItems(outlineData?.outline || [])) updateTitle.run(row.title, timestamp, row.node_id, row.title);
+        } else {
+          saveSortedOutline(outlineData);
+        }
+        savedOutlineData = loadOutlineData(readMetaRow());
         return;
       }
       const snapshot = loadOutlinePersistenceSnapshot();
-      const outlineToSave = buildOutlineWithPersistedContent(outlineData, { snapshot, reverseMap, affectedIds, clearAll });
-      savedOutlineData = outlineToSave;
+      const previousRuntime = safeJsonParse(readMetaRow().content_generation_runtime_json, {}) || {};
+      const generationStarted = Boolean(previousRuntime.generation_started || loadTask('content-generation'));
+      const rowsBeforeSave = flattenOutlineItems(outlineData?.outline || []);
+      const previousParents = new Set(Object.values(snapshot.nodes).map(node => node.parentId).filter(Boolean));
+      const nextParents = new Set(rowsBeforeSave.map(row => row.parent_node_id).filter(Boolean));
+      const newLeafIds = [];
+      for (const row of rowsBeforeSave) {
+        const id = row.node_id;
+        const wasBranch = previousParents.has(id);
+        const isBranch = nextParents.has(row.node_id);
+        if (wasBranch !== isBranch && snapshot.nodes[id]) affectedIds.add(id);
+        if (!isBranch && row.content_mode === 'ai-generate' && (!snapshot.nodes[id] || wasBranch)) newLeafIds.push(row.node_id);
+      }
+      const outlineToSave = buildOutlineWithPersistedContent(outlineData, { snapshot, affectedIds, clearAll });
+      const nextIds = new Set(flattenOutlineItems(outlineToSave?.outline || []).map(row => row.node_id));
+      reconcileContentWords(wordChanges, { snapshot, affectedIds, nextIds, clearAll });
+      savedOutlineData = outlineToSave ? { ...outlineToSave, outline: numberOutline(outlineToSave.outline) } : outlineToSave;
       saveOutlineData(outlineToSave);
       if (!outlineToSave?.outline?.length) {
         updateMeta({ outline_word_control_snapshot_json: null });
       }
-      const rows = flattenOutlineItems(outlineToSave?.outline || []);
-      const nextIds = new Set(rows.map((row) => row.node_id));
-      restoreMappedContentRows({ snapshot, idMap, affectedIds, nextIds, clearAll });
+      restoreRetainedContentRows({ snapshot, affectedIds, nextIds, clearAll });
       if (invalidatesContentTask) {
         db.prepare("DELETE FROM technical_plan_tasks WHERE type = 'content-generation'").run();
         clearTechnicalPlanMermaidCache();
-        updateMeta({ content_generation_runtime_json: null });
+        // 结构变化清除本轮进度，保留锁定及局部生成范围；完整替换则重置。
+        const survivingIds = ids => (ids || []).filter(id => nextIds.has(id) && !affectedIds.has(id));
+        const retainedRuntime = {
+          direct_generation_item_ids: survivingIds(previousRuntime.direct_generation_item_ids),
+          pending_item_ids: survivingIds(previousRuntime.pending_item_ids),
+        };
+        const leafIds = new Set(rowsBeforeSave.filter(row => !nextParents.has(row.node_id) && row.content_mode === 'ai-generate').map(row => row.node_id));
+        const keepLeafIds = ids => [...new Set(ids)].filter(id => leafIds.has(id));
+        const keepResult = id => leafIds.has(id) && !affectedIds.has(id);
+        updateMeta({ content_generation_runtime_json: clearAll ? null : JSON.stringify({
+          generation_started: generationStarted,
+          section_words: Object.fromEntries(Object.entries(previousRuntime.section_words || {}).filter(([id]) => keepResult(id))),
+          ...(previousRuntime.html_output ? { html_output: {
+            ...previousRuntime.html_output,
+            word_sections: previousRuntime.html_output.word_sections.filter(section => keepResult(section.section_id)),
+          } } : {}),
+          phase: 'planning',
+          direct_generation_item_ids: keepLeafIds([...(retainedRuntime.direct_generation_item_ids || []), ...newLeafIds]),
+          pending_item_ids: keepLeafIds([...(retainedRuntime.pending_item_ids || []), ...(generationStarted ? newLeafIds : [])]),
+        }) });
       }
-      clearContentIllustrationPlan();
     });
     transaction();
-    const sortedContentRuntime = reason === 'sort'
-      ? safeJsonParse(readMetaRow().content_generation_runtime_json, undefined)
-      : undefined;
-    const sortedContentTask = reason === 'sort' ? loadTask('content-generation') : undefined;
+    if (invalidatesContentTask) {
+      agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+      if (clearAll) agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
+      cleanupOriginalImageBatches();
+    }
+    const savedContentRuntime = safeJsonParse(readMetaRow().content_generation_runtime_json, undefined);
+    const savedContentTask = preservesContentTask ? loadTask('content-generation') : undefined;
     return {
       outlineData: savedOutlineData,
-      contentIllustrationPlan: reason === 'sort' ? savedIllustrationPlan : undefined,
-      ...(reason === 'sort' ? {
-        contentGenerationTask: sortedContentTask,
-        contentGenerationRuntime: sortedContentRuntime,
-      } : {}),
-      ...(invalidatesContentTask ? {
-        contentGenerationTask: undefined,
-        contentGenerationRuntime: undefined,
-      } : {}),
+      contentGenerationTask: savedContentTask,
+      contentGenerationRuntime: savedContentRuntime,
+      contentGenerationSections: loadContentSections(savedOutlineData),
+      contentGenerationPlans: loadContentPlans(),
     };
-  }
-
-  function saveGlobalFactsConfig({ globalFactsMode } = {}) {
-    const normalized = normalizeGlobalFactsMode(globalFactsMode);
-    updateTechnicalPlan({ globalFactsMode: normalized });
-    return { globalFactsMode: normalized };
   }
 
   function saveGlobalFacts(globalFacts) {
     const normalizedGlobalFacts = normalizeGlobalFactGroups(globalFacts);
     let savedTask;
-    const transaction = db.transaction(() => {
+    const transaction = createContentWordTransaction((wordChanges) => {
       replaceGlobalFacts(normalizedGlobalFacts);
-      clearContentGenerationState();
+      clearContentGenerationState(wordChanges);
       const timestamp = now();
       savedTask = {
         task_id: `manual-global-facts-${Date.now()}`,
@@ -2321,20 +2206,20 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       saveTask('global-facts-generation', savedTask);
     });
     transaction();
+    cleanupOriginalImageBatches();
     return {
       globalFacts: normalizedGlobalFacts,
       globalFactsTask: savedTask,
       contentGenerationTask: undefined,
       contentGenerationSections: {},
       contentGenerationPlans: {},
-      contentIllustrationPlan: undefined,
       contentGenerationRuntime: undefined,
     };
   }
 
   function saveContentGenerationOptions(contentGenerationOptions) {
-    updateTechnicalPlan({ contentGenerationOptions, contentIllustrationPlan: undefined });
-    return { contentGenerationOptions, contentIllustrationPlan: undefined };
+    const saved = saveGenerationConfig({ contentGenerationOptions });
+    return { contentGenerationOptions: saved.contentGenerationOptions };
   }
 
   function saveChapterContent({ nodeId, content }) {
@@ -2350,10 +2235,10 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
         VALUES (?, ?, NULL, ?)
         ON CONFLICT(node_id) DO UPDATE SET status = excluded.status, error = NULL, updated_at = excluded.updated_at
       `).run(nodeId, nextContent.trim() ? 'success' : 'idle', timestamp);
-      clearContentIllustrationPlan();
     });
     transaction();
-    return { contentIllustrationPlan: undefined };
+    cleanupOriginalImageBatches();
+    return {};
   }
 
   async function runBeforeCommit(beforeCommit) {
@@ -2494,8 +2379,8 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       clearTenderSourceFiles('remove-last-tender');
       removeWorkspacePathSync(tenderMarkdownPath);
       removeWorkspacePathSync(tenderOriginalMarkdownPath);
-      const transaction = db.transaction(() => {
-        clearDownstreamFromTender();
+      const transaction = createContentWordTransaction((wordChanges) => {
+        clearDownstreamFromTender(wordChanges);
         updateMeta({
           tender_file_name: null,
           tender_markdown_path: null,
@@ -2512,6 +2397,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
         });
       });
       transaction();
+      cleanupOriginalImageBatches();
       return { success: true, message: '已移除招标文件', markdown: '' };
     }
 
@@ -2533,14 +2419,52 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     });
   }
 
-  async function importOriginalPlanDocument(filePaths, options = {}) {
+  // 定位已导入的原图，供正文 Agent 复制资源及原方案存在性检查复用。
+  function resolveOriginalImagePath(reference) {
+    const root = path.resolve(getImportedImagesDir(app));
+    const url = new URL(reference);
+    const filePath = path.resolve(root, decodeURIComponent(url.pathname.slice(1)));
+    const relative = path.relative(root, filePath);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(filePath)) {
+      throw new Error(`原方案图片资源缺失，请重新导入原 Word：${reference}`);
+    }
+    return filePath;
+  }
+
+  // 校验原图资源实际存在，不触发图片下载或生成。
+  function assertOriginalImageFiles(markdown) {
+    for (const reference of new Set(originalImageReferences(markdown))) resolveOriginalImagePath(reference);
+  }
+
+  // 原方案或正文变化、任务结束后回收未引用批次；活动/暂停任务退出后由状态提交再次触发。
+  function cleanupOriginalImageBatches() {
+    if (db.prepare("SELECT 1 FROM technical_plan_tasks WHERE status IN ('running', 'pausing', 'paused') LIMIT 1").get()) return;
+    const root = path.resolve(getImportedImagesDir(app));
+    if (!fs.existsSync(root)) return;
+    const batches = fs.readdirSync(root, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('technical-plan-original-'));
+    if (!batches.length) return;
+    const retained = new Set();
+    const contents = [readOriginalPlanMarkdown(), ...db.prepare('SELECT content FROM technical_plan_outline_nodes').all().map(row => row.content)];
+    for (const content of contents) {
+      for (const reference of originalImageReferences(content)) retained.add(decodeURIComponent(new URL(reference).pathname.split('/')[1]));
+    }
+    for (const entry of batches) {
+      if (retained.has(entry.name)) continue;
+      const target = path.resolve(root, entry.name);
+      const relative = path.relative(root, target);
+      if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(target, { recursive: true, force: true });
+    }
+  }
+
+  async function importOriginalPlanDocument(filePaths) {
     const importer = fileService?.importTechnicalPlanDocument || fileService?.importDocument;
     if (!importer) {
       throw new Error('文件导入服务尚未初始化');
     }
 
     const result = fileService.importTechnicalPlanDocument
-      ? await fileService.importTechnicalPlanDocument('原方案', { filePaths })
+      ? await fileService.importTechnicalPlanDocument('原方案', { filePaths, preserveImages: true, assetScopePrefix: 'technical-plan-original' })
       : await importer({ filePaths });
     if (!result?.success || !result.file_content) {
       return {
@@ -2551,9 +2475,9 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
 
     const markdown = String(result.file_content || '').trim();
+    assertOriginalImageFiles(markdown);
     const fileName = result.file_name || '未命名文件';
     const parserLabel = result.parser_label || null;
-    await runBeforeCommit(options.beforeCommit);
     const targetDir = path.dirname(originalPlanMarkdownPath);
     const tempPath = path.join(targetDir, `original-plan-${Date.now()}.tmp.md`);
     fs.mkdirSync(targetDir, { recursive: true });
@@ -2564,7 +2488,6 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       const timestamp = now();
       const transaction = db.transaction(() => {
         updateMeta({
-          workflow_kind: 'existing-plan-expansion',
           original_plan_file_name: fileName,
           original_plan_markdown_path: originalPlanMarkdownRelativePath,
           original_plan_markdown_hash: stableHash(markdown),
@@ -2572,9 +2495,11 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
           original_plan_parser_label: parserLabel || null,
           original_plan_imported_at: timestamp,
         });
-        clearDownstreamFromOriginalPlan();
       });
       transaction();
+      agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+      agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
+      cleanupOriginalImageBatches();
       return {
         success: true,
         message: result.message || '原方案已导入',
@@ -2584,6 +2509,34 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
       throw error;
     }
+  }
+
+  async function removeOriginalPlanDocument() {
+    const meta = ensureMetaRow();
+    if (!meta.original_plan_markdown_path) {
+      return { success: true, message: '当前没有已上传的原方案' };
+    }
+
+    const filePath = resolveMarkdownPath(meta.original_plan_markdown_path);
+    const transaction = db.transaction(() => {
+      updateMeta({
+        original_plan_file_name: null,
+        original_plan_markdown_path: null,
+        original_plan_markdown_hash: null,
+        original_plan_markdown_chars: 0,
+        original_plan_parser_label: null,
+        original_plan_imported_at: null,
+      });
+      updateGenerationConfig({ outlineExpansionMode: 'ai-complement' });
+    });
+    transaction();
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true });
+    }
+    agentService.deletePersistentTask(ORIGINAL_RESTORATION_AGENT_TASK_KEY);
+    agentService.deletePersistentTask(CONTENT_GENERATION_AGENT_TASK_KEY);
+    cleanupOriginalImageBatches();
+    return { success: true, message: '已移除原方案' };
   }
 
   function saveTenderMarkdownAndState(markdown, { fileName, parserLabel, message, selectedSection, fallbackToLocal, resetOriginal, sourceFiles }) {
@@ -2606,8 +2559,8 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     }
 
     const timestamp = now();
-    const transaction = db.transaction(() => {
-      clearDownstreamFromTender();
+    const transaction = createContentWordTransaction((wordChanges) => {
+      clearDownstreamFromTender(wordChanges);
       updateMeta({
         tender_file_name: fileName || '未命名文件',
         tender_markdown_path: tenderMarkdownRelativePath,
@@ -2624,6 +2577,7 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       });
     });
     transaction();
+    cleanupOriginalImageBatches();
     return {
       success: true,
       message: message || (fallbackToLocal ? '文件解析完成，当前格式已自动使用本地解析' : '招标文件已导入'),
@@ -2645,18 +2599,19 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
       const workingMarkdown = buildSelectedSectionMarkdown(originalMarkdown, aiSections, matched.id);
       clearBidTemplate();
       writeMarkdownFile(tenderMarkdownPath, workingMarkdown, 'tender');
-      const transaction = db.transaction(() => {
-        clearDownstreamFromBidSectionChange();
+      const transaction = createContentWordTransaction((wordChanges) => {
+        clearDownstreamFromBidSectionChange(wordChanges);
+        updateGenerationConfig({ bidSectionMode: 'multiple' });
         updateMeta({
           tender_markdown_path: tenderMarkdownRelativePath,
           tender_markdown_hash: stableHash(workingMarkdown),
           tender_markdown_chars: workingMarkdown.length,
-          bid_section_mode: 'multiple',
           selected_section_id: matched.id || null,
           selected_section_title: matched.title || null,
         });
       });
       transaction();
+      cleanupOriginalImageBatches();
       return {
         success: true,
         message: `已选择【${matched.title || '投标范围'}】，招标文件解析将仅使用当前投标范围`,
@@ -2667,75 +2622,72 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
     throw new Error('请先完成多标段识别，再选择投标范围');
   }
 
+  // 全流程重置按业务目录与表整体清空，包含没有节点记录的 Word 和暂存文件。
   function clearTechnicalPlan() {
-    const workflowKind = normalizeWorkflowKind(ensureMetaRow().workflow_kind);
-    clearTenderSourceFiles();
-    cleanupPendingTenderSelection();
-    removeWorkspacePathSync(tenderMarkdownPath);
-    removeWorkspacePathSync(tenderOriginalMarkdownPath);
-    removeWorkspacePathSync(originalPlanMarkdownPath);
-    clearOriginalOutlineRuntime();
+    removeWorkspacePathSync(getTechnicalPlanDir(app), undefined, { deferOnFailure: false });
+    removeWorkspacePathSync(path.join(getGeneratedImagesDir(app), 'technical-plan'), undefined, { deferOnFailure: false });
     clearTechnicalPlanMermaidCache();
-    clearIllustrationFiles();
     deleteImportedImageBatches(app, 'technical-plan');
     deleteOutlineAgentTask();
     deleteGlobalFactsAgentTask();
     const transaction = db.transaction(() => {
       db.prepare('DELETE FROM technical_plan_tasks').run();
       db.prepare('DELETE FROM technical_plan_bid_items').run();
-      db.prepare('DELETE FROM technical_plan_reference_docs').run();
+      db.prepare('DELETE FROM technical_plan_generation_bid_tasks').run();
+      db.prepare('DELETE FROM technical_plan_generation_reference_docs').run();
+      db.prepare('DELETE FROM technical_plan_generation_config').run();
       db.prepare('DELETE FROM technical_plan_outline_nodes').run();
       db.prepare('DELETE FROM technical_plan_global_fact_groups').run();
-      clearContentIllustrationPlan();
       db.prepare('DELETE FROM technical_plan_meta').run();
       ensureMetaRow();
-      updateMeta({ workflow_kind: workflowKind });
+      ensureGenerationConfigRow();
     });
     transaction();
     notifyAgentWorkspaceChange({ force: true });
-    return { success: true, message: '技术方案缓存已清空' };
+    return { success: true, message: '技术方案已重置' };
   }
 
+  ensureGenerationConfigRow();
   cleanupLegacyPendingTenderState(ensureMetaRow());
 
   return {
     loadTechnicalPlan,
+    loadGenerationConfig,
+    saveGenerationConfig,
     updateTechnicalPlan,
     updateTechnicalPlanWithoutReload,
     clearMermaidCache: clearTechnicalPlanMermaidCache,
-    clearIllustrationFiles,
-    clearUnreferencedGeneratedImages: clearUnreferencedRootGeneratedImages,
     clearTechnicalPlan,
     importTenderDocument,
     removeTenderDocument,
     importOriginalPlanDocument,
+    removeOriginalPlanDocument,
     checkBidSections,
     prepareBidSectionExtraction,
     selectBidSection,
     readTenderMarkdown,
+    readContentWord,
     readTenderSourceMarkdown,
     readOriginalTenderMarkdown,
     readOriginalPlanMarkdown,
-    readIllustrationHtml,
-    findIllustrationHtml,
+    assertOriginalImageFiles,
+    resolveOriginalImagePath,
     readOriginalOutlineRuntime,
     saveOriginalOutlineRuntime,
     clearOriginalOutlineRuntime,
     updateStep,
-    setWorkflowKind,
-    switchWorkflowKind,
     setAgentWorkspaceChangeListener,
     saveBidAnalysisConfig,
-    saveOutlineConfig,
     saveOutlineSelection,
     saveOutline,
-    saveGlobalFactsConfig,
     saveGlobalFacts,
-    saveIllustrationHtml,
-    saveIllustrationPng,
     saveContentGenerationOptions,
     saveChapterContent,
     clearBidTemplate,
+    // 正文 Word 直接保存到技术方案业务目录，独立于 Agent 会话。
+    getContentWordOutputDir() {
+      return getTechnicalPlanDir(app);
+    },
     listTenderSourceDocxRelativePaths() {
       return loadTenderSourceFiles()
         .map((file) => String(file.sourceDocxPath || '').trim())
@@ -2791,5 +2743,4 @@ function createTechnicalPlanStore({ app, db, fileService, agentService, taskLogS
 
 module.exports = {
   createTechnicalPlanStore,
-  originalPlanDownstreamTaskTypes,
 };

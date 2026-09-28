@@ -14,7 +14,7 @@ interface OutlineSelectionDialogProps {
   onConfirm: (items: OutlineSelectionItem[], selectedIds: string[]) => void;
 }
 
-const outlineAttributes: OutlineAttribute[] = ['通用', '商务', '资信', '技术', '其他'];
+const outlineAttributes: OutlineAttribute[] = ['通用', '商务/资信', '技术', '其他', '目录', '报价', '业绩'];
 const contentModes = Object.keys(OUTLINE_CONTENT_MODE_LABELS) as OutlineContentMode[];
 
 // 展示一级目录候选，并维护本次确认前的属性和选择草稿。
@@ -141,7 +141,7 @@ function OutlineSelectionDialog({
                 const selected = selectedIds.includes(item.id);
                 return (
                   <div className={`outline-selection-row${selected ? ' is-selected' : ''}`} key={item.id}>
-                    <span className="outline-selection-id">{item.id}</span>
+                    <span className="outline-selection-id">{item.number}</span>
                     <strong title={item.title}>{item.title}</strong>
                     <select
                       value={item.attr}

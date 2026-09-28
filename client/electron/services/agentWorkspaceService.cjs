@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const { OUTLINE_AGENT_TASK_KEY } = require('./outlineGenerationAgentV2Config.cjs');
 const { GLOBAL_FACTS_AGENT_TASK_KEY } = require('./globalFactsAgentV2Config.cjs');
+const { CONTENT_GENERATION_AGENT_TASK_KEY } = require('./contentGenerationAgent.cjs');
 const { FEASIBILITY_OUTLINE_AGENT_TASK_KEY } = require('./feasibilityOutlineAgentConfig.cjs');
 
 function now() {
@@ -11,20 +12,26 @@ function isActiveTaskStatus(status) {
   return status === 'running' || status === 'pausing';
 }
 
-function countGeneratedLeaves(items) {
-  return (items || []).reduce((total, item) => (
-    Array.isArray(item?.children) && item.children.length
-      ? total + countGeneratedLeaves(item.children)
-      : total + (String(item?.content || '').trim() ? 1 : 0)
-  ), 0);
+// 技术方案 AI 正文使用生成记录判断；底稿、非 AI 正文和可研仍读取 content。
+function hasGeneratedBody(items, plan = {}) {
+  return Boolean(plan.contentGenerationTask?.stats?.content?.generation_completed) || (items || []).some(item => (
+    item?.children?.length
+      ? hasGeneratedBody(item.children, plan)
+      : Boolean(String(item?.content || '').trim()) || (item?.content_mode === 'ai-generate' && (
+        plan.contentGenerationSections?.[item.id]?.status === 'success'
+        || Object.hasOwn(plan.contentGenerationRuntime?.section_words || {}, item.id)
+        || plan.contentGenerationRuntime?.html_output?.word_sections.some(section => section.section_id === item.id)
+      ))
+  ));
 }
 
 const STEP_WORKSPACE_IDS = Object.freeze({
   'outline-generation': OUTLINE_AGENT_TASK_KEY,
   'global-facts': GLOBAL_FACTS_AGENT_TASK_KEY,
+  'content-edit': CONTENT_GENERATION_AGENT_TASK_KEY,
 });
 
-const TECHNICAL_PLAN_SECTIONS = new Set(['technical-plan', 'existing-plan-expansion']);
+const TECHNICAL_PLAN_SECTIONS = new Set(['technical-plan']);
 
 function normalizeCurrentView(view = {}) {
   const section = String(view.section || '').trim();
@@ -42,9 +49,8 @@ function getMappedWorkspaceId(view) {
 }
 
 /**
- * 通用 Agent 工作空间服务：向插件暴露可对话的 Agent 工作空间。
- * 当前内置目录生成与全局事实设定工作空间；后续其他持久 Agent 任务可按同样的
- * provider 形态（descriptor + sendMessage）注册接入。
+ * 通用 Agent 工作空间服务：向插件暴露持久 Agent 工作空间。
+ * 可调整任务通过 provider 的 sendMessage 接入，正文生成当前只注册只读工作空间。
  */
 function createAgentWorkspaceService({ agentService, taskService, technicalPlanStore, feasibilityReportStore }) {
   const chatSubscribers = new Set();
@@ -156,7 +162,7 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
         : contentPaused
           ? '正文生成已暂停，请先在主界面继续或重置正文任务'
           : '';
-      const hasGeneratedContent = countGeneratedLeaves(plan.outlineData.outline) > 0;
+      const hasGeneratedContent = hasGeneratedBody(plan.outlineData.outline, plan);
       return {
         id: this.id,
         title: '目录生成',
@@ -203,7 +209,7 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
         : contentPaused
           ? '正文生成已暂停，请先在主界面继续或重置正文任务'
           : '';
-      const hasGeneratedContent = countGeneratedLeaves(plan.outlineData?.outline) > 0;
+      const hasGeneratedContent = hasGeneratedBody(plan.outlineData?.outline, plan);
       return {
         id: this.id,
         title: '全局事实设定',
@@ -218,6 +224,43 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
     },
     sendMessage(message) {
       return taskService.startGlobalFactsAdjustment({ requirement: message });
+    },
+  };
+
+  const contentGenerationWorkspaceProvider = {
+    id: CONTENT_GENERATION_AGENT_TASK_KEY,
+    buildDescriptor() {
+      const plan = technicalPlanStore.loadTechnicalPlan() || {};
+      const activeTasks = taskService.getActiveTasks();
+      const busyTask = activeTasks.find((task) => task.group === 'technical-plan' && isActiveTaskStatus(task.status));
+      const hasSession = agentService.hasPersistentTaskSession(CONTENT_GENERATION_AGENT_TASK_KEY);
+      if (!hasSession) {
+        if (busyTask?.type === 'content-generation') {
+          return {
+            id: this.id,
+            title: '正文生成',
+            status: 'busy',
+            busy_reason: '正文生成任务正在准备或执行中',
+            has_generated_content: false,
+            empty_hint: '正文生成工作空间将在 Agent 启动后保留。',
+          };
+        }
+        return null;
+      }
+      const taskReason = busyTask
+        ? `${technicalPlanTaskLabels[busyTask.type] || busyTask.type}任务执行中，请等待完成`
+        : '正文生成工作空间已保留，暂不支持继续调整';
+      return {
+        id: this.id,
+        title: '正文生成',
+        status: 'busy',
+        busy_reason: taskReason,
+        has_generated_content: hasGeneratedBody(plan.outlineData?.outline, plan),
+        empty_hint: '正文生成工作空间已保留，暂不支持继续调整。',
+      };
+    },
+    sendMessage() {
+      throw new Error('正文生成工作空间暂不支持 AI 调整');
     },
   };
 
@@ -250,7 +293,7 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
         : contentPaused
           ? '正文生成已暂停，请先在主界面继续或重置正文任务'
           : '';
-      const hasGeneratedContent = countGeneratedLeaves(report.outlineData.outline) > 0;
+      const hasGeneratedContent = hasGeneratedBody(report.outlineData.outline);
       return {
         id: this.id,
         title: '可研报告目录',
@@ -268,7 +311,7 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
     },
   };
 
-  const providers = [outlineWorkspaceProvider, globalFactsWorkspaceProvider, feasibilityOutlineWorkspaceProvider];
+  const providers = [outlineWorkspaceProvider, globalFactsWorkspaceProvider, contentGenerationWorkspaceProvider, feasibilityOutlineWorkspaceProvider];
 
   function buildWorkspaceEntry(provider) {
     const descriptor = provider.buildDescriptor();
@@ -417,9 +460,10 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
 
   agentService.onPrimarySessionChanged(() => emitPrimaryWorkspacesChanged());
 
-  // 重新生成目录或全局事实会重建对应 Agent 工作空间，聊天记录跟随工作空间同步重置。
+  // 新建持久 Agent 工作空间时同步重置对应的内存聊天记录。
   let lastOutlineGenerationTaskId = null;
   let lastGlobalFactsGenerationTaskId = null;
+  let lastContentGenerationTaskId = null;
   let lastFeasibilityOutlineTaskId = null;
 
   taskService.subscribeCallback((event) => {
@@ -435,6 +479,15 @@ function createAgentWorkspaceService({ agentService, taskService, technicalPlanS
       if (task.task_id && task.task_id !== lastGlobalFactsGenerationTaskId) {
         lastGlobalFactsGenerationTaskId = task.task_id;
         resetChatState(GLOBAL_FACTS_AGENT_TASK_KEY);
+      }
+      return;
+    }
+    if (task?.type === 'content-generation') {
+      if (task.task_id && task.task_id !== lastContentGenerationTaskId) {
+        lastContentGenerationTaskId = task.task_id;
+        if (!agentService.hasPersistentTaskSession(CONTENT_GENERATION_AGENT_TASK_KEY)) {
+          resetChatState(CONTENT_GENERATION_AGENT_TASK_KEY);
+        }
       }
       return;
     }

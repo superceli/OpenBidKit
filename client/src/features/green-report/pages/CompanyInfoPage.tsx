@@ -1,7 +1,14 @@
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { useToast } from '../../../shared/ui';
 import type { GreenProjectInfo, GreenReportState, GreenReportType } from '../types';
-import { findReportTypeById, GREEN_REPORT_TYPES, groupReportTypesByCategory, searchReportTypes, type GreenReportCategory } from '../reportTypes';
+import {
+  buildCustomReportType,
+  GREEN_REPORT_TYPES,
+  groupReportTypesByCategory,
+  isCustomReportType,
+  resolveReportTypeName,
+  searchReportTypes,
+} from '../reportTypes';
 
 interface CompanyInfoPageProps {
   state: GreenReportState;
@@ -20,7 +27,13 @@ function CompanyInfoPage({
 }: CompanyInfoPageProps) {
   const { showToast } = useToast();
   const [reportTypeSearch, setReportTypeSearch] = useState('');
+  const [customReportName, setCustomReportName] = useState('');
   const [generatingCode, setGeneratingCode] = useState(false);
+
+  // 已选自定义类型时回填名称，切换内置类型时清空输入
+  useEffect(() => {
+    setCustomReportName(isCustomReportType(state.reportType) ? resolveReportTypeName(state.reportType) : '');
+  }, [state.reportType]);
 
   // 搜索并按分类分组
   const filteredGroups = useMemo(() => {
@@ -32,7 +45,14 @@ function CompanyInfoPage({
     onDraftChange({ ...draftProjectInfo, [field]: e.target.value });
   };
 
-  const selectedReportType = findReportTypeById(state.reportType);
+  const selectedReportTypeName = resolveReportTypeName(state.reportType);
+  const customSelected = isCustomReportType(state.reportType);
+
+  const handleUseCustomReportType = () => {
+    const name = customReportName.trim();
+    if (!name) return;
+    onReportTypeChange(buildCustomReportType(name));
+  };
 
   const handleGenerateReportCode = async () => {
     setGeneratingCode(true);
@@ -62,13 +82,40 @@ function CompanyInfoPage({
               onChange={(e) => setReportTypeSearch(e.target.value)}
             />
           </div>
-          {selectedReportType && (
+          <div className="green-report-type-custom">
+            <div className="green-report-type-custom-row">
+              <input
+                type="text"
+                className="green-report-input"
+                placeholder="没有找到需要的类型？直接输入自定义报告名称"
+                value={customReportName}
+                onChange={(e) => setCustomReportName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleUseCustomReportType();
+                }}
+              />
+              <button
+                type="button"
+                className="green-report-btn-secondary"
+                disabled={!customReportName.trim()}
+                onClick={handleUseCustomReportType}
+              >
+                使用自定义名称
+              </button>
+            </div>
+            <p className="green-report-type-custom-hint">自定义名称将按通用绿色报告结构生成目录和正文。</p>
+          </div>
+          {selectedReportTypeName && (
             <div className="green-report-type-selected">
-              当前选择：<span className="green-report-type-selected-name">{selectedReportType.name}</span>
+              当前选择：<span className="green-report-type-selected-name">{selectedReportTypeName}</span>
+              {customSelected && <span className="green-report-type-selected-tag">自定义</span>}
               <button
                 type="button"
                 className="green-report-type-selected-clear"
-                onClick={() => onReportTypeChange('')}
+                onClick={() => {
+                  setCustomReportName('');
+                  onReportTypeChange('');
+                }}
                 title="清除选择"
               >
                 ×

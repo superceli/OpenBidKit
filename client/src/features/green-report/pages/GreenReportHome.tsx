@@ -12,7 +12,7 @@ import OutlinePage from './OutlinePage';
 import ContentPage from './ContentPage';
 import type { GreenDocumentStyle, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType } from '../types';
 import { DEFAULT_GREEN_PROJECT_INFO, GREEN_STEPS, GREEN_STEP_LABELS } from '../types';
-import { findReportTypeById } from '../reportTypes';
+import { resolveReportTypeName } from '../reportTypes';
 
 interface GreenReportHomeProps {
   registerLeaveGuard?: (guard: ((nextSection?: string) => Promise<boolean>) | null) => void;
@@ -163,9 +163,8 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       const rawDate = state.projectInfo.compileDate || new Date().toISOString().slice(0, 10);
       const dateObj = new Date(rawDate);
       const compileDate = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月`;
-      // 报告标题用用户勾选的报告类型名称（如"ESG（环境、社会、公司治理）报告"）
-      const reportType = findReportTypeById(state.reportType);
-      const reportTitle = reportType?.name || '绿色报告';
+      // 报告标题用用户勾选的报告类型名称（自定义类型取用户输入的名称）
+      const reportTitle = resolveReportTypeName(state.reportType) || '绿色报告';
       // 委托单位即企业名称（全局唯一企业标识字段，UI 上已合并）
       const clientUnit = state.projectInfo.companyName || '';
       const result = await window.lvcert.export.exportWord({
@@ -328,7 +327,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             onGenerateOutline={async () => {
               await window.lvcert.tasks.startGreenReportOutline({
                 reportType: state.reportType,
-                reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                reportTypeName: resolveReportTypeName(state.reportType),
                 projectInfo: state.projectInfo,
                 targetWords: state.targetWords,
                 pageCount: state.pageCount,
@@ -358,7 +357,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             onGenerate={async () => {
               await window.lvcert.tasks.startGreenReportContent({
                 reportType: state.reportType,
-                reportTypeName: findReportTypeById(state.reportType)?.name || '',
+                reportTypeName: resolveReportTypeName(state.reportType),
                 projectInfo: state.projectInfo,
                 outlineData: state.outlineData,
                 targetWords: state.targetWords,

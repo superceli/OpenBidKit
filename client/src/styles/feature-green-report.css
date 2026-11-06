@@ -150,6 +150,43 @@
   margin-bottom: 12px;
 }
 
+/* 自定义报告名称 */
+.green-report-type-custom {
+  margin-bottom: 12px;
+}
+
+.green-report-type-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.green-report-type-custom-row .green-report-input {
+  flex: 1;
+}
+
+.green-report-type-custom-row .green-report-btn-secondary {
+  flex-shrink: 0;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.green-report-type-custom-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--yb-text-muted);
+  line-height: 1.55;
+}
+
+.green-report-type-selected-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(33, 116, 253, 0.14);
+  color: var(--yb-primary-deep, #1d4ed8);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .green-report-type-list {
   max-height: 360px;
   overflow-y: auto;

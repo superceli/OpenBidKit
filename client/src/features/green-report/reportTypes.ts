@@ -250,3 +250,22 @@ export function searchReportTypes(keyword: string): GreenReportTypeItem[] {
 export function findReportTypeById(id: string): GreenReportTypeItem | undefined {
   return GREEN_REPORT_TYPES.find((item) => item.id === id);
 }
+
+/** 自定义报告类型前缀：report_type 存为 custom:<名称>，与内置类型 id 区分 */
+export const CUSTOM_REPORT_TYPE_PREFIX = 'custom:';
+
+/** 是否为用户自定义的报告类型 */
+export function isCustomReportType(id: string): boolean {
+  return typeof id === 'string' && id.startsWith(CUSTOM_REPORT_TYPE_PREFIX);
+}
+
+/** 由自定义报告名称构造报告类型标识 */
+export function buildCustomReportType(name: string): string {
+  return `${CUSTOM_REPORT_TYPE_PREFIX}${name.trim()}`;
+}
+
+/** 解析报告类型显示名：内置类型按 id 查找，自定义类型取前缀后的名称 */
+export function resolveReportTypeName(id: string): string {
+  if (isCustomReportType(id)) return id.slice(CUSTOM_REPORT_TYPE_PREFIX.length).trim();
+  return findReportTypeById(id)?.name || '';
+}

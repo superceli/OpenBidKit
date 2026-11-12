@@ -1,4 +1,22 @@
 const path = require('node:path');
+const fs = require('node:fs');
+
+/** 解析随包资源：优先 resources/assets，其次 asar 内 assets，兼容开发与打包环境。 */
+function resolveBundledAssetPath(app, fileName) {
+  const candidates = [];
+  if (app?.isPackaged && process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'assets', fileName));
+  }
+  candidates.push(path.join(__dirname, '..', '..', 'assets', fileName));
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (error) {
+      // 忽略不可访问路径，继续尝试下一个候选位置
+    }
+  }
+  return candidates[candidates.length - 1];
+}
 
 function getUserDataPath(app) {
   return app.getPath('userData');
@@ -94,10 +112,7 @@ function getGreenReportCoverTemplatePath(app) {
   if (process.env.LVCERT_GREEN_REPORT_COVER_TEMPLATE) {
     return process.env.LVCERT_GREEN_REPORT_COVER_TEMPLATE;
   }
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'assets', 'green-report-cover.docx');
-  }
-  return path.join(__dirname, '..', '..', 'assets', 'green-report-cover.docx');
+  return resolveBundledAssetPath(app, 'green-report-cover.docx');
 }
 
 /** 绿色报告签章页 docx 模板路径。 */
@@ -105,10 +120,7 @@ function getSigningPageTemplatePath(app) {
   if (process.env.LVCERT_SIGNING_PAGE_TEMPLATE) {
     return process.env.LVCERT_SIGNING_PAGE_TEMPLATE;
   }
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'assets', 'signing-page-template.docx');
-  }
-  return path.join(__dirname, '..', '..', 'assets', 'signing-page-template.docx');
+  return resolveBundledAssetPath(app, 'signing-page-template.docx');
 }
 
 /** 绿色报告每页底纹背景图路径；打包后在 resources/assets，开发时在 client/assets。 */
@@ -116,10 +128,7 @@ function getGreenReportPageBackgroundPath(app) {
   if (process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND) {
     return process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND;
   }
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'assets', 'green-report-page-bg.png');
-  }
-  return path.join(__dirname, '..', '..', 'assets', 'green-report-page-bg.png');
+  return resolveBundledAssetPath(app, 'green-report-page-bg.png');
 }
 
 /** 开发时编译用的助手工程路径。 */

@@ -143,51 +143,30 @@ async function parallelLimit(items, limit, mapper) {
 }
 
 /**
- * 获取知识库上下文：优先按委托单位匹配知识库文件夹取资料，匹配不到再按企业名称和行业关键词检索。
+ * 获取知识库上下文：每次按当前委托单位名称精确匹配知识库文件夹，不跨企业复用资料。
  */
 async function resolveKnowledgeContext({ payload, knowledgeBaseService, publish }) {
-  if (payload.knowledgeContext?.items?.length) {
-    return payload.knowledgeContext;
-  }
+  // 始终按当前委托单位重新读取知识库，避免复用上一家公司的缓存资料
   if (!knowledgeBaseService) return null;
 
   const companyName = String(payload.projectInfo?.companyName || '').trim();
-  const industry = String(payload.projectInfo?.industry || '').trim();
+  if (!companyName) return null;
+  if (typeof knowledgeBaseService.readItemsByFolderName !== 'function') return null;
 
-  // 优先按委托单位名称精确匹配知识库文件夹，取该企业文件夹下的全部资料
-  if (companyName && typeof knowledgeBaseService.readItemsByFolderName === 'function') {
-    publish?.(`正在读取知识库文件夹：${companyName}`, 12);
-    try {
-      const folderResult = await knowledgeBaseService.readItemsByFolderName(companyName, { limit: 15, contentExcerptChars: 1200 });
-      if (folderResult?.items?.length) {
-        return {
-          keyword: companyName,
-          source: 'folder',
-          items: folderResult.items,
-          searchedAt: new Date().toISOString(),
-        };
-      }
-    } catch (error) {
-      // 文件夹匹配失败不阻塞生成流程，继续走关键词检索
-    }
-  }
-
-  const keywords = [companyName, industry].filter(Boolean);
-  if (!keywords.length) return null;
-
-  const searchKeyword = keywords.join(' ');
+  publish?.(`正在读取知识库文件夹：${companyName}`, 12);
   try {
-    publish?.(`正在检索知识库：${searchKeyword}`, 12);
-    const result = await knowledgeBaseService.searchItems?.(searchKeyword, { limit: 15, contentExcerptChars: 1200 });
-    if (result?.items?.length) {
+    const folderResult = await knowledgeBaseService.readItemsByFolderName(companyName, { limit: 15, contentExcerptChars: 1200 });
+    if (folderResult?.items?.length) {
       return {
-        keyword: searchKeyword,
-        items: result.items,
+        keyword: companyName,
+        source: 'folder',
+        items: folderResult.items,
         searchedAt: new Date().toISOString(),
       };
     }
+    publish?.(`未找到与委托单位“${companyName}”同名的知识库文件夹，本次不引用其他企业资料`, 12);
   } catch (error) {
-    // 知识库检索失败不阻塞生成流程
+    // 知识库读取失败不阻塞生成流程
   }
   return null;
 }

@@ -396,7 +396,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               const finalProjectInfo = newCode
                 ? { ...draftProjectInfo, reportCode: newCode }
                 : draftProjectInfo;
-              setState((prev) => ({ ...prev, projectInfo: finalProjectInfo }));
+              setState((prev) => ({ ...prev, projectInfo: finalProjectInfo, knowledgeContext: null }));
               setDraftProjectInfo(finalProjectInfo);
               try {
                 await window.lvcert?.greenReport?.saveProjectInfo(finalProjectInfo);

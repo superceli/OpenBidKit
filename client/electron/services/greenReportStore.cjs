@@ -198,7 +198,15 @@ function createGreenReportStore({ app, db, taskLogStore }) {
   }
 
   function saveProjectInfo(projectInfo) {
-    saveMeta({ project_info_json: JSON.stringify(projectInfo) });
+    const previous = loadState().projectInfo || {};
+    const fields = { project_info_json: JSON.stringify(projectInfo) };
+    // 委托单位或行业变化时清空知识库上下文，避免沿用上一家公司的资料
+    const companyChanged = String(previous.companyName || '').trim() !== String(projectInfo?.companyName || '').trim();
+    const industryChanged = String(previous.industry || '').trim() !== String(projectInfo?.industry || '').trim();
+    if (companyChanged || industryChanged) {
+      fields.knowledge_context_json = null;
+    }
+    saveMeta(fields);
     return loadState();
   }
 

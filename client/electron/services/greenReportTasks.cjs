@@ -157,8 +157,14 @@ async function resolveKnowledgeContext({ payload, knowledgeBaseService, publish 
   try {
     const folderResult = await knowledgeBaseService.readItemsByFolderName(companyName, { limit: 15, contentExcerptChars: 1200 });
     if (folderResult?.items?.length) {
+      const documentNames = [...new Set(folderResult.items.map((item) => String(item.documentName || '').trim()).filter(Boolean))];
+      if (documentNames.length) {
+        publish?.(`知识库命中文件夹“${companyName}”：${documentNames.join('、')}`, 13);
+      }
       return {
         keyword: companyName,
+        companyName,
+        folderName: companyName,
         source: 'folder',
         items: folderResult.items,
         searchedAt: new Date().toISOString(),
@@ -434,6 +440,33 @@ async function runGreenReportContentTask({
     let content = typeof result === 'string'
       ? result
       : (result?.content || result?.message?.content || '');
+
+    // 关键指标章节强制图表：模型偶尔退回 Markdown 表格，这里检测到没有 Mermaid 图时重试一次
+    const chapterTopTitle = outlineSkeleton.find((item) => item.id === leaf.id)?.topTitle || leaf.title || '';
+    const isKeyIndicatorChapter = /关键指标|指标总览/.test(chapterTopTitle);
+    if (isKeyIndicatorChapter && content && !/```mermaid/i.test(content)) {
+      publish(`${leaf.title} 未按要求输出图表，正在重新生成图表…`, Math.round((completed / total) * 100));
+      try {
+        const retryHint = '\n\n【重要】上一次输出使用了 Markdown 表格，违反了本章要求。请重新输出本章完整内容：整章不得出现任何 Markdown 表格，所有指标数据必须改用 ```mermaid 代码块（xychart-beta 柱形图 / pie 饼图）呈现，数据与口径保持不变。';
+        const retryResult = await aiService.chat({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `${userPrompt}${retryHint}` },
+          ],
+        });
+        const retryContent = typeof retryResult === 'string'
+          ? retryResult
+          : (retryResult?.content || retryResult?.message?.content || '');
+        if (retryContent && /```mermaid/i.test(retryContent)) {
+          content = retryContent;
+        }
+      } catch (error) {
+        // 重试失败时保留原内容
+      }
+      if (taskControl.signal.aborted) {
+        throw taskControl.signal.reason || new Error('任务已取消');
+      }
+    }
 
     // 后处理：如果章节超上限，调用 AI 精简一次
     if (perChapterMax > 0 && content) {

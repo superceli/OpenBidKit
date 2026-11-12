@@ -40,7 +40,7 @@ function OutlinePage({ state, onOutlineChange, onGenerateOutline, onSaveOutline 
 
   const handleCancelGenerate = async () => {
     try {
-      const res = await window.lvcert.tasks.cancelGreenReportOutline();
+      const res = await window.lvcert.tasks.cancelGreenReportOutline(state.reportId || '');
       if (res.success) {
         showToast('目录生成已取消', 'success');
       } else {

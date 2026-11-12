@@ -1070,3 +1070,171 @@
   color: var(--yb-text-muted);
 }
 
+
+/* ============ 报告列表 ============ */
+.green-report-list {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+}
+
+.green-report-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.green-report-list-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  color: var(--yb-text);
+}
+
+.green-report-list-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--yb-text-muted);
+}
+
+.green-report-list-empty {
+  padding: 56px 20px;
+  text-align: center;
+  color: var(--yb-text-muted);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px dashed var(--yb-border-soft);
+  border-radius: var(--yb-radius-lg);
+}
+
+.green-report-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.green-report-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--yb-border-soft);
+  border-radius: var(--yb-radius-lg);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.green-report-list-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.green-report-list-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  color: var(--yb-text);
+}
+
+.green-report-list-status {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: var(--yb-radius-pill);
+  color: var(--yb-text-muted);
+  background: rgba(23, 32, 51, 0.06);
+}
+
+.green-report-list-status.is-running,
+.green-report-list-status.is-queued {
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.1);
+}
+
+.green-report-list-status.is-success {
+  color: #0f8f5f;
+  background: rgba(15, 143, 95, 0.1);
+}
+
+.green-report-list-status.is-error {
+  color: var(--yb-danger);
+  background: rgba(200, 50, 32, 0.1);
+}
+
+.green-report-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--yb-text-muted);
+}
+
+.green-report-list-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.green-report-list-progress-bar {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  background: rgba(33, 116, 253, 0.12);
+  border-radius: 999px;
+}
+
+.green-report-list-progress-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(135deg, var(--yb-primary), var(--yb-violet));
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.green-report-list-progress small {
+  font-size: 11px;
+  color: var(--yb-text-muted);
+}
+
+.green-report-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.green-report-list-action {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--yb-primary);
+  background: rgba(33, 116, 253, 0.06);
+  border: 1px solid rgba(33, 116, 253, 0.16);
+  border-radius: var(--yb-radius-pill);
+  cursor: pointer;
+}
+
+.green-report-list-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.green-report-list-action.is-primary {
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--yb-primary), var(--yb-violet));
+  border-color: transparent;
+}
+
+.green-report-list-action.is-danger {
+  color: var(--yb-danger);
+  background: rgba(200, 50, 32, 0.06);
+  border-color: rgba(200, 50, 32, 0.16);
+}

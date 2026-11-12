@@ -1,7 +1,7 @@
 import type { AiHttpErrorPayload, ChatCompletionRequest, JsonCompletionRequest } from './ai';
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelInfoResult, ModelListResult, UpdateChannel } from './config';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
-import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
+import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportSummary, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
 import type { ImageLibraryItem, ImageLibraryMutationResult } from './imageLibrary';
 import type { ExportFormatConfig, ExportTemplateRecord } from './exportFormat';
 
@@ -16,10 +16,13 @@ export interface TaskEventTask {
   updated_at: string;
   error?: string;
   stats?: unknown;
+  report_id?: string;
+  scope_id?: string;
 }
 
 export interface TaskEvent<TState = unknown> {
   task: TaskEventTask;
+  reportId?: string;
   greenReportPatch?: Partial<GreenReportState>;
 }
 
@@ -597,16 +600,19 @@ export interface LvcertBridge {
     onEvent: (callback: (event: KnowledgeBaseEvent) => void) => () => void;
   };
   greenReport: {
-    loadState: () => Promise<GreenReportState>;
-    updateStep: (step: GreenReportStep) => Promise<void>;
-    saveReportType: (reportType: GreenReportType) => Promise<void>;
-    saveProjectInfo: (projectInfo: GreenProjectInfo) => Promise<GreenReportState>;
-    saveOutlineConfig: (payload: { targetWords?: number }) => Promise<GreenReportState>;
-    saveReportConfig: (payload: { targetWords?: number; pageCount?: number; documentStyle?: GreenDocumentStyle }) => Promise<GreenReportState>;
-    saveKnowledgeContext: (context: GreenKnowledgeContext | null) => Promise<GreenReportState>;
-    saveOutline: (payload: GreenSaveOutlineRequest) => Promise<Partial<GreenReportState>>;
-    saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;
-    clear: () => Promise<{ success: boolean; message?: string }>;
+    list: () => Promise<GreenReportSummary[]>;
+    create: (payload?: { reportType?: GreenReportType }) => Promise<GreenReportState>;
+    delete: (reportId: string) => Promise<{ success: boolean; message?: string }>;
+    loadState: (reportId: string) => Promise<GreenReportState | null>;
+    updateStep: (reportId: string, step: GreenReportStep) => Promise<void>;
+    saveReportType: (reportId: string, reportType: GreenReportType) => Promise<void>;
+    saveProjectInfo: (reportId: string, projectInfo: GreenProjectInfo) => Promise<GreenReportState>;
+    saveOutlineConfig: (reportId: string, payload: { targetWords?: number }) => Promise<GreenReportState>;
+    saveReportConfig: (reportId: string, payload: { targetWords?: number; pageCount?: number; documentStyle?: GreenDocumentStyle; templateId?: string | null }) => Promise<GreenReportState>;
+    saveKnowledgeContext: (reportId: string, context: GreenKnowledgeContext | null) => Promise<GreenReportState>;
+    saveOutline: (reportId: string, payload: GreenSaveOutlineRequest) => Promise<Partial<GreenReportState>>;
+    saveChapterContent: (reportId: string, payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;
+    clear: (reportId: string) => Promise<{ success: boolean; message?: string }>;
     generateReportCode: () => Promise<string>;
   };
   imageLibrary: {
@@ -625,8 +631,9 @@ export interface LvcertBridge {
   tasks: {
     startGreenReportOutline: (payload?: unknown) => Promise<unknown>;
     startGreenReportContent: (payload?: unknown) => Promise<unknown>;
-    cancelGreenReportOutline: () => Promise<{ success: boolean; message?: string }>;
-    cancelGreenReportContent: () => Promise<{ success: boolean; message?: string }>;
+    cancelGreenReportOutline: (reportId: string) => Promise<{ success: boolean; message?: string }>;
+    cancelGreenReportContent: (reportId: string) => Promise<{ success: boolean; message?: string }>;
+    cancelGreenReport: (reportId: string) => Promise<{ success: boolean; message?: string }>;
     getActiveTasks: () => Promise<TaskEventTask[]>;
     onTaskEvent: <TState = unknown>(callback: (event: TaskEvent<TState>) => void) => () => void;
   };

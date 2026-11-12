@@ -4,13 +4,16 @@ const crypto = require('node:crypto');
 const { runGreenReportOutlineTask, runGreenReportContentTask } = require('./greenReportTasks.cjs');
 const { normalizeLogs } = require('./taskLogStore.cjs');
 
+// 最多同时生成的报告份数，超出排队等待。
+const MAX_CONCURRENT_REPORTS = 2;
+
 const taskDefinitions = {
   'green-report-outline': {
     label: '绿色报告目录生成',
     group: 'green-report',
     groupLabel: '绿色报告',
     step: 3,
-    lockPolicy: 'group-exclusive',
+    lockPolicy: 'scope-exclusive',
     stateKey: 'greenReport',
     field: 'outlineTask',
   },
@@ -19,7 +22,7 @@ const taskDefinitions = {
     group: 'green-report',
     groupLabel: '绿色报告',
     step: 4,
-    lockPolicy: 'group-exclusive',
+    lockPolicy: 'scope-exclusive',
     stateKey: 'greenReport',
     field: 'contentTask',
   },
@@ -33,9 +36,12 @@ function getTaskDefinition(type) {
   return taskDefinitions[type] || { label: type, stateKey: 'greenReport', field: undefined, lockPolicy: 'none' };
 }
 
+function getReportId(payload) {
+  return String(payload?.reportId ?? payload?.report_id ?? '').trim();
+}
+
 function getScopeId(payload) {
-  const scopeId = payload?.scopeId ?? payload?.scope_id;
-  return scopeId === undefined || scopeId === null ? '' : String(scopeId);
+  return getReportId(payload);
 }
 
 function getPayloadSignature() {
@@ -44,6 +50,10 @@ function getPayloadSignature() {
 
 function isActiveTaskStatus(status) {
   return status === 'running' || status === 'pausing';
+}
+
+function isQueuedTaskStatus(status) {
+  return status === 'queued';
 }
 
 function hasOwn(value, field) {
@@ -58,18 +68,22 @@ function copyPatchFields(target, source, fields) {
   }
 }
 
+function taskKey(type, reportId) {
+  return `${type}:${reportId}`;
+}
+
 function createTask(type, payload) {
   const definition = getTaskDefinition(type);
-  const scopeId = getScopeId(payload);
-  const payloadSignature = getPayloadSignature(type, payload);
+  const reportId = getReportId(payload);
   return {
     task_id: crypto.randomUUID(),
     type,
     group: definition.group,
     step: definition.step,
     lock_policy: definition.lockPolicy,
-    scope_id: scopeId || undefined,
-    payload_signature: payloadSignature,
+    report_id: reportId,
+    scope_id: reportId || undefined,
+    payload_signature: getPayloadSignature(type, payload),
     status: 'running',
     progress: 0,
     logs: [],
@@ -83,6 +97,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
   const callbackSubscribers = new Set();
   const activeTasks = new Map();
   const activeTaskControls = new Map();
+  const queuedTasks = new Map();
 
   function emit(task, snapshot) {
     const event = { task, ...snapshot };
@@ -96,24 +111,26 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     }
   }
 
-  function buildSnapshot(definition, state) {
+  function buildSnapshot(definition, reportId, state) {
     if (definition.stateKey === 'greenReport') {
-      return { greenReportPatch: state };
+      return { reportId, greenReportPatch: state };
     }
     return {};
   }
 
   function getSnapshotForTask(task) {
     const definition = getTaskDefinition(task.type);
-    if (definition.stateKey === 'greenReport') {
-      return buildSnapshot(definition, greenReportStore.loadState());
+    if (definition.stateKey !== 'greenReport') return {};
+    const reportId = task.report_id || '';
+    if (!reportId || !greenReportStore.reportExists(reportId)) {
+      return { reportId };
     }
-    return {};
+    return buildSnapshot(definition, reportId, greenReportStore.loadState(reportId));
   }
 
   function subscribe(webContents) {
     subscribers.add(webContents);
-    for (const task of activeTasks.values()) {
+    for (const task of [...activeTasks.values(), ...queuedTasks.values()]) {
       if (!webContents.isDestroyed()) {
         webContents.send('tasks:event', { task, ...getSnapshotForTask(task) });
       }
@@ -126,7 +143,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
    */
   function subscribeCallback(callback) {
     callbackSubscribers.add(callback);
-    for (const task of activeTasks.values()) {
+    for (const task of [...activeTasks.values(), ...queuedTasks.values()]) {
       callback({ task, ...getSnapshotForTask(task) });
     }
     return () => callbackSubscribers.delete(callback);
@@ -143,10 +160,15 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     }
 
     const nextScopeId = getScopeId(payload);
-    for (const task of activeTasks.values()) {
-      if (!isActiveTaskStatus(task.status) || task.type === type) {
+    const allTasks = [
+      ...activeTasks.values(),
+      ...[...queuedTasks.values()].map((entry) => entry.task),
+    ];
+    for (const task of allTasks) {
+      if (!isActiveTaskStatus(task.status) && !isQueuedTaskStatus(task.status)) {
         continue;
       }
+      if (task.type === type) continue;
 
       const activeDefinition = getTaskDefinition(task.type);
       if (activeDefinition.group !== definition.group) {
@@ -160,7 +182,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
       if (
         definition.lockPolicy === 'scope-exclusive'
         && nextScopeId
-        && getScopeId(task.payload || {}) === nextScopeId
+        && (task.report_id || getScopeId(task.payload || {})) === nextScopeId
       ) {
         return { task, definition: activeDefinition };
       }
@@ -173,23 +195,29 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     if (conflict) {
       const nextDefinition = getTaskDefinition(type);
       const message = nextDefinition.groupLabel && nextDefinition.label
-        ? `当前${nextDefinition.groupLabel}正在执行“${nextDefinition.label}”，请等待当前任务完成。`
-        : '当前任务组正在执行其他任务，请等待完成。';
+        ? `该报告正在执行“${conflict.definition.label || conflict.task.type}”，请等待完成或先取消。`
+        : '该任务组正在执行其他任务，请等待完成。';
       throw new Error(message);
     }
   }
 
-  function updateWorkspaceStateWithoutReload(definition, partial) {
-    if (definition.stateKey === 'greenReport') {
-      greenReportStore.updateGreenReportWithoutReload(partial);
-    }
+  function updateWorkspaceStateWithoutReload(reportId, partial) {
+    greenReportStore.updateGreenReportWithoutReload(reportId, partial);
   }
 
-  function loadWorkspaceState(definition) {
-    if (definition.stateKey === 'greenReport') {
-      return greenReportStore.loadState();
-    }
-    return null;
+  function loadWorkspaceState(reportId) {
+    return greenReportStore.loadState(reportId);
+  }
+
+  function createScopedWorkspaceStore(reportId) {
+    return {
+      ...greenReportStore,
+      loadState: () => greenReportStore.loadState(reportId),
+      saveOutlineFromResult: (outlineData) => greenReportStore.saveOutlineFromResult(reportId, outlineData),
+      saveChapterContent: (payload) => greenReportStore.saveChapterContent(reportId, payload),
+      clearAllChapterContent: () => greenReportStore.clearAllChapterContent(reportId),
+      saveTaskState: (type, taskState) => greenReportStore.saveTaskState(reportId, type, taskState),
+    };
   }
 
   function createAgentUserTaskContext(type, definition, payload, currentTask) {
@@ -201,6 +229,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
         group_label: definition.groupLabel || '',
         step: definition.step,
         state_key: definition.stateKey || '',
+        report_id: getReportId(payload),
         payload,
         state: currentTask,
       },
@@ -208,25 +237,27 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     };
   }
 
-  function startManagedTask(type, payload, runner, initialPartial = {}, startOptions = {}) {
-    const existingTask = activeTasks.get(type);
-    if (existingTask && isActiveTaskStatus(existingTask.status)) {
-      const nextPayloadSignature = getPayloadSignature(type, payload);
-      if (existingTask.payload_signature && nextPayloadSignature && existingTask.payload_signature !== nextPayloadSignature) {
-        const definition = getTaskDefinition(type);
-        throw new Error(`当前${definition.groupLabel || '任务组'}正在执行“${definition.label || type}”，请等待当前任务完成后再重新分析新的文件集合。`);
+  function countRunningReports() {
+    const reportIds = new Set();
+    for (const task of activeTasks.values()) {
+      if (isActiveTaskStatus(task.status) && task.report_id) {
+        reportIds.add(task.report_id);
       }
-      emit(existingTask, getSnapshotForTask(existingTask));
-      return existingTask;
     }
+    return reportIds.size;
+  }
 
-    assertTaskCanStart(type, payload);
+  function launchManagedTask({ type, task, payload, runner, initialPartial = {}, startOptions = {} }) {
+    const definition = getTaskDefinition(type);
+    const reportId = task.report_id;
+    const key = taskKey(type, reportId);
     startOptions.beforeStart?.();
 
-    const definition = getTaskDefinition(type);
-    const task = startOptions.existingTask || createTask(type, payload);
-    const queueScopeId = `${type}:${task.task_id}`;
-    activeTasks.set(type, task);
+    const queuedControl = queuedTasks.get(key);
+    if (queuedControl) queuedTasks.delete(key);
+
+    task = { ...task, status: 'running', updated_at: now() };
+    activeTasks.set(key, task);
     const taskField = getTaskField(type);
     let currentTask = task;
     const abortController = new AbortController();
@@ -235,7 +266,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
       resolveSettled = resolve;
     });
     const taskControl = {
-      queueScopeId,
+      queueScopeId: `${type}:${task.task_id}`,
       signal: abortController.signal,
       pauseRequested: false,
       isPauseRequested() {
@@ -263,7 +294,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
         this.outlineSelectionAutoConfirmationId = null;
       },
     };
-    activeTaskControls.set(type, taskControl);
+    activeTaskControls.set(key, taskControl);
 
     const applyTaskPatch = (partial) => {
       const nextStatus = currentTask.status === 'pausing' && partial.status === 'running'
@@ -277,14 +308,24 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
         logs: partial.logs ? normalizeLogs(partial.logs) : currentTask.logs,
         updated_at: now(),
       };
-      activeTasks.set(type, currentTask);
+      activeTasks.set(key, currentTask);
       return currentTask;
     };
 
-    // 仅更新内存并推送 Renderer，用于无恢复价值的高频展示状态。
+    // 高频展示状态：立即推送 Renderer；同时节流落库，保证列表/详情重新进入时能直接回显最新进度。
+    let lastProgressPersistAt = 0;
     const updateTask = (partial, workspaceState = {}, eventPatch) => {
       const nextTask = applyTaskPatch(partial);
-      emit(nextTask, buildSnapshot(definition, { ...(workspaceState || {}), [taskField]: nextTask }));
+      emit(nextTask, buildSnapshot(definition, reportId, { ...(workspaceState || {}), [taskField]: nextTask }));
+      const ts = Date.now();
+      if (!lastProgressPersistAt || ts - lastProgressPersistAt >= 1200) {
+        lastProgressPersistAt = ts;
+        try {
+          greenReportStore.saveTaskState(reportId, type, nextTask);
+        } catch (error) {
+          // 进度落库失败不影响任务执行
+        }
+      }
       return nextTask;
     };
 
@@ -298,40 +339,40 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
         ...(workspacePartial || {}),
         [taskField]: nextTask,
       };
-      updateWorkspaceStateWithoutReload(definition, persistedPatch);
-      emit(nextTask, buildSnapshot(definition, persistedPatch));
+      updateWorkspaceStateWithoutReload(reportId, persistedPatch);
+      emit(nextTask, buildSnapshot(definition, reportId, persistedPatch));
       return { task: nextTask };
     };
 
-    const previousState = loadWorkspaceState(definition) || {};
-    // 互斥任务：启动当前任务时清除同组的另一个任务状态，避免旧进度条残留
+    const previousState = loadWorkspaceState(reportId) || {};
+    // 互斥任务：启动当前任务时清除同报告的另一个任务状态，避免旧进度条残留
     const siblingReset = {};
     if (definition.stateKey === 'greenReport') {
       if (taskField === 'outlineTask') {
         siblingReset.contentTask = null;
-        // 重新生成目录时同时清空旧正文，避免 ContentPage 残留旧勾选/正文
-        Object.assign(siblingReset, greenReportStore.clearAllChapterContent());
+        Object.assign(siblingReset, greenReportStore.clearAllChapterContent(reportId));
       } else if (taskField === 'contentTask') {
         siblingReset.outlineTask = null;
-        // 重新生成正文时先清空所有节点的旧正文，让勾选归零后重新生成
-        Object.assign(siblingReset, greenReportStore.clearAllChapterContent());
+        Object.assign(siblingReset, greenReportStore.clearAllChapterContent(reportId));
       }
     }
     const initialState = startOptions.skipInitialStateUpdate
       ? previousState
       : { ...siblingReset, ...initialPartial, [taskField]: currentTask };
     if (!startOptions.skipInitialStateUpdate) {
-      updateWorkspaceStateWithoutReload(definition, initialState);
+      updateWorkspaceStateWithoutReload(reportId, initialState);
     }
-    emit(currentTask, buildSnapshot(definition, initialState));
+    // 首次启动时把 running 状态落库，保证重启后能识别中断任务
+    greenReportStore.saveTaskState(reportId, type, currentTask);
+    emit(currentTask, buildSnapshot(definition, reportId, initialState));
 
-    const runnerWorkspaceStore = greenReportStore;
-    const runnerAiService = aiService?.withQueueScope ? aiService.withQueueScope(queueScopeId, taskControl.signal) : aiService;
+    const runnerWorkspaceStore = createScopedWorkspaceStore(reportId);
+    const runnerAiService = aiService?.withQueueScope ? aiService.withQueueScope(taskControl.queueScopeId, taskControl.signal) : aiService;
     const agentTaskContextProvider = () => createAgentUserTaskContext(type, definition, payload, currentTask);
     const runnerAgentService = agentService.bindTaskContext(
       agentTaskContextProvider,
       {
-        queueScopeId,
+        queueScopeId: taskControl.queueScopeId,
         signal: taskControl.signal,
         primary_session: startOptions.primarySession === true,
       },
@@ -339,7 +380,7 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     const runnerOrdinaryAgentService = agentService.bindTaskContext(
       agentTaskContextProvider,
       {
-        queueScopeId,
+        queueScopeId: taskControl.queueScopeId,
         signal: taskControl.signal,
       },
     );
@@ -350,84 +391,133 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     }).finally(() => {
       taskControl.dispose();
       if (aiService?.resumeQueueScope) {
-        aiService.resumeQueueScope(queueScopeId);
+        aiService.resumeQueueScope(taskControl.queueScopeId);
       }
-      activeTasks.delete(type);
-      activeTaskControls.delete(type);
+      activeTasks.delete(key);
+      activeTaskControls.delete(key);
       resolveSettled();
+      pumpQueue();
     });
 
     return currentTask;
   }
 
-  // 恢复应用异常关闭时仍在运行的绿色报告任务，将其标记为 error 状态。
-  function recoverInterruptedGreenReportTasks() {
-    const state = greenReportStore.loadState() || {};
-    const partial = {};
-    if (!activeTasks.has('green-report-outline') && isActiveTaskStatus(state.outlineTask?.status)) {
-      partial.outlineTask = {
-        ...state.outlineTask,
-        status: 'error',
-        error: '上次任务因应用关闭而中断，请重新生成。',
-        updated_at: now(),
-      };
-    }
-    if (!activeTasks.has('green-report-content') && isActiveTaskStatus(state.contentTask?.status)) {
-      partial.contentTask = {
-        ...state.contentTask,
-        status: 'error',
-        error: '上次任务因应用关闭而中断，请重新生成。',
-        updated_at: now(),
-      };
-    }
-    if (Object.keys(partial).length) {
-      greenReportStore.updateGreenReportWithoutReload(partial);
+  function pumpQueue() {
+    while (queuedTasks.size && countRunningReports() < MAX_CONCURRENT_REPORTS) {
+      const [key, entry] = queuedTasks.entries().next().value;
+      queuedTasks.delete(key);
+      try {
+        launchManagedTask(entry);
+      } catch (error) {
+        const task = { ...entry.task, status: 'error', error: error.message || '任务启动失败', updated_at: now() };
+        greenReportStore.saveTaskState(entry.task.report_id, entry.type, task);
+        emit(task, buildSnapshot(getTaskDefinition(entry.type), entry.task.report_id, null));
+      }
     }
   }
 
+  function startManagedTask(type, payload, runner, initialPartial = {}, startOptions = {}) {
+    const reportId = getReportId(payload);
+    if (!reportId) {
+      throw new Error('缺少报告 ID，无法启动生成任务');
+    }
+    const key = taskKey(type, reportId);
+    const existingTask = activeTasks.get(key) || queuedTasks.get(key)?.task;
+    if (existingTask) {
+      emit(existingTask, getSnapshotForTask(existingTask));
+      return existingTask;
+    }
+
+    assertTaskCanStart(type, payload);
+
+    const definition = getTaskDefinition(type);
+    const task = startOptions.existingTask || createTask(type, payload);
+
+    if (countRunningReports() >= MAX_CONCURRENT_REPORTS) {
+      const queuedTask = { ...task, status: 'queued', updated_at: now() };
+      queuedTasks.set(key, { type, task: queuedTask, payload, runner, initialPartial, startOptions });
+      greenReportStore.saveTaskState(reportId, type, queuedTask);
+      emit(queuedTask, buildSnapshot(definition, reportId, null));
+      return queuedTask;
+    }
+
+    return launchManagedTask({ type, task, payload, runner, initialPartial, startOptions });
+  }
+
+  // 恢复应用异常关闭时仍在运行的绿色报告任务，将其标记为 error 状态。
   function recoverInterruptedGreenReportTasks() {
-    const state = greenReportStore.loadState() || {};
-    const partial = {};
-    if (!activeTasks.has('green-report-outline') && isActiveTaskStatus(state.outlineTask?.status)) {
-      partial.outlineTask = {
-        ...state.outlineTask,
-        status: 'error',
-        error: '上次任务因应用关闭而中断，请重新生成。',
-        updated_at: now(),
-      };
-    }
-    if (!activeTasks.has('green-report-content') && isActiveTaskStatus(state.contentTask?.status)) {
-      partial.contentTask = {
-        ...state.contentTask,
-        status: 'error',
-        error: '上次任务因应用关闭而中断，请重新生成。',
-        updated_at: now(),
-      };
-    }
-    if (Object.keys(partial).length) {
-      greenReportStore.updateGreenReportWithoutReload(partial);
+    for (const summary of greenReportStore.listReports()) {
+      const reportId = summary.id;
+      const state = greenReportStore.loadState(reportId) || {};
+      for (const [taskField, taskType] of [['outlineTask', 'green-report-outline'], ['contentTask', 'green-report-content']]) {
+        const task = state[taskField];
+        if (!task) continue;
+        if (!isActiveTaskStatus(task.status) && !isQueuedTaskStatus(task.status)) continue;
+        if (activeTasks.has(taskKey(taskType, reportId))) continue;
+        greenReportStore.saveTaskState(reportId, taskType, {
+          ...task,
+          status: 'error',
+          error: '上次任务因应用关闭而中断，请重新生成。',
+          updated_at: now(),
+        });
+      }
     }
   }
 
   recoverInterruptedGreenReportTasks();
 
-  function cancelTask(type) {
-    const control = activeTaskControls.get(type);
+  function markTaskCancelled(type, reportId, task) {
+    const definition = getTaskDefinition(type);
+    const taskField = getTaskField(type);
+    const nextStatus = { ...task, status: 'cancelled', error: '任务已被用户取消', updated_at: now() };
+    greenReportStore.updateGreenReportWithoutReload(reportId, { [taskField]: nextStatus });
+    emit(nextStatus, buildSnapshot(definition, reportId, { [taskField]: nextStatus }));
+    return nextStatus;
+  }
+
+  function cancelTask(type, reportId) {
+    const id = String(reportId || '').trim();
+    if (!id) return { success: false, message: '缺少报告 ID' };
+    const key = taskKey(type, id);
+    const queued = queuedTasks.get(key);
+    if (queued) {
+      queuedTasks.delete(key);
+      markTaskCancelled(type, id, queued.task);
+      return { success: true };
+    }
+    const control = activeTaskControls.get(key);
     if (!control) return { success: false, message: '当前没有正在执行的任务' };
-    const task = activeTasks.get(type);
+    const task = activeTasks.get(key);
     if (task) {
-      const nextStatus = { ...task, status: 'cancelled', error: '任务已被用户取消', updated_at: now() };
-      activeTasks.set(type, nextStatus);
-      const definition = getTaskDefinition(type);
-      const taskField = getTaskField(type);
-      const persistedPatch = { [taskField]: nextStatus };
-      if (definition.stateKey === 'greenReport') {
-        greenReportStore.updateGreenReportWithoutReload(persistedPatch);
-      }
-      emit(nextStatus, buildSnapshot(definition, persistedPatch));
+      markTaskCancelled(type, id, task);
     }
     control.cancel();
     return { success: true };
+  }
+
+  function cancelReportTasks(reportId) {
+    const id = String(reportId || '').trim();
+    if (!id) return { success: false, message: '缺少报告 ID' };
+    let cancelled = false;
+    for (const type of Object.keys(taskDefinitions)) {
+      const result = cancelTask(type, id);
+      if (result.success) cancelled = true;
+    }
+    return cancelled
+      ? { success: true }
+      : { success: false, message: '该报告当前没有正在执行的任务' };
+  }
+
+  function hasActiveTask(reportId) {
+    const id = String(reportId || '').trim();
+    if (!id) return false;
+    for (const task of activeTasks.values()) {
+      if (task.report_id === id && isActiveTaskStatus(task.status)) return true;
+    }
+    for (const entry of queuedTasks.values()) {
+      if (entry.task.report_id === id) return true;
+    }
+    return false;
   }
 
   return {
@@ -439,10 +529,12 @@ function createTaskService({ aiService, agentService, autoConfirmationService, k
     startGreenReportContent(payload) {
       return startManagedTask('green-report-content', payload, runGreenReportContentTask);
     },
-    cancelGreenReportOutline() { return cancelTask('green-report-outline'); },
-    cancelGreenReportContent() { return cancelTask('green-report-content'); },
+    cancelGreenReportOutline(reportId) { return cancelTask('green-report-outline', reportId); },
+    cancelGreenReportContent(reportId) { return cancelTask('green-report-content', reportId); },
+    cancelReportTasks,
+    hasActiveTask,
     getActiveTasks() {
-      return Array.from(activeTasks.values());
+      return [...activeTasks.values(), ...queuedTasks.values()].map((entry) => (entry.task ? entry.task : entry));
     },
   };
 }

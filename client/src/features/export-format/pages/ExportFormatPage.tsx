@@ -529,7 +529,11 @@ function ExportFormatPage({ mode = 'create', templateId = null, onBack }: Export
     let unsubscribe: (() => void) | undefined;
 
     try {
-      const greenReport = await window.lvcert?.greenReport.loadState();
+      const reports = await window.lvcert?.greenReport.list();
+      const latestReport = (reports || []).find((item) => item.status === 'success') || (reports || [])[0];
+      const greenReport = latestReport
+        ? await window.lvcert?.greenReport.loadState(latestReport.id)
+        : null;
       const outlineData = greenReport?.outlineData;
       const outline = outlineData?.outline || [];
       if (!hasGeneratedContent(outline)) {

@@ -3,44 +3,59 @@
 const { ipcMain } = require('electron');
 
 function registerGreenReportIpc({ greenReportStore, greenReportImageService, taskService }) {
-  ipcMain.handle('green-report:load-state', () => {
-    return greenReportStore.loadState();
+  ipcMain.handle('green-report:list', () => {
+    return greenReportStore.listReports();
   });
 
-  ipcMain.handle('green-report:update-step', (_event, step) => {
-    greenReportStore.updateStep(step);
+  ipcMain.handle('green-report:create', (_event, payload) => {
+    return greenReportStore.createReport(payload || {});
   });
 
-  ipcMain.handle('green-report:save-report-type', (_event, reportType) => {
-    greenReportStore.saveReportType(reportType);
+  ipcMain.handle('green-report:delete', (_event, reportId) => {
+    if (taskService.hasActiveTask(reportId)) {
+      return { success: false, message: '该报告正在生成，请先取消生成后再删除' };
+    }
+    return greenReportStore.deleteReport(reportId);
   });
 
-  ipcMain.handle('green-report:save-project-info', (_event, projectInfo) => {
-    return greenReportStore.saveProjectInfo(projectInfo);
+  ipcMain.handle('green-report:load-state', (_event, reportId) => {
+    return greenReportStore.reportExists(reportId) ? greenReportStore.loadState(reportId) : null;
   });
 
-  ipcMain.handle('green-report:save-outline-config', (_event, payload) => {
-    return greenReportStore.saveOutlineConfig(payload);
+  ipcMain.handle('green-report:update-step', (_event, reportId, step) => {
+    greenReportStore.updateStep(reportId, step);
   });
 
-  ipcMain.handle('green-report:save-report-config', (_event, payload) => {
-    return greenReportStore.saveReportConfig(payload);
+  ipcMain.handle('green-report:save-report-type', (_event, reportId, reportType) => {
+    greenReportStore.saveReportType(reportId, reportType);
   });
 
-  ipcMain.handle('green-report:save-knowledge-context', (_event, context) => {
-    return greenReportStore.saveKnowledgeContext(context);
+  ipcMain.handle('green-report:save-project-info', (_event, reportId, projectInfo) => {
+    return greenReportStore.saveProjectInfo(reportId, projectInfo);
   });
 
-  ipcMain.handle('green-report:save-outline', (_event, payload) => {
-    return greenReportStore.saveOutline(payload);
+  ipcMain.handle('green-report:save-outline-config', (_event, reportId, payload) => {
+    return greenReportStore.saveOutlineConfig(reportId, payload);
   });
 
-  ipcMain.handle('green-report:save-chapter-content', (_event, payload) => {
-    return greenReportStore.saveChapterContent(payload);
+  ipcMain.handle('green-report:save-report-config', (_event, reportId, payload) => {
+    return greenReportStore.saveReportConfig(reportId, payload);
   });
 
-  ipcMain.handle('green-report:clear', () => {
-    return greenReportStore.clear();
+  ipcMain.handle('green-report:save-knowledge-context', (_event, reportId, context) => {
+    return greenReportStore.saveKnowledgeContext(reportId, context);
+  });
+
+  ipcMain.handle('green-report:save-outline', (_event, reportId, payload) => {
+    return greenReportStore.saveOutline(reportId, payload);
+  });
+
+  ipcMain.handle('green-report:save-chapter-content', (_event, reportId, payload) => {
+    return greenReportStore.saveChapterContent(reportId, payload);
+  });
+
+  ipcMain.handle('green-report:clear', (_event, reportId) => {
+    return greenReportStore.clear(reportId);
   });
 
   ipcMain.handle('green-report:generate-report-code', () => {
@@ -76,14 +91,19 @@ function registerGreenReportIpc({ greenReportStore, greenReportImageService, tas
     });
   });
 
-  ipcMain.handle('tasks:cancel-green-report-outline', (event) => {
+  ipcMain.handle('tasks:cancel-green-report-outline', (event, reportId) => {
     taskService.subscribe(event.sender);
-    return taskService.cancelGreenReportOutline();
+    return taskService.cancelGreenReportOutline(reportId);
   });
 
-  ipcMain.handle('tasks:cancel-green-report-content', (event) => {
+  ipcMain.handle('tasks:cancel-green-report-content', (event, reportId) => {
     taskService.subscribe(event.sender);
-    return taskService.cancelGreenReportContent();
+    return taskService.cancelGreenReportContent(reportId);
+  });
+
+  ipcMain.handle('tasks:cancel-green-report', (event, reportId) => {
+    taskService.subscribe(event.sender);
+    return taskService.cancelReportTasks(reportId);
   });
 }
 

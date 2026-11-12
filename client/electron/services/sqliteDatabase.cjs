@@ -1,9 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 30;
+const schemaVersion = 31;
 
 function createInitialSchema(db) {
   db.exec(`
@@ -1038,7 +1039,7 @@ function createFeasibilityReportSchema(db) {
 function createGreenReportSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS green_report_meta (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
+      id TEXT PRIMARY KEY,
       step TEXT NOT NULL DEFAULT 'company-info',
       report_type TEXT NOT NULL DEFAULT 'esg',
       project_info_json TEXT,
@@ -1049,23 +1050,29 @@ function createGreenReportSchema(db) {
       knowledge_context_json TEXT,
       outline_project_name TEXT,
       outline_project_overview TEXT,
+      report_seq INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      progress INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS green_report_tasks (
-      type TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      type TEXT NOT NULL,
       task_id TEXT NOT NULL,
       status TEXT NOT NULL,
       progress INTEGER NOT NULL DEFAULT 0,
       stats_json TEXT,
       error TEXT,
       started_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (report_id, type)
     );
 
     CREATE TABLE IF NOT EXISTS green_report_outline_nodes (
-      node_id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
       parent_node_id TEXT,
       sort_order INTEGER NOT NULL,
       level INTEGER NOT NULL,
@@ -1074,14 +1081,179 @@ function createGreenReportSchema(db) {
       content TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      FOREIGN KEY (parent_node_id) REFERENCES green_report_outline_nodes(node_id) ON DELETE CASCADE
+      PRIMARY KEY (report_id, node_id)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_green_report_meta_updated
+    ON green_report_meta(updated_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_green_report_outline_parent_order
-    ON green_report_outline_nodes(parent_node_id, sort_order);
+    ON green_report_outline_nodes(report_id, parent_node_id, sort_order);
 
     CREATE INDEX IF NOT EXISTS idx_green_report_outline_level
-    ON green_report_outline_nodes(level);
+    ON green_report_outline_nodes(report_id, level);
+  `);
+}
+
+/**
+ * v31：绿色报告从单份实例改为多报告实例。
+ * 重建 meta/tasks/outline_nodes 三张表，并把旧的单份数据迁移成一份历史报告。
+ */
+function migrateGreenReportMultiReport(db) {
+  const dropTempTables = () => {
+    db.exec('DROP TABLE IF EXISTS green_report_meta_v31;');
+    db.exec('DROP TABLE IF EXISTS green_report_tasks_v31;');
+    db.exec('DROP TABLE IF EXISTS green_report_outline_nodes_v31;');
+  };
+  dropTempTables();
+
+  db.exec(`
+    CREATE TABLE green_report_meta_v31 (
+      id TEXT PRIMARY KEY,
+      step TEXT NOT NULL DEFAULT 'company-info',
+      report_type TEXT NOT NULL DEFAULT 'esg',
+      project_info_json TEXT,
+      target_words INTEGER NOT NULL DEFAULT 20000,
+      page_count INTEGER NOT NULL DEFAULT 30,
+      document_style TEXT NOT NULL DEFAULT 'standard',
+      template_id TEXT,
+      knowledge_context_json TEXT,
+      outline_project_name TEXT,
+      outline_project_overview TEXT,
+      report_seq INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      progress INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE green_report_tasks_v31 (
+      report_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress INTEGER NOT NULL DEFAULT 0,
+      stats_json TEXT,
+      error TEXT,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (report_id, type)
+    );
+    CREATE TABLE green_report_outline_nodes_v31 (
+      report_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      parent_node_id TEXT,
+      sort_order INTEGER NOT NULL,
+      level INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (report_id, node_id)
+    );
+  `);
+
+  const tableExists = (name) => Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+  const ts = new Date().toISOString();
+  const legacyMeta = tableExists('green_report_meta')
+    ? db.prepare('SELECT * FROM green_report_meta WHERE id = 1').get()
+    : null;
+  const legacyNodes = tableExists('green_report_outline_nodes')
+    ? db.prepare('SELECT * FROM green_report_outline_nodes').all()
+    : [];
+  const legacyTasks = tableExists('green_report_tasks')
+    ? db.prepare('SELECT * FROM green_report_tasks').all()
+    : [];
+
+  if (legacyMeta && (legacyMeta.project_info_json || legacyNodes.length || legacyTasks.length)) {
+    const reportId = crypto.randomUUID();
+    const activeStatuses = new Set(['running', 'pausing', 'queued']);
+    const contentTask = legacyTasks.find((task) => task.type === 'green-report-content');
+    const outlineTask = legacyTasks.find((task) => task.type === 'green-report-outline');
+    let status = 'draft';
+    if (legacyTasks.some((task) => activeStatuses.has(String(task.status || '')))) {
+      status = 'error';
+    } else if (contentTask?.status === 'success') {
+      status = 'success';
+    } else if (contentTask?.status === 'cancelled' || outlineTask?.status === 'cancelled') {
+      status = 'cancelled';
+    }
+    const progress = legacyTasks.reduce((max, task) => Math.max(max, Number(task.progress) || 0), 0);
+
+    db.prepare(`
+      INSERT INTO green_report_meta_v31 (id, step, report_type, project_info_json, target_words, page_count, document_style, template_id, knowledge_context_json, outline_project_name, outline_project_overview, report_seq, status, progress, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      reportId,
+      legacyMeta.step || 'company-info',
+      legacyMeta.report_type || 'esg',
+      legacyMeta.project_info_json || null,
+      legacyMeta.target_words || 20000,
+      legacyMeta.page_count ?? 30,
+      legacyMeta.document_style || 'standard',
+      legacyMeta.template_id ?? null,
+      legacyMeta.knowledge_context_json || null,
+      legacyMeta.outline_project_name || '',
+      legacyMeta.outline_project_overview || '',
+      legacyMeta.report_seq ?? 0,
+      status,
+      progress,
+      legacyMeta.created_at || ts,
+      legacyMeta.updated_at || ts,
+    );
+
+    const insertNode = db.prepare(`
+      INSERT INTO green_report_outline_nodes_v31 (report_id, node_id, parent_node_id, sort_order, level, title, description, content, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const node of legacyNodes) {
+      insertNode.run(
+        reportId,
+        node.node_id,
+        node.parent_node_id || null,
+        node.sort_order || 0,
+        node.level || 0,
+        node.title || '',
+        node.description || '',
+        node.content || '',
+        node.created_at || ts,
+        node.updated_at || ts,
+      );
+    }
+
+    const insertTask = db.prepare(`
+      INSERT INTO green_report_tasks_v31 (report_id, type, task_id, status, progress, stats_json, error, started_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const task of legacyTasks) {
+      const interrupted = activeStatuses.has(String(task.status || ''));
+      insertTask.run(
+        reportId,
+        task.type,
+        task.task_id || '',
+        interrupted ? 'error' : task.status || 'idle',
+        interrupted ? 0 : (task.progress || 0),
+        task.stats_json || null,
+        interrupted ? '上次任务因应用关闭而中断' : (task.error || null),
+        task.started_at || ts,
+        ts,
+      );
+    }
+  }
+
+  db.exec('DROP TABLE IF EXISTS green_report_meta;');
+  db.exec('DROP TABLE IF EXISTS green_report_tasks;');
+  db.exec('DROP TABLE IF EXISTS green_report_outline_nodes;');
+  db.exec('ALTER TABLE green_report_meta_v31 RENAME TO green_report_meta;');
+  db.exec('ALTER TABLE green_report_tasks_v31 RENAME TO green_report_tasks;');
+  db.exec('ALTER TABLE green_report_outline_nodes_v31 RENAME TO green_report_outline_nodes;');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_green_report_meta_updated
+    ON green_report_meta(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_green_report_outline_parent_order
+    ON green_report_outline_nodes(report_id, parent_node_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_green_report_outline_level
+    ON green_report_outline_nodes(report_id, level);
   `);
 }
 
@@ -1253,6 +1425,11 @@ const schemaHealthTableGroups = [
   },
   {
     version: 24,
+    tables: ['green_report_meta', 'green_report_tasks', 'green_report_outline_nodes'],
+    repair: createGreenReportSchema,
+  },
+  {
+    version: 31,
     tables: ['green_report_meta', 'green_report_tasks', 'green_report_outline_nodes'],
     repair: createGreenReportSchema,
   },
@@ -1504,6 +1681,11 @@ const migrations = [
     version: 30,
     description: '绿色报告图片素材归属知识库文件夹 folder_id',
     up: addGreenReportImageFolderId,
+  },
+  {
+    version: 31,
+    description: '绿色报告支持多报告实例（report_id）',
+    up: migrateGreenReportMultiReport,
   },
 ];
 

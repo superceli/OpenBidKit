@@ -102,6 +102,9 @@ function sendToWebContents(webContents, channel, payload) {
 }
 
 const workspaceDatabaseChannels = [
+  'green-report:list',
+  'green-report:create',
+  'green-report:delete',
   'green-report:load-state',
   'green-report:update-step',
   'green-report:save-report-type',
@@ -130,6 +133,9 @@ const workspaceDatabaseChannels = [
   'knowledge-base:search-items',
   'tasks:start-green-report-outline',
   'tasks:start-green-report-content',
+  'tasks:cancel-green-report-outline',
+  'tasks:cancel-green-report-content',
+  'tasks:cancel-green-report',
   'tasks:get-active',
   'templates:list',
   'templates:get',

@@ -47,6 +47,10 @@ export interface GreenKnowledgeContextItem {
 
 export interface GreenKnowledgeContext {
   keyword: string;
+  /** 资料所属企业（用于约束 AI 不得混用其他企业数据） */
+  companyName?: string;
+  /** 命中的知识库文件夹名称 */
+  folderName?: string;
   items: GreenKnowledgeContextItem[];
   searchedAt: string;
 }
@@ -71,6 +75,8 @@ export interface GreenSaveOutlineRequest {
 }
 
 export interface GreenReportState {
+  /** 报告实例 ID；新建报告后由主进程生成 */
+  reportId?: string;
   step: GreenReportStep;
   reportType: GreenReportType;
   projectInfo: GreenProjectInfo;
@@ -81,12 +87,29 @@ export interface GreenReportState {
   templateId: string | null;
   knowledgeContext: GreenKnowledgeContext | null;
   outlineData: OutlineData | null;
+  /** 报告级运行状态：draft / queued / running / success / error / cancelled */
+  status?: string;
+  progress?: number;
   outlineTask?: GreenBackgroundTaskState;
   contentTask?: GreenBackgroundTaskState;
   /** 目录生成时用户附加的自定义要求 */
   outlineRequirements?: string;
   /** 正文生成时用户附加的自定义要求 */
   contentRequirements?: string;
+}
+
+/** 报告列表摘要 */
+export interface GreenReportSummary {
+  id: string;
+  companyName: string;
+  reportType: GreenReportType;
+  step: GreenReportStep;
+  status: string;
+  progress: number;
+  /** 是否已生成目录，决定列表上能否直接生成正文 */
+  hasOutline?: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const GREEN_STEPS: GreenReportStep[] = ['company-info', 'report-config', 'outline', 'content'];
@@ -122,7 +145,7 @@ export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   compileStaffText: '',
   keyIndicatorsText: '',
   publicityPlatformsText: '',
-  compileUnit: '',
+  compileUnit: '安徽蔚碳环保科技有限公司',
   compileDate: getLocalDateString(),
   reportCode: '',
 };

@@ -61,7 +61,7 @@ function ContentPage({
 
   const handleCancelGenerate = async () => {
     try {
-      const res = await window.lvcert.tasks.cancelGreenReportContent();
+      const res = await window.lvcert.tasks.cancelGreenReportContent(state.reportId || '');
       if (res.success) {
         showToast('正文生成已取消', 'success');
       } else {

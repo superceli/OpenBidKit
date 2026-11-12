@@ -75,7 +75,11 @@ ${String(projectInfo.publicityPlatformsText).trim()}`);
 
 function buildKnowledgeContextBlock(knowledgeContext) {
   if (!knowledgeContext?.items?.length) return '';
-  const lines = ['\n以下是从知识库检索到的企业相关资料，请在生成时优先采用；其中的工商信息、财务数据、环境能耗、员工与社会责任、公司治理、产品服务、荣誉资质、知识产权等字段均为权威数据，对应章节必须逐项引用，不得省略或改写：'];
+  const companyName = String(knowledgeContext.companyName || knowledgeContext.keyword || '').trim();
+  const header = companyName
+    ? `\n以下资料来自知识库中与委托单位“${companyName}”对应的文件夹，仅属于“${companyName}”。严禁混用其他企业的资料或数据；如与本次委托单位不一致，请忽略：`
+    : '\n以下是从知识库检索到的企业相关资料，请在生成时优先采用；其中的工商信息、财务数据、环境能耗、员工与社会责任、公司治理、产品服务、荣誉资质、知识产权等字段均为权威数据，对应章节必须逐项引用，不得省略或改写：';
+  const lines = [header];
   knowledgeContext.items.forEach((item, i) => {
     lines.push(`--- [${i + 1}] ${item.title} ---`);
     if (item.resume) lines.push(item.resume);
@@ -338,9 +342,14 @@ ${options.imageAssets.map((item) => `- ${item.key}：${item.description}`).join(
     ? (options.outlineSkeleton.find((item) => item.id === node.id)?.topTitle || '')
     : '';
   const chapterTitle = chapterTopTitle || nodeTitle;
+  // 关键指标章节用 Mermaid 图表呈现，必须排除“每节一张表格”的通用要求，避免指令冲突
+  const isKeyIndicatorChapter = chapterTitle.includes('关键指标') || chapterTitle.includes('指标总览');
+  const chapterTableRule = isKeyIndicatorChapter
+    ? '- 本章为关键指标总览：禁止输出任何 Markdown 表格（包括指标清单、指标明细表），指标数据一律改用 Mermaid 图表呈现'
+    : '- 每个分节采用"一段文字说明 + 一张数据/分析表格"，本章合计 3-5 张 Markdown 表格';
   parts.push(`\n本章写作要求（通用绿色专项报告框架）：
 - 称谓：前言用第一人称"我们"；制度章节用"本公司""公司"；评价章节用"该企业"第三方视角
-- 每个分节采用"一段文字说明 + 一张数据/分析表格"，本章合计 3-5 张 Markdown 表格
+${chapterTableRule}
 - 关键数据（营业收入、研发费用、研发投入占比等）须与全篇其他章节保持一致
 - 本章开头须加一行加粗的对仗式主题标语（引号内），并写成 <p align="center"><strong>“标语”</strong></p>，不要输出章节级编号标题`);
     if (chapterTitle.includes('前言')) {
@@ -361,14 +370,24 @@ ${options.imageAssets.map((item) => `- ${item.key}：${item.description}`).join(
       parts.push(`\n本章为企业基本信息：用 Markdown 表格列出企业名称、企业简称、统一社会信用代码、法定代表人、注册资本、成立日期、企业类型、登记状态、注册地址、主营业务、服务对象、联系电话；必须一行一个字段、按上述顺序完整列出，严禁合并字段（如把信用代码、法定代表人、注册资本写在同一行）或省略字段；已提供的字段原样使用，未提供的字段填"以工商登记为准"，不得编造；如本章补充财务数据，须用 Mermaid 柱形图呈现，不得用表格罗列`);
     }
     if (chapterTitle.includes('关键指标') || chapterTitle.includes('指标总览')) {
-      parts.push(`\n本章为关键指标总览：财务数据与关键指标必须用 Mermaid 图表展示，不再用 Markdown 表格罗列。至少输出 2 个图表，每个图表后写 2-3 句解读：
-- 财务类（营业收入、营业成本、利润总额、净利润、纳税额等）用柱形图，y 轴上限按数据自动调整：
+      parts.push(`\n本章为关键指标总览：整章禁止出现任何 Markdown 表格（包括指标清单表、指标明细表），财务类与非财务类指标全部改用 Mermaid 图表呈现。请按指标类别分别成图，至少输出 3 个图表，每个图表后写 2-3 句解读。
+【重要】下方代码块中的数值仅为格式示意，严禁照抄；所有图表数值必须取自知识库资料或用户填写的关键指标清单：
+- 财务类（营业收入、营业成本、利润总额、净利润、纳税额等）用柱形图，y 轴上限按真实数据自动调整：
 \`\`\`mermaid
 xychart-beta
-    title "2025年度财务数据（万元）"
+    title "报告期财务数据（万元）"
     x-axis ["营业收入", "营业成本", "利润总额", "净利润", "纳税额"]
-    y-axis "金额（万元）" 0 --> 800
-    bar [772.2, 507, 89.25, 86.65, 29.2]
+    y-axis "金额（万元）" 0 --> 100
+    bar [0, 0, 0, 0, 0]
+\`\`\`
+- 投入、质量合规、人才、环境等非财务类指标的现状值与目标值对比，分组柱形图（两条 bar 分别表示现状值与目标值）：
+\`\`\`mermaid
+xychart-beta
+    title "关键指标现状值与目标值"
+    x-axis ["指标A", "指标B", "指标C", "指标D"]
+    y-axis "指标值" 0 --> 100
+    bar [0, 0, 0, 0]
+    bar [0, 0, 0, 0]
 \`\`\`
 - 指标构成、占比、结构类用饼图：
 \`\`\`mermaid
@@ -378,7 +397,7 @@ pie title 关键指标构成
     "社会责任" : 20
     "公司治理" : 10
 \`\`\`
-图表数据只能来自知识库资料或用户填写的关键指标清单；数据不足以成图时不得虚构数值，改用文字描述现状与未来规划；严禁虚构财务、人数、知识产权、证书类数据`);
+饼图权重如无真实来源，按报告类型合理设定即可；柱形图数值必须来自知识库资料或用户填写的关键指标清单。数据不足以成图时不得虚构数值，改用文字描述现状与未来规划，绝对不得退回 Markdown 表格；严禁虚构财务、人数、知识产权、证书类数据`);
     }
     if (chapterTitle.includes('制度') || chapterTitle.includes('规范')) {
       parts.push(`\n本章为制度规范章节：以公文体撰写，条文用加粗的"第一条、第二条……"开头（不使用标题级编号），至少包含总则、规范依据与编制背景、评价范围与期限、指导思想与基本原则、战略定位与总体目标、实施路径与阶段规划（基础建设期→深化推进期→巩固提升期）、组织架构与职责分工、专项领域条款、考核与评价、监督检查与持续改进、附则；每个条文后附1张表格；专项条款须紧扣企业主营业务；本章使用"本公司""公司"称谓；规范依据须从下方政策清单中选择，不得编造`);

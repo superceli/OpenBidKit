@@ -6,7 +6,7 @@ const cheerio = require('cheerio');
 const { imageSize } = require('image-size');
 const { compactLogError, createDeveloperLogger, textMetrics } = require('../utils/developerLog.cjs');
 const { getMermaidCacheEntry, saveMermaidCacheImage } = require('../utils/mermaidCache.cjs');
-const { getGeneratedImagesDir, getImportedImagesDir, getGreenReportCoverTemplatePath, getSigningPageTemplatePath, getOpenXmlJobsDir } = require('../utils/paths.cjs');
+const { getGeneratedImagesDir, getGreenReportImagesDir, getImportedImagesDir, getGreenReportCoverTemplatePath, getGreenReportPageBackgroundPath, getSigningPageTemplatePath, getOpenXmlJobsDir } = require('../utils/paths.cjs');
 const { REMOTE_IMAGE_RETRY_ATTEMPTS, REMOTE_IMAGE_RETRY_DELAY_MS } = require('../utils/remoteImageRetry.cjs');
 const { renderMarkdownHtml } = require('../utils/renderMarkdownHtml.cjs');
 const { getLocalImageRenderService } = require('./localImageRenderService.cjs');
@@ -20,9 +20,11 @@ const {
   Header,
   HeightRule,
   HeadingLevel,
+  HorizontalPositionRelativeFrom,
   ImageRun,
   LevelFormat,
   LevelSuffix,
+  LineRuleType,
   Packer,
   PageNumber,
   PageBreak,
@@ -34,8 +36,10 @@ const {
   TableLayoutType,
   TableRow,
   TextRun,
+  TextWrappingType,
   UnderlineType,
   VerticalAlignTable,
+  VerticalPositionRelativeFrom,
   WidthType,
 } = require('docx');
 
@@ -49,12 +53,12 @@ const CHAPTER_LEAF_CONTENT_WIDTH_TWIPS = DOCX_TABLE_WIDTH_TWIPS - CHAPTER_LEAF_T
 const DEFAULT_HEADING_BORDER_CELL_COLORS = ['#e0ecff', '#e9f1ff', '#f2f7ff', '#f8fbff', '#ffffff', '#ffffff'];
 const DEFAULT_TABLE_STYLE = {
   border_width: 1,
-  border_color: '#dcdff6',
+  border_color: '#000000',
   cell_padding_pt: 6,
   full_width: true,
-  header_row: { font: '黑体', size: '小四', alignment: '居中对齐', text_color: '#243048', background_color: '#eef5ff' },
-  first_column: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '#ffffff' },
-  body_cell: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '#ffffff' },
+  header_row: { font: '黑体', size: '小四', alignment: '居中对齐', text_color: '#243048', background_color: '' },
+  first_column: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '' },
+  body_cell: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '' },
 };
 const DEFAULT_IMAGE_STYLE = {
   max_width_percent: 90,
@@ -144,6 +148,19 @@ function addWarning(context, message) {
   }
   writeExportLog(context, 'export.warning', { message });
   console.warn(`[export-word] ${message}`);
+}
+
+/** 生成导出结果提示：区分图片失败与内容降级，避免把 HTML 降级误报成图片未插入。 */
+function buildExportResultMessage(prefix, buildResult) {
+  const failedImages = Math.max(0, Number(buildResult?.imageFailureCount) || 0);
+  if (failedImages > 0) {
+    return `${prefix}，但有 ${failedImages} 张图片未能插入，请打开文档核对。`;
+  }
+  const warningCount = Array.isArray(buildResult?.warnings) ? buildResult.warnings.length : 0;
+  if (warningCount > 0) {
+    return `${prefix}，但有 ${warningCount} 处内容已降级，请核对文档。`;
+  }
+  return `${prefix}，请打开文档核对图片、表格和版式。`;
 }
 
 function addUnsupportedHtmlWarning(context, tagName) {
@@ -438,24 +455,27 @@ function buildChapterFrameTable(exportFormat, rows) {
 }
 
 function createPageNumberRuns(format, runOptions) {
-  const parts = String(format || '第{page}页').split('{page}');
+  const parts = String(format || '第{page}页').split(/(\{page\}|\{pages\})/);
   const runs = [];
 
-  if (parts[0]) {
-    runs.push(new TextRun({ ...runOptions, text: cleanText(parts[0]) }));
-  }
-  runs.push(new TextRun({ ...runOptions, children: [PageNumber.CURRENT] }));
-  if (parts[1]) {
-    runs.push(new TextRun({ ...runOptions, text: cleanText(parts[1]) }));
+  for (const part of parts) {
+    if (!part) continue;
+    if (part === '{page}') {
+      runs.push(new TextRun({ ...runOptions, children: [PageNumber.CURRENT] }));
+    } else if (part === '{pages}') {
+      runs.push(new TextRun({ ...runOptions, children: [PageNumber.TOTAL_PAGES] }));
+    } else {
+      runs.push(new TextRun({ ...runOptions, text: cleanText(part) }));
+    }
   }
 
   return runs;
 }
 
-function buildWordHeaders(pageSetup) {
+function buildWordHeaders(pageSetup, backgroundParagraph = null) {
   const enabled = pageSetup ? pageSetup.header_enabled === true : false;
   const headerText = cleanText(pageSetup?.header_text || '').trim();
-  if (!enabled || !headerText) return undefined;
+  if (!backgroundParagraph && (!enabled || !headerText)) return undefined;
 
   const runOptions = {
     font: pageSetup?.header_font || '宋体',
@@ -463,16 +483,54 @@ function buildWordHeaders(pageSetup) {
     color: normalizeDocxColor(pageSetup?.header_color || '#536176'),
   };
 
+  const headerChildren = [];
+  if (backgroundParagraph) headerChildren.push(backgroundParagraph);
+  if (enabled && headerText) {
+    headerChildren.push(
+      new Paragraph({
+        alignment: alignmentToWordType(pageSetup?.header_alignment || '居中对齐'),
+        children: [new TextRun({ ...runOptions, text: headerText })],
+      }),
+    );
+  }
+
   return {
-    default: new Header({
+    default: new Header({ children: headerChildren }),
+  };
+}
+
+/** 绿色报告整页底纹：以页眉浮动图方式衬于每页正文下方。 */
+function buildGreenReportPageBackgroundParagraph(pageSetup, appRef) {
+  try {
+    const backgroundPath = getGreenReportPageBackgroundPath(appRef || app);
+    if (!backgroundPath || !fs.existsSync(backgroundPath)) return null;
+    const paper = PAPER_DIMENSIONS_MM[pageSetup?.paper_size] || PAPER_DIMENSIONS_MM.a4;
+    const landscape = pageSetup?.orientation === 'landscape';
+    const widthMm = landscape ? paper.height : paper.width;
+    const heightMm = landscape ? paper.width : paper.height;
+    const width = Math.round((widthMm / 25.4) * 96);
+    const height = Math.round((heightMm / 25.4) * 96);
+    return new Paragraph({
+      spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
       children: [
-        new Paragraph({
-          alignment: alignmentToWordType(pageSetup?.header_alignment || '居中对齐'),
-          children: [new TextRun({ ...runOptions, text: headerText })],
+        new ImageRun({
+          data: fs.readFileSync(backgroundPath),
+          transformation: { width, height },
+          floating: {
+            horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 0 },
+            verticalPosition: { relative: VerticalPositionRelativeFrom.PAGE, offset: 0 },
+            behindDocument: true,
+            allowOverlap: true,
+            wrap: { type: TextWrappingType.NONE },
+            zIndex: 0,
+          },
         }),
       ],
-    }),
-  };
+    });
+  } catch (error) {
+    compactLogError('[export] 页面背景图加载失败', error);
+    return null;
+  }
 }
 
 function buildWordFooters(pageSetup) {
@@ -544,7 +602,7 @@ function tableBorders(context) {
   const border = {
     style: BorderStyle.SINGLE,
     size,
-    color: normalizeDocxColor(getTableStyle(context).border_color, 'DCDFF6'),
+    color: normalizeDocxColor(getTableStyle(context).border_color, '000000'),
   };
   return {
     top: border,
@@ -597,9 +655,12 @@ function createTableCell({ children, context, isHeader = false, isFirstColumn = 
   const table = getTableStyle(context);
   const cellStyle = getTableCellStyle(context, { isHeader, isFirstColumn });
   const fullWidth = table.full_width !== false;
+  const backgroundFill = typeof cellStyle?.background_color === 'string' ? cellStyle.background_color.trim() : '';
   return new TableCell({
     children,
-    shading: { type: ShadingType.CLEAR, fill: normalizeDocxColor(cellStyle?.background_color, 'FFFFFF') },
+    shading: backgroundFill
+      ? { type: ShadingType.CLEAR, fill: normalizeDocxColor(backgroundFill, 'FFFFFF') }
+      : undefined,
     margins: tableCellMargins(context),
     columnSpan: safeSpan > 1 ? safeSpan : undefined,
     width: fullWidth ? { size: tableCellWidth(safeSpan, totalColumns), type: WidthType.DXA } : undefined,
@@ -912,6 +973,19 @@ function alignmentToWordType(align) {
   return map[align] || AlignmentType.JUSTIFIED;
 }
 
+/** 读取 HTML 节点上的 align 属性或 text-align 样式，转换为 Word 对齐方式。 */
+function resolveHtmlTextAlignment($, node) {
+  const align = String($(node).attr('align') || '').trim().toLowerCase();
+  const style = String($(node).attr('style') || '');
+  const styleMatch = style.match(/text-align\s*:\s*(left|center|right|justify)/i);
+  const value = styleMatch ? styleMatch[1].toLowerCase() : align;
+  if (value === 'center') return AlignmentType.CENTER;
+  if (value === 'right') return AlignmentType.RIGHT;
+  if (value === 'left') return AlignmentType.LEFT;
+  if (value === 'justify') return AlignmentType.JUSTIFIED;
+  return undefined;
+}
+
 function numberToChinese(num) {
   const digits = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
   const tens = ['', '十', '二十', '三十', '四十', '五十', '六十', '七十', '八十', '九十'];
@@ -1085,6 +1159,7 @@ function resolveAssetImagePath(url) {
   const assetRoots = {
     'generated-images': getGeneratedImagesDir(app),
     'imported-images': getImportedImagesDir(app),
+    'green-report-images': getGreenReportImagesDir(app),
   };
   const rootDir = assetRoots[assetUrl.hostname];
   if (!rootDir) return null;
@@ -1409,6 +1484,29 @@ function hasBlockHtmlChildren($, node) {
   return $(node).contents().toArray().some((child) => ['table', 'ul', 'ol', 'blockquote', 'pre', 'div', 'section', 'article', 'img', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(htmlTagName(child)));
 }
 
+/**
+ * 文本节点转 Run：HTML 里残留的 Markdown 粗体标记（**文本**）按加粗渲染，避免把星号原样带进文档。
+ */
+function textRunsWithBoldMarkers(text, marks) {
+  const value = String(text || '');
+  if (!value.includes('**')) return textRunsWithBreaks(value, marks);
+  const runs = [];
+  const pattern = /\*\*([^*\n]+)\*\*/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex) {
+      runs.push(...textRunsWithBreaks(value.slice(lastIndex, match.index), marks));
+    }
+    runs.push(...textRunsWithBreaks(match[1], { ...marks, bold: true }));
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < value.length) {
+    runs.push(...textRunsWithBreaks(value.slice(lastIndex), marks));
+  }
+  return runs;
+}
+
 async function htmlInlineRuns($, nodes = [], context = {}, marks = {}) {
   // 正文样式作为基础，调用方显式传入的 font/size 覆盖
   if (context.bodyRunFont && !('font' in marks)) {
@@ -1421,7 +1519,7 @@ async function htmlInlineRuns($, nodes = [], context = {}, marks = {}) {
 
   for (const node of nodes) {
     if (node.type === 'text') {
-      runs.push(...textRunsWithBreaks(node.data || '', marks));
+      runs.push(...textRunsWithBoldMarkers(node.data || '', marks));
       continue;
     }
 
@@ -1739,12 +1837,27 @@ async function htmlNodeToDocxBlocks($, node, context, options = {}) {
   if (tag === 'p' && hasBlockHtmlChildren($, node)) {
     return htmlNodesToDocxBlocks($, $(node).contents().toArray(), context, options);
   }
+  if (tag === 'center') {
+    const centerChildren = $(node).contents().toArray();
+    if (hasBlockHtmlChildren($, node)) {
+      return htmlNodesToDocxBlocks($, centerChildren, context, options);
+    }
+    const centerParaOpts = buildHtmlBodyParaOpts(context);
+    centerParaOpts.alignment = AlignmentType.CENTER;
+    delete centerParaOpts.indent;
+    return [paragraph(await htmlInlineRuns($, centerChildren, context), centerParaOpts)];
+  }
   if (['p', 'div', 'section', 'article', 'span', 'strong', 'b', 'em', 'i', 'del', 's', 'strike', 'a', 'code', 'label', 'small', 'sub', 'sup', 'mark'].includes(tag)) {
     const isFigureCaption = /^图[:：]/.test($(node).text().trim());
     if (isFigureCaption) {
       return [paragraph([textRun($(node).text().trim(), getCaptionRunMarks(context))], getCaptionParagraphOptions(context))];
     }
     const htmlParaOpts = buildHtmlBodyParaOpts(context);
+    const htmlAlignment = resolveHtmlTextAlignment($, node);
+    if (htmlAlignment) {
+      htmlParaOpts.alignment = htmlAlignment;
+      delete htmlParaOpts.indent;
+    }
     const groups = splitHtmlInlineNodesByBreaks($, $(node).contents().toArray());
     const paragraphs = [];
     for (const [index, group] of groups.entries()) {
@@ -1792,8 +1905,25 @@ async function markdownToDocxBlocks(content, context = {}) {
   return htmlToDocxBlocks(html, context);
 }
 
+/**
+ * 绿色报告章节开头的引号主题标语统一居中输出。
+ * 兼容旧正文把标语写成普通段落的情况，避免导出后靠左显示。
+ */
+function centerLeadingChapterSlogan(content) {
+  const text = String(content || '');
+  const lines = text.split(/\r?\n/);
+  const index = lines.findIndex((line) => line.trim());
+  if (index < 0) return text;
+  const line = lines[index].trim();
+  const match = line.match(/^(?:\*\*|__)?\s*[“「"]([^”」"]{2,60})[”」"]\s*(?:\*\*|__)?$/);
+  if (!match) return text;
+  lines[index] = `<p align="center"><strong>“${match[1].trim()}”</strong></p>`;
+  return lines.join('\n');
+}
+
 async function addMarkdownContent(children, content, context) {
-  children.push(...await markdownToDocxBlocks(content, context));
+  const markdown = context?.greenReport ? centerLeadingChapterSlogan(content) : content;
+  children.push(...await markdownToDocxBlocks(markdown, context));
 }
 
 const FEASIBILITY_ACCENT = '1A5F7A';
@@ -2014,7 +2144,7 @@ function buildOutlineHeadingParagraph(item, context, level, options = {}) {
 
   const paraOptions = {
     heading: headingLevel(level),
-    pageBreakBefore: level === 1 && isLevel1PageBreakEnabled(context.exportFormat) && !options.disablePageBreakBefore,
+    pageBreakBefore: level === 1 && (context.greenReport === true || isLevel1PageBreakEnabled(context.exportFormat)) && !options.disablePageBreakBefore,
     alignment: style ? alignmentToWordType(style.alignment) : undefined,
     before: options.compact ? 0 : (style ? style.spacing_before_pt * 20 : (level === 1 ? 320 : 200)),
     after: options.compact ? 0 : (style ? style.spacing_after_pt * 20 : 120),
@@ -2078,18 +2208,21 @@ async function addChapterFrameRows(rows, items, context, level = 1) {
 
 async function addOutlineItems(children, items, context, level = 1) {
   for (const item of items || []) {
+    // 绿色报告的每个一级章节都必须另起一页；文档第一个章节前不再插入分页，避免出现空白页
+    const isFirstLevel1 = level === 1 && !context.level1Started;
+    if (level === 1) context.level1Started = true;
     const useChapterFrame = level === 1 && getChapterFrameConfig(context.exportFormat);
     if (useChapterFrame) {
       const rows = [];
       await addChapterFrameRows(rows, [item], context, level);
-      if (isLevel1PageBreakEnabled(context.exportFormat)) {
+      if ((context.greenReport === true || isLevel1PageBreakEnabled(context.exportFormat)) && !isFirstLevel1) {
         children.push(pageBreakParagraph());
       }
       children.push(buildChapterFrameTable(context.exportFormat, rows));
       continue;
     }
 
-    children.push(buildOutlineHeadingParagraph(item, context, level));
+    children.push(buildOutlineHeadingParagraph(item, context, level, { disablePageBreakBefore: isFirstLevel1 }));
 
     if (!item.children?.length) {
       if (String(item.content || '').trim()) {
@@ -2257,6 +2390,8 @@ async function buildDocxResult(payload, options = {}) {
     unsupportedHtmlTags: new Set(),
     developerLogger: options.developerLogger,
     exportFormat,
+    greenReport: payload.cover_template === 'green-report',
+    level1Started: false,
     feasibility: readFeasibilityExportContext(payload),
   };
   writeExportLog(context, 'export.docx.build.started', {
@@ -2343,7 +2478,13 @@ async function buildDocxResult(payload, options = {}) {
   const sectionChildren = [...children];
   const pageNumberEnabled = isPageNumberEnabled(pageSetup);
   const pageNumberStart = Math.max(1, Math.floor(Number(pageSetup ? pageSetup.page_number_start : 1) || 1));
-  const headers = buildWordHeaders(pageSetup);
+  const headers = buildWordHeaders(
+    pageSetup,
+    context.greenReport ? buildGreenReportPageBackgroundParagraph(pageSetup) : null,
+  );
+  if (headers?.default && firstPageDifferent) {
+    headers.first = headers.default;
+  }
   const footers = buildWordFooters(pageSetup);
 
   const numbering = createNumberingConfig(context);
@@ -2387,7 +2528,7 @@ async function buildDocxResult(payload, options = {}) {
     image_failure_count: Math.max(0, context.imageCount - context.imageSuccessCount),
     buffer_bytes: buffer.length,
   });
-  return { buffer, warnings: context.warnings, stats };
+  return { buffer, warnings: context.warnings, stats, imageCount: context.imageCount || 0, imageSuccessCount: context.imageSuccessCount || 0, imageFailureCount: Math.max(0, (context.imageCount || 0) - (context.imageSuccessCount || 0)) };
 }
 
 async function buildDocxBuffer(payload, options = {}) {
@@ -2396,6 +2537,71 @@ async function buildDocxBuffer(payload, options = {}) {
 }
 
 function createExportService({ configStore, openXmlHelperService, aiService, app: appRef } = {}) {
+  /** 绿色报告 PDF 导出：在转 PDF 前合并封面与签章页。 */
+  async function mergeGreenReportCoverForPdf({
+    payload,
+    bodyDocPath,
+    outputPath,
+    warnings,
+    onProgress,
+    progressContext,
+    developerLogger,
+    progress = 65,
+    message = '正在合并封面。',
+  }) {
+    const coverFields = payload.cover_fields || {};
+    const shouldMerge = payload.cover_template === 'green-report'
+      && payload.skip_cover_frontmatter !== true
+      && openXmlHelperService
+      && appRef
+      && (coverFields.clientUnit || coverFields.reportCode || coverFields.compileUnit || coverFields.compileDate);
+
+    if (!shouldMerge) {
+      if (path.resolve(bodyDocPath) !== path.resolve(outputPath)) {
+        await fs.promises.copyFile(bodyDocPath, outputPath);
+      }
+      return false;
+    }
+
+    reportProgress({ ...progressContext, warnings }, progress, message);
+    const coverTitle = coverFields.reportTitle || payload.report_type_name || '绿色报告';
+    const coverFieldsMap = {
+      '委托单位': coverFields.clientUnit || '',
+      '报告编号': coverFields.reportCode || '',
+      '编制单位': coverFields.compileUnit || '',
+      '编制日期': coverFields.compileDate || '',
+      '公示网址': resolveConfiguredPublicityPlatformsText(payload),
+      reportTitle: coverTitle,
+    };
+    let frontMatter = null;
+    try {
+      frontMatter = aiService
+        ? await generateFrontMatterByAi(aiService, payload)
+        : buildGreenReportFrontMatter(payload);
+    } catch (err) {
+      compactLogError('[export] AI 生成前置页失败，回退默认', err);
+      frontMatter = buildGreenReportFrontMatter(payload);
+    }
+    await openXmlHelperService.runJob({
+      action: 'merge-documents',
+      request: {
+        coverTemplate: getGreenReportCoverTemplatePath(appRef),
+        signingPageTemplate: getSigningPageTemplatePath(appRef),
+        tableBorderColor: resolveMergeTableBorderColor(payload.export_format),
+        tableHeaderBg: resolveMergeTableHeaderBg(payload.export_format),
+        coverFields: coverFieldsMap,
+        bodyDoc: bodyDocPath,
+        output: outputPath,
+        frontMatter,
+      },
+      timeoutMs: 60000,
+    });
+    developerLogger?.write('export.pdf.cover.merged', {
+      output_file_name: path.basename(outputPath),
+    });
+    return true;
+  }
+
   return {
     async exportWord(payload = {}, onProgress) {
       const stats = countOutlineStats(Array.isArray(payload.outline) ? payload.outline : []);
@@ -2452,6 +2658,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
         // 绿色报告封面合并：把封面 docx 的正封面插到正文开头、尾封面插到末尾，并回显封面字段
         const coverFields = payload.cover_fields || {};
         const shouldMergeCover = payload.cover_template === 'green-report'
+          && payload.skip_cover_frontmatter !== true
           && openXmlHelperService
           && appRef
           && (coverFields.clientUnit || coverFields.reportCode || coverFields.compileUnit || coverFields.compileDate);
@@ -2471,6 +2678,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
               '报告编号': coverFields.reportCode || '',
               '编制单位': coverFields.compileUnit || '',
               '编制日期': coverFields.compileDate || '',
+              '公示网址': resolveConfiguredPublicityPlatformsText(payload),
               reportTitle: coverTitle,
             };
             let frontMatter = null;
@@ -2497,9 +2705,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
               timeoutMs: 60000,
             });
             try { fs.unlinkSync(tempBodyPath); } catch {}
-            const message = buildResult.warnings.length
-              ? `Word 已导出（含封面），但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`
-              : 'Word 已导出（含封面），请打开文档核对图片、表格和版式。';
+            const message = buildExportResultMessage('Word 已导出（含封面）', buildResult);
             reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 100, message, { phase: 'success' });
             developerLogger.write('export.word.completed', {
               output_file_name: path.basename(result.filePath),
@@ -2520,9 +2726,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
 
         reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 96, '正在写入 Word 文件。');
         fs.writeFileSync(result.filePath, buildResult.buffer);
-        const message = buildResult.warnings.length
-          ? `Word 已导出，但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`
-          : 'Word 已导出，请打开文档核对图片、表格和版式。';
+        const message = buildExportResultMessage('Word 已导出', buildResult);
         reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 100, message, { phase: 'success' });
         developerLogger.write('export.word.completed', {
           output_file_name: path.basename(result.filePath),
@@ -2596,10 +2800,30 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
       try {
         const buildResult = await buildDocxResult(payload, { onProgress, warnings: progressContext.warnings, developerLogger });
         reportProgress(progressContext, 55, '正在写入 Word 中间文件。');
+        const tempBodyPath = path.join(tmpDir, `green-report-body-${Date.now()}.docx`);
+        await fs.promises.writeFile(tempBodyPath, buildResult.buffer);
         tempDocxPath = path.join(tmpDir, `green-report-${Date.now()}.docx`);
-        await fs.promises.writeFile(tempDocxPath, buildResult.buffer);
+        try {
+          await mergeGreenReportCoverForPdf({
+            payload,
+            bodyDocPath: tempBodyPath,
+            outputPath: tempDocxPath,
+            warnings: buildResult.warnings,
+            onProgress,
+            progressContext,
+            developerLogger,
+            progress: 65,
+            message: '正在合并封面。',
+          });
+        } catch (mergeError) {
+          developerLogger.write('export.pdf.cover.merge.failed', {
+            error: compactLogError(mergeError),
+          });
+          buildResult.warnings.push('封面合并失败，已导出无封面版本');
+          await fs.promises.copyFile(tempBodyPath, tempDocxPath);
+        }
 
-        reportProgress(progressContext, 65, '正在通过 LibreOffice 转换为 PDF。');
+        reportProgress(progressContext, 75, '正在通过 LibreOffice 转换为 PDF。');
         developerLogger.write('export.pdf.convert.started', {
           libre_office: soffice,
           temp_docx: path.basename(tempDocxPath),
@@ -2614,9 +2838,7 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
         reportProgress(progressContext, 90, '正在保存 PDF 文件。');
         await fs.promises.copyFile(tempPdfPath, result.filePath);
 
-        const message = buildResult.warnings.length
-          ? `PDF 已导出，但有 ${buildResult.warnings.length} 处图片未能插入，请打开文档核对。`
-          : 'PDF 已导出，请打开文档核对图片、表格和版式。';
+        const message = buildExportResultMessage('PDF 已导出', buildResult);
         reportProgress({ onProgress, warnings: buildResult.warnings, stats: buildResult.stats }, 100, message, { phase: 'success' });
         developerLogger.write('export.pdf.completed', {
           output_file_name: path.basename(result.filePath),
@@ -2742,6 +2964,35 @@ function resolveMergeTableHeaderBg(exportFormat) {
   return /^[0-9A-Fa-f]{6}$/.test(v) ? v.toUpperCase() : '';
 }
 
+/** 封面“公示网址”只使用用户配置的平台；未配置时返回空，保留模板默认内容。 */
+function resolveConfiguredPublicityPlatformsText(payload) {
+  const platforms = Array.isArray(payload?.publicity_platforms) ? payload.publicity_platforms : [];
+  return platforms
+    .map((item) => {
+      const name = String(item?.name || '').trim();
+      const url = String(item?.url || '').trim();
+      if (!name && !url) return '';
+      return url ? `${name}（${url}）` : name;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function resolvePublicityPlatformsText(payload) {
+  const platforms = Array.isArray(payload?.publicity_platforms) ? payload.publicity_platforms : [];
+  const normalized = platforms
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      const name = String(item?.name || '').trim();
+      const url = String(item?.url || '').trim();
+      if (!name && !url) return '';
+      return url ? `${name}（${url}）` : name;
+    })
+    .filter(Boolean);
+  if (normalized.length) return normalized.join('\n');
+  return '蔚碳环保官网（www.weitanhuanbao.com）\n绿色低碳投标网（www.tanshuangbiao.com）\n招标与采购网（www.gc-zb.com）\n采购招标网（www.chinabidding.cc）';
+}
+
 /**
  * 兜底版前置页数据（不调用 AI，用于 AI 失败或未注入时）。
  */
@@ -2775,7 +3026,7 @@ function buildGreenReportFrontMatter(payload) {
         { label: '报告编号', value: reportCode },
         { label: '编制日期', value: compileDate },
         { label: '编制单位', value: compileUnit },
-        { label: '公示平台', value: '蔚碳环保官网（www.weitanhuanbao.com）\n绿色低碳投标网（www.tanshuangbiao.com）\n招标与采购网（www.gc-zb.com）\n采购招标网（www.chinabidding.cc）' },
+        { label: '公示平台', value: resolvePublicityPlatformsText(payload) },
       ],
     },
     toc: { title: '目录', entries: addTocNumbering(flatTitles) },
@@ -2876,7 +3127,7 @@ async function generateFrontMatterByAi(aiService, payload) {
       { label: '报告编号', value: reportCode },
       { label: '编制日期', value: compileDate },
       { label: '编制单位', value: compileUnit },
-      { label: '公示平台', value: '蔚碳环保官网（www.weitanhuanbao.com）\n绿色低碳投标网（www.tanshuangbiao.com）\n招标与采购网（www.gc-zb.com）\n采购招标网（www.chinabidding.cc）' },
+      { label: '公示平台', value: resolvePublicityPlatformsText(payload) },
     ],
   };
 

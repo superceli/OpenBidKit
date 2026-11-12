@@ -234,12 +234,12 @@ const defaultExportFormat = {
   },
   table: {
     border_width: 1,
-    border_color: '#dcdff6',
+    border_color: '#000000',
     cell_padding_pt: 6,
     full_width: true,
-    header_row: { font: '黑体', size: '小四', alignment: '居中对齐', text_color: '#243048', background_color: '#eef5ff' },
-    first_column: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '#ffffff' },
-    body_cell: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '#ffffff' },
+    header_row: { font: '黑体', size: '小四', alignment: '居中对齐', text_color: '#243048', background_color: '' },
+    first_column: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '' },
+    body_cell: { font: '宋体', size: '小四', alignment: '左对齐', text_color: '#243048', background_color: '' },
   },
   image: {
     max_width_percent: 90,

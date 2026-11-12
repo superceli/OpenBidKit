@@ -1,4 +1,5 @@
 import type { ChangeEvent } from 'react';
+import { AppSwitch } from '../../../shared/ui';
 import type { ExportTemplateRecord } from '../../../shared/types/exportFormat';
 import type { GreenDocumentStyle, GreenReportState } from '../types';
 import { GREEN_DOCUMENT_STYLE_LABELS } from '../types';
@@ -9,11 +10,13 @@ interface ReportConfigPageProps {
   draftDocumentStyle: GreenDocumentStyle;
   draftTargetWords: number;
   draftTemplateId: string | null;
+  skipCoverFrontMatter: boolean;
   templates: ExportTemplateRecord[];
   onDraftPageCountChange: (value: number) => void;
   onDraftDocumentStyleChange: (value: GreenDocumentStyle) => void;
   onDraftTargetWordsChange: (value: number) => void;
   onDraftTemplateIdChange: (value: string | null) => void;
+  onSkipCoverFrontMatterChange: (value: boolean) => void;
   onSave: () => void;
 }
 
@@ -31,11 +34,13 @@ function ReportConfigPage({
   draftDocumentStyle,
   draftTargetWords,
   draftTemplateId,
+  skipCoverFrontMatter,
   templates,
   onDraftPageCountChange,
   onDraftDocumentStyleChange,
   onDraftTargetWordsChange,
   onDraftTemplateIdChange,
+  onSkipCoverFrontMatterChange,
   onSave,
 }: ReportConfigPageProps) {
   const handlePageCountChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -113,6 +118,17 @@ function ReportConfigPage({
               </select>
               <span className="green-report-field-hint">
                 选择导出 Word 时使用的版式模板；可在「报告模板」页面新建和管理模板
+              </span>
+            </div>
+
+            <div className="green-report-field">
+              <span className="green-report-field-label">仅导出正文</span>
+              <div className="green-report-switch-row">
+                <AppSwitch checked={skipCoverFrontMatter} onCheckedChange={onSkipCoverFrontMatterChange} />
+                <span>不导出封面、扉页、目录、签章页和尾页</span>
+              </div>
+              <span className="green-report-field-hint">
+                开启后 Word/PDF 从“前言”开始导出；关闭则保留完整封面与前置页
               </span>
             </div>
 

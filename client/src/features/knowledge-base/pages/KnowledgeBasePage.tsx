@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { trackPageView } from '../../../shared/analytics/analytics';
 import { AppDialog, InlineSpinner, isLibreOfficeRequiredMessage, MarkdownFullscreenViewer, MarkdownRenderer, ProgressBar, useDocumentParseNotice, useToast } from '../../../shared/ui';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseIndex, KnowledgeDocument, KnowledgeItem } from '../types';
+import FolderImagePanel from '../components/FolderImagePanel';
 
 declare global {
   interface Window {
@@ -300,6 +301,7 @@ function KnowledgeBasePage() {
   const [activeFolderId, setActiveFolderId] = useState('');
   const [listLoading, setListLoading] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'documents' | 'images'>('documents');
   const [viewer, setViewer] = useState<KnowledgeViewer | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
   const [viewerTrace, setViewerTrace] = useState<RenderDebugTrace | null>(null);
@@ -891,9 +893,11 @@ function KnowledgeBasePage() {
         </div>
         <div className="knowledge-toolbar-actions">
           <button type="button" className="secondary-action" onClick={() => setShowCreateFolder((value) => !value)} disabled={listLoading}>新建文件夹</button>
-          <button type="button" className="primary-action" onClick={uploadDocuments} disabled={loading || !activeFolder}>
-            {loading ? '处理中...' : '上传文档'}
-          </button>
+          {activeTab === 'documents' && (
+            <button type="button" className="primary-action" onClick={uploadDocuments} disabled={loading || !activeFolder}>
+              {loading ? '处理中...' : '上传文档'}
+            </button>
+          )}
         </div>
       </section>
 
@@ -923,6 +927,16 @@ function KnowledgeBasePage() {
             取消
           </button>
         </form>
+      )}
+
+      {activeFolder ? (
+        <p className="knowledge-page-tip">
+          当前文件夹“{activeFolder.name}”中的文档与图片都归属该文件夹。文件夹名称建议与委托单位一致；生成绿色报告正文时会按委托单位匹配该文件夹，并自动引用图库中的图片。
+        </p>
+      ) : (
+        <p className="knowledge-page-tip">
+          文档与图片按左侧文件夹归属。文件夹名称建议与委托单位一致；生成绿色报告正文时会按委托单位匹配对应文件夹，并自动引用图库中的图片。
+        </p>
       )}
 
       <section className="knowledge-layout">
@@ -984,10 +998,36 @@ function KnowledgeBasePage() {
         <main className="knowledge-document-panel">
           <div className="knowledge-panel-head">
             <strong>{activeFolder?.name || '未选择文件夹'}</strong>
-            <span>{documents.length} 个文档</span>
+            <span>{activeTab === 'documents' ? `${documents.length} 个文档` : '图片素材'}</span>
           </div>
 
-          {listLoading ? (
+          <div className="knowledge-view-tabs">
+            <button
+              type="button"
+              className={activeTab === 'documents' ? 'is-active' : ''}
+              onClick={() => setActiveTab('documents')}
+            >
+              文档
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'images' ? 'is-active' : ''}
+              onClick={() => setActiveTab('images')}
+            >
+              图片
+            </button>
+          </div>
+
+          {activeTab === 'images' ? (
+            activeFolder ? (
+              <FolderImagePanel folderId={activeFolder.id} />
+            ) : (
+              <div className="knowledge-empty-box large">
+                <strong>请先选择文件夹</strong>
+                <p>图片会归属到左侧选中的企业/资料文件夹。</p>
+              </div>
+            )
+          ) : listLoading ? (
             <div className="knowledge-empty-box large">
               <strong>正在读取知识库...</strong>
               <p>文档列表加载完成后会自动显示。</p>

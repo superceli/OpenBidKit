@@ -2,6 +2,7 @@ import type { AiHttpErrorPayload, ChatCompletionRequest, JsonCompletionRequest }
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelInfoResult, ModelListResult, UpdateChannel } from './config';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
 import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
+import type { ImageLibraryItem, ImageLibraryMutationResult } from './imageLibrary';
 import type { ExportFormatConfig, ExportTemplateRecord } from './exportFormat';
 
 export interface TaskEventTask {
@@ -607,6 +608,12 @@ export interface LvcertBridge {
     saveChapterContent: (payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;
     clear: () => Promise<{ success: boolean; message?: string }>;
     generateReportCode: () => Promise<string>;
+  };
+  imageLibrary: {
+    list: (folderId?: string) => Promise<ImageLibraryItem[]>;
+    addImages: (folderId: string) => Promise<ImageLibraryMutationResult>;
+    updateImage: (payload: { id: string; description: string }) => Promise<ImageLibraryItem>;
+    deleteImage: (imageId: string) => Promise<{ success: boolean; images: ImageLibraryItem[] }>;
   };
   templates: {
     list: () => Promise<ExportTemplateRecord[]>;

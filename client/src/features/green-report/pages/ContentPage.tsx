@@ -16,7 +16,15 @@ interface ContentPageProps {
     error: string;
     filePath: string;
   };
+  pdfExportProgress: {
+    running: boolean;
+    progress: number;
+    message: string;
+    error: string;
+    filePath: string;
+  };
   onExportWord: () => Promise<void>;
+  onExportPdf: () => Promise<void>;
 }
 
 function ContentPage({
@@ -25,7 +33,9 @@ function ContentPage({
   onSaveChapter,
   onContentRequirementsChange,
   wordExportProgress,
+  pdfExportProgress,
   onExportWord,
+  onExportPdf,
 }: ContentPageProps) {
   const { showToast } = useToast();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -88,6 +98,15 @@ function ContentPage({
         </div>
       )}
 
+      {pdfExportProgress.running && (
+        <div className="green-report-progress-stack">
+          <ProgressBar
+            value={pdfExportProgress.progress}
+            label={`PDF: ${pdfExportProgress.message}`}
+          />
+        </div>
+      )}
+
       <div className="green-report-content-split">
         <div className="green-report-chapter-panel">
           <div className="green-report-chapter-head">
@@ -140,6 +159,9 @@ function ContentPage({
               rows={2}
               style={{ marginBottom: 0 }}
             />
+            <div className="green-report-field-hint" style={{ marginTop: 4 }}>
+              配图素材请在「知识库 → 图片」维护并填写描述；生成正文时会按描述匹配章节，未被 AI 引用的图片也会自动补充插入。
+            </div>
           </div>
           <div className="green-report-chapter-list">
             {leaves.length === 0 ? (
@@ -207,9 +229,16 @@ function ContentPage({
                   <button
                     className="green-report-btn green-report-btn-primary"
                     onClick={onExportWord}
-                    disabled={wordExportProgress.running}
+                    disabled={wordExportProgress.running || pdfExportProgress.running}
                   >
                     {wordExportProgress.running ? 'Word 导出中...' : '导出 Word'}
+                  </button>
+                  <button
+                    className="green-report-btn-secondary"
+                    onClick={onExportPdf}
+                    disabled={wordExportProgress.running || pdfExportProgress.running}
+                  >
+                    {pdfExportProgress.running ? 'PDF 导出中...' : '导出 PDF'}
                   </button>
                 </div>
               )}
@@ -217,6 +246,7 @@ function ContentPage({
           )}
         </div>
       </div>
+
     </div>
   );
 }

@@ -46,7 +46,7 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <GreenReportHome registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
     case 'green-news':
       return <GreenNewsPage />;
-    case 'document-knowledge-base':
+    case 'knowledge-base':
       return <KnowledgeBasePage />;
     case 'resources':
       return <ResourcesPage />;

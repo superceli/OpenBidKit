@@ -4,7 +4,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { registerIpcHandlers } = require('./ipc/index.cjs');
 const { setupAutoUpdate, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall, getLatestVersion, getUpdateDownloadUrl } = require('./services/updateService.cjs');
-const { getConfigFilePath, getGeneratedImagesDir, getGpuStartupProbePath, getImportedImagesDir } = require('./utils/paths.cjs');
+const { getConfigFilePath, getGeneratedImagesDir, getGreenReportImagesDir, getGpuStartupProbePath, getImportedImagesDir } = require('./utils/paths.cjs');
 
 // 支持通过环境变量覆盖 userData 路径（用于测试/沙箱环境）
 if (process.env.LVCERT_USER_DATA_DIR) {
@@ -272,6 +272,7 @@ function registerAssetProtocol() {
       const assetRoots = {
         'generated-images': getGeneratedImagesDir(app),
         'imported-images': getImportedImagesDir(app),
+        'green-report-images': getGreenReportImagesDir(app),
       };
       const rootDir = assetRoots[url.hostname];
       if (!rootDir) {

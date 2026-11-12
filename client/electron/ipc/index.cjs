@@ -34,6 +34,7 @@ const { clearOrphanedGeneratedImages, clearStalePiTaskArchives, runHistoricalSto
 const { createTaskService } = require('../services/taskService.cjs');
 const { createTaskLogStore } = require('../services/taskLogStore.cjs');
 const { createGreenReportStore } = require('../services/greenReportStore.cjs');
+const { createGreenReportImageService } = require('../services/greenReportImageService.cjs');
 const { createTemplateStore } = require('../services/templateStore.cjs');
 const { checkRequiredOnlineServices, getRequiredOnlineServiceStatus } = require('../services/requiredOnlineServices.cjs');
 const { initLocalImageRenderService } = require('../services/localImageRenderService.cjs');
@@ -112,6 +113,10 @@ const workspaceDatabaseChannels = [
   'green-report:save-chapter-content',
   'green-report:clear',
   'green-report:generate-report-code',
+  'green-report:list-images',
+  'green-report:add-images',
+  'green-report:update-image',
+  'green-report:delete-image',
   'knowledge-base:list',
   'knowledge-base:create-folder',
   'knowledge-base:rename-folder',
@@ -207,14 +212,15 @@ function registerWorkspaceDatabaseServices({ app, configStore, aiService, agentS
   const knowledgeBaseStore = createKnowledgeBaseStore({ app, db: sqliteDatabase.db });
   const knowledgeBaseService = createKnowledgeBaseService({ app, aiService, configStore, knowledgeBaseStore });
   const greenReportStore = createGreenReportStore({ app, db: sqliteDatabase.db, taskLogStore });
+  const greenReportImageService = createGreenReportImageService({ app, db: sqliteDatabase.db });
   const templateStore = createTemplateStore({ db: sqliteDatabase.db });
   const greenNewsStore = createGreenNewsStore({ db: sqliteDatabase.db });
   const greenNewsSpiderService = createGreenNewsSpiderService({ app, store: greenNewsStore });
   const taskService = createTaskService({ aiService, agentService, autoConfirmationService, knowledgeBaseService, openXmlHelperService, greenReportStore });
 
   clearWorkspaceDatabaseIpc();
-  registerKnowledgeBaseIpc({ knowledgeBaseService });
-  registerGreenReportIpc({ greenReportStore, taskService });
+  registerKnowledgeBaseIpc({ knowledgeBaseService, greenReportImageService });
+  registerGreenReportIpc({ greenReportStore, greenReportImageService, taskService });
   registerTemplateIpc({ templateStore });
   registerGreenNewsIpc({ greenNewsStore, greenNewsSpiderService });
   registerTaskIpc({ taskService });

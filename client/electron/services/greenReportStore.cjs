@@ -23,12 +23,17 @@ function createGreenReportStore({ app, db, taskLogStore }) {
       step: row.step || 'company-info',
       reportType: row.report_type || 'esg',
       projectInfo: (() => {
-        if (!row.project_info_json) return { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileUnit: '', compileDate: '', reportCode: '' };
+        if (!row.project_info_json) return { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileStaffText: '', keyIndicatorsText: '', publicityPlatformsText: '', compileUnit: '', compileDate: '', reportCode: '' };
         const parsed = JSON.parse(row.project_info_json);
         // 兼容老数据：剥离已废弃的 clientUnit 字段（UI 已合并到 companyName）
         // 下次 saveMeta 时该字段不会再次写入数据库
         if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'clientUnit')) {
           delete parsed.clientUnit;
+        }
+        // 兼容老数据：旧版报告编号（WTHB-开头）升级为新版 ZHYX 格式
+        if (parsed && /^WTHB-/.test(String(parsed.reportCode || ''))) {
+          parsed.reportCode = generateReportCode();
+          saveMeta({ project_info_json: JSON.stringify(parsed) });
         }
         return parsed;
       })(),
@@ -142,7 +147,7 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return {
       step: meta?.step || 'company-info',
       reportType: meta?.reportType || 'esg',
-      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileUnit: '', compileDate: '', reportCode: '' },
+      projectInfo: meta?.projectInfo || { companyName: '', industry: '', reportingPeriod: '', reportScope: '', keyTopics: '', compileStaffText: '', keyIndicatorsText: '', publicityPlatformsText: '', compileUnit: '', compileDate: '', reportCode: '' },
       targetWords: meta?.targetWords || 20000,
       pageCount: meta?.pageCount || 30,
       documentStyle: meta?.documentStyle || 'standard',
@@ -306,20 +311,17 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return { success: true };
   }
 
-  // 生成唯一报告编号 WTHB-YYYYMMDD-XXXXXX，日期+6位随机编号防碰撞。
-  // 格式参考市面上绿色报告通用编号：WTHB-20260908-A7F3K9
+  // 生成唯一报告编号 ZHYX+年月日+BID+6位数字，例如 ZHYX20261109BID481286。
   function generateReportCode() {
     const nowDate = new Date();
     const yyyy = nowDate.getFullYear();
     const mm = String(nowDate.getMonth() + 1).padStart(2, '0');
     const dd = String(nowDate.getDate()).padStart(2, '0');
-    // 随机6位后缀（大写字母+数字），防碰撞
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let suffix = '';
     for (let i = 0; i < 6; i++) {
-      suffix += chars[Math.floor(Math.random() * chars.length)];
+      suffix += String(Math.floor(Math.random() * 10));
     }
-    return `WTHB-${yyyy}${mm}${dd}-${suffix}`;
+    return `ZHYX${yyyy}${mm}${dd}BID${suffix}`;
   }
 
   return {

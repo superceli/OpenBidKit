@@ -259,6 +259,8 @@ static class MergeDocumentsAction
 
             // 字段回显
             ApplyCoverFields(destBody, request.CoverFields ?? new());
+            // 公示网址平台列表按用户配置替换
+            ReplaceCoverWebsitePlatforms(destBody, request.CoverFields ?? new());
             // 修正"招标与采购网/采购招标网"等行用前导空格做缩进导致的字间距过大问题
             NormalizeWebsiteLineIndent(destBody);
             // 替换封面大标题"能源评价报告"为用户勾选的报告类型名称
@@ -562,6 +564,96 @@ static class MergeDocumentsAction
         else
         {
             paragraph.AppendChild(newRun);
+        }
+    }
+
+    /// <summary>
+    /// 把封面“公示网址”下的平台列表替换为用户配置的平台。
+    /// 模板结构：标签段落内包含第一个平台 run，后续 3 个平台各占一个段落。
+    /// </summary>
+    static void ReplaceCoverWebsitePlatforms(Wp.Body body, Dictionary<string, string> fields)
+    {
+        if (!fields.TryGetValue("公示网址", out var value) || string.IsNullOrWhiteSpace(value)) return;
+        var platforms = value.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .Where(item => item.Length > 0)
+            .ToList();
+        if (platforms.Count == 0) return;
+
+        var labelParagraphs = body.Descendants<Wp.Paragraph>()
+            .Where(paragraph => ReadDirectRunText(paragraph).StartsWith("公示网址", StringComparison.Ordinal))
+            .ToList();
+        foreach (var labelParagraph in labelParagraphs)
+        {
+            ReplaceCoverWebsiteParagraph(labelParagraph, platforms);
+        }
+    }
+
+    static void ReplaceCoverWebsiteParagraph(Wp.Paragraph labelParagraph, List<string> platforms)
+    {
+        var runs = labelParagraph.Elements<Wp.Run>().ToList();
+        if (runs.Count == 0) return;
+        var labelRun = runs.FirstOrDefault(run => run.Descendants<Wp.Text>().Any(text => (text.Text ?? "").Contains("公示网址"))) ?? runs[0];
+        var styleRun = runs.LastOrDefault(run => run != labelRun) ?? labelRun;
+
+        static Wp.Run CreatePlatformRun(Wp.Run template, string text)
+        {
+            var run = (Wp.Run)template.CloneNode(true);
+            foreach (var child in run.ChildElements.ToList())
+            {
+                if (child is Wp.Text || child is Wp.Break) child.Remove();
+            }
+            run.AppendChild(new Wp.Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            return run;
+        }
+
+        // 标签段落只保留标签 run，再追加第一个平台
+        foreach (var run in runs)
+        {
+            if (run != labelRun) run.Remove();
+        }
+        labelParagraph.AppendChild(CreatePlatformRun(styleRun, platforms[0]));
+
+        // 收集标签段落后的平台段落（模板通常为 3 个）
+        var platformParagraphs = new List<Wp.Paragraph>();
+        var next = labelParagraph.NextSibling<Wp.Paragraph>();
+        while (next is not null)
+        {
+            var text = ReadDirectRunText(next).Trim();
+            if (text.Length == 0) break;
+            if (!text.Contains("www.") && !text.Contains("http", StringComparison.OrdinalIgnoreCase)) break;
+            platformParagraphs.Add(next);
+            next = next.NextSibling<Wp.Paragraph>();
+        }
+
+        var templateParagraph = platformParagraphs.FirstOrDefault();
+        for (var i = 1; i < platforms.Count; i++)
+        {
+            Wp.Paragraph target;
+            if (i - 1 < platformParagraphs.Count)
+            {
+                target = platformParagraphs[i - 1];
+            }
+            else
+            {
+                target = templateParagraph is not null
+                    ? (Wp.Paragraph)templateParagraph.CloneNode(true)
+                    : new Wp.Paragraph(new Wp.ParagraphProperties());
+                var anchor = platformParagraphs.Count > 0 ? platformParagraphs[platformParagraphs.Count - 1] : labelParagraph;
+                anchor.InsertAfterSelf(target);
+                platformParagraphs.Add(target);
+            }
+
+            var targetRuns = target.Elements<Wp.Run>().ToList();
+            var templateRun = targetRuns.FirstOrDefault() ?? styleRun;
+            foreach (var run in targetRuns) run.Remove();
+            target.AppendChild(CreatePlatformRun(templateRun, platforms[i]));
+        }
+
+        // 删除多余的旧平台段落
+        for (var i = platforms.Count - 1; i < platformParagraphs.Count; i++)
+        {
+            platformParagraphs[i].Remove();
         }
     }
 

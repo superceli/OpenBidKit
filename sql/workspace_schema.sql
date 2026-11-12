@@ -9,6 +9,8 @@
 --    v26 绿色报告新增导出模板 ID 字段 template_id，关联 export_templates.template_id。
 --    v27 绿色报告新增报告编号自增顺序号 report_seq。
 --    v28 新增 green_news 绿色新闻表，用于存储行业新闻爬取结果。
+--    v29 新增 green_report_images 绿色报告图片素材表，用于正文按描述自动配图。
+--    v30 图片素材新增 folder_id，归属知识库文件夹（企业/资料文件夹）。
 -- 5. 每次表结构调整后，需要同步更新本文件和 runtime migration 版本。
 -- 6. 本文件不保存历史版本，每次更新都写入最新目标完整结构。
 
@@ -18,7 +20,7 @@ PRAGMA busy_timeout = 5000;
 
 -- 目标完整结构版本。
 -- 运行时代码应通过 PRAGMA user_version 判断是否需要自动升级。
-PRAGMA user_version = 28;
+PRAGMA user_version = 30;
 
 -- ============================================================================
 -- 任务日志 task_logs（v20 目标设计）
@@ -310,6 +312,25 @@ ON green_report_outline_nodes(parent_node_id, sort_order);
 
 CREATE INDEX IF NOT EXISTS idx_green_report_outline_level
 ON green_report_outline_nodes(level);
+
+-- 绿色报告图片素材。description 由用户填写，正文生成时作为配图选择依据。
+CREATE TABLE IF NOT EXISTS green_report_images (
+  id TEXT PRIMARY KEY,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  mime_type TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
+  folder_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_green_report_images_created
+ON green_report_images(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_green_report_images_folder
+ON green_report_images(folder_id, created_at);
 
 -- ============================================================================
 -- 绿色新闻 green_news（v28 目标设计）

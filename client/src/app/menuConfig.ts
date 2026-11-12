@@ -14,15 +14,7 @@ export const appMenuItems: AppMenuItem[] = [
   {
     id: 'knowledge-base',
     label: '知识库',
-    description: '企业资料、行业素材和可复用知识条目',
-    children: [
-      {
-        id: 'document-knowledge-base',
-        label: '文档知识库',
-        description: '管理企业文档、ESG数据和可复用知识条目',
-        icon: 'document',
-      },
-    ],
+    description: '按企业文件夹管理文档、图片和可复用知识条目',
   },
   {
     id: 'template-settings',

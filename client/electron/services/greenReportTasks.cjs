@@ -19,15 +19,106 @@ function collectLeaves(items = [], leaves = []) {
 }
 
 /** 把嵌套 outline 拍平成叶子骨架列表，用于构建跨章节去重上下文。 */
-function collectOutlineSkeleton(items = [], flat = []) {
+function collectOutlineSkeleton(items = [], flat = [], topTitle = '') {
   items.forEach((item) => {
+    const currentTopTitle = topTitle || item.title || '';
     if (item.children?.length) {
-      collectOutlineSkeleton(item.children, flat);
+      collectOutlineSkeleton(item.children, flat, currentTopTitle);
       return;
     }
-    flat.push({ id: item.id || '', title: item.title || '' });
+    flat.push({ id: item.id || '', title: item.title || '', topTitle: currentTopTitle });
   });
   return flat;
+}
+
+/**
+ * 把 AI 输出的 [[IMG-001]] 占位符替换为真实图片 Markdown。
+ * 只允许使用素材清单内的图片，同一图片全篇只保留第一次使用。
+ */
+function replaceImagePlaceholders(content, imageAssets, usedImageIds) {
+  if (!content || !Array.isArray(imageAssets) || !imageAssets.length) return content;
+  const byKey = new Map(imageAssets.map((item) => [item.key, item]));
+  return content.replace(/\[\[\s*IMG-(\d+)\s*\]\]/gi, (_match, num) => {
+    const key = `IMG-${String(Number(num)).padStart(3, '0')}`;
+    const asset = byKey.get(key);
+    if (!asset || usedImageIds.has(asset.id)) return '';
+    usedImageIds.add(asset.id);
+    const alt = String(asset.description || asset.fileName || '图片').replace(/[\]\r\n]/g, ' ').trim();
+    return `![${alt}](${asset.assetUrl})`;
+  });
+}
+
+// 常见实景照片关键词与章节关键词的对应关系，用于给 AI 未引用的图片找合适章节
+const IMAGE_SCENE_HINTS = [
+  { scenes: ['门头', '前台', '办公', '公司', '厂区', '外景', '全景', '招牌'], chapters: ['企业基本信息', '关于本报告', '企业概况'] },
+  { scenes: ['生产', '车间', '施工', '设备', '工艺', '流水线', '项目现场'], chapters: ['投入', '产出', '管理'] },
+  { scenes: ['仓储', '仓库', '库房', '物流', '运输'], chapters: ['管理', '保障', '产出'] },
+  { scenes: ['员工', '团队', '培训', '人才', '会议'], chapters: ['保障', '管理'] },
+  { scenes: ['资质', '荣誉', '证书', '奖牌', '专利'], chapters: ['企业基本信息', '产出', '关于本报告'] },
+  { scenes: ['售后', '客服', '客户', '服务'], chapters: ['产出', '效益'] },
+  { scenes: ['环保', '节能', '减排', '光伏', '绿化'], chapters: ['效益', '保障', '投入'] },
+];
+
+function scoreImageForChapter(asset, leaf, topTitle) {
+  const description = String(asset?.description || '');
+  if (!description) return 0;
+  const chapterText = `${topTitle || ''} ${leaf?.title || ''}`;
+  let score = 0;
+  IMAGE_SCENE_HINTS.forEach((hint) => {
+    if (!hint.scenes.some((word) => description.includes(word))) return;
+    if (hint.chapters.some((word) => chapterText.includes(word))) score += 10;
+  });
+  String(leaf?.title || '')
+    .split(/[^\u4e00-\u9fa5A-Za-z0-9]+/)
+    .filter((token) => token.length >= 2)
+    .forEach((token) => {
+      if (description.includes(token)) score += 6;
+    });
+  return score;
+}
+
+function countChapterImages(content) {
+  return (String(content || '').match(/!\[[^\]]*\]\([^)]+\)/g) || []).length;
+}
+
+/**
+ * 强制使用全部已描述图片：把 AI 未主动引用的图片按描述与章节相关性补充到正文。
+ * 需要传入生成完成后的最新叶子节点内容，避免覆盖已生成正文。
+ */
+function insertRemainingImages({ leaves, outlineSkeleton, imageAssets, usedImageIds, workspaceStore, publish }) {
+  const remaining = imageAssets.filter((asset) => !usedImageIds.has(asset.id));
+  if (!remaining.length) return;
+
+  const topTitleById = new Map((outlineSkeleton || []).map((item) => [item.id, item.topTitle]));
+  const chapterState = leaves
+    .filter((leaf) => !/前言|附录/.test(`${topTitleById.get(leaf.id) || ''} ${leaf.title || ''}`))
+    .map((leaf) => ({ leaf, count: countChapterImages(leaf.content) }));
+  if (!chapterState.length) return;
+
+  let inserted = 0;
+  remaining.forEach((asset) => {
+    let best = null;
+    let bestScore = -1;
+    let bestCount = Infinity;
+    chapterState.forEach((item) => {
+      // 每章优先不超过 2 张，已满时仍可作为兜底目标
+      const score = scoreImageForChapter(asset, item.leaf, topTitleById.get(item.leaf.id)) + (item.count < 2 ? 1 : 0);
+      if (score > bestScore || (score === bestScore && item.count < bestCount)) {
+        best = item;
+        bestScore = score;
+        bestCount = item.count;
+      }
+    });
+    if (!best) return;
+    const alt = String(asset.description || asset.fileName || '图片').replace(/[\]\r\n]/g, ' ').trim();
+    best.leaf.content = `${String(best.leaf.content || '').trim()}\n\n![${alt}](${asset.assetUrl})`;
+    best.count += 1;
+    usedImageIds.add(asset.id);
+    workspaceStore.saveChapterContent({ nodeId: best.leaf.id, content: best.leaf.content });
+    inserted += 1;
+  });
+
+  if (inserted) publish(`已补充 ${inserted} 张未被引用的图片素材`, 99);
 }
 
 /**
@@ -52,23 +143,42 @@ async function parallelLimit(items, limit, mapper) {
 }
 
 /**
- * 获取知识库上下文：优先使用 payload 中已有的，否则根据企业名称和行业自动检索。
+ * 获取知识库上下文：优先按委托单位匹配知识库文件夹取资料，匹配不到再按企业名称和行业关键词检索。
  */
 async function resolveKnowledgeContext({ payload, knowledgeBaseService, publish }) {
   if (payload.knowledgeContext?.items?.length) {
     return payload.knowledgeContext;
   }
-  if (!knowledgeBaseService?.searchItems) return null;
+  if (!knowledgeBaseService) return null;
 
-  const companyName = payload.projectInfo?.companyName || '';
-  const industry = payload.projectInfo?.industry || '';
+  const companyName = String(payload.projectInfo?.companyName || '').trim();
+  const industry = String(payload.projectInfo?.industry || '').trim();
+
+  // 优先按委托单位名称精确匹配知识库文件夹，取该企业文件夹下的全部资料
+  if (companyName && typeof knowledgeBaseService.readItemsByFolderName === 'function') {
+    publish?.(`正在读取知识库文件夹：${companyName}`, 12);
+    try {
+      const folderResult = await knowledgeBaseService.readItemsByFolderName(companyName, { limit: 15, contentExcerptChars: 1200 });
+      if (folderResult?.items?.length) {
+        return {
+          keyword: companyName,
+          source: 'folder',
+          items: folderResult.items,
+          searchedAt: new Date().toISOString(),
+        };
+      }
+    } catch (error) {
+      // 文件夹匹配失败不阻塞生成流程，继续走关键词检索
+    }
+  }
+
   const keywords = [companyName, industry].filter(Boolean);
   if (!keywords.length) return null;
 
   const searchKeyword = keywords.join(' ');
   try {
     publish?.(`正在检索知识库：${searchKeyword}`, 12);
-    const result = await knowledgeBaseService.searchItems(searchKeyword, { limit: 15, contentExcerptChars: 1200 });
+    const result = await knowledgeBaseService.searchItems?.(searchKeyword, { limit: 15, contentExcerptChars: 1200 });
     if (result?.items?.length) {
       return {
         keyword: searchKeyword,
@@ -229,6 +339,22 @@ async function runGreenReportContentTask({
     }
   }
 
+  // 图片素材：只使用用户已填写描述的图片，按清单顺序生成 IMG-001 形式的引用编号
+  const imageAssets = (Array.isArray(payload.imageAssets) ? payload.imageAssets : [])
+    .filter((item) => String(item?.description || '').trim())
+    .map((item, index) => ({
+      key: `IMG-${String(index + 1).padStart(3, '0')}`,
+      id: item.id,
+      fileName: item.fileName || '',
+      description: String(item.description).trim(),
+      assetUrl: item.assetUrl || '',
+    }))
+    .filter((item) => item.id && item.assetUrl);
+  const usedImageIds = new Set();
+  if (imageAssets.length) {
+    publish(`已加载 ${imageAssets.length} 张图片素材，将按描述自动配图`, 7);
+  }
+
   // 按全篇目标字数 / 叶子节点数 摊分每章目标字数，同时计算上下限
   // 上限 = 摊分 * 1.1（允许小幅浮动），下限 = max(300, 摊分 * 0.7)（给低篇幅章节留空间）
   const numericTargetWords = Number(targetWords);
@@ -306,6 +432,7 @@ async function runGreenReportContentTask({
       chapterMaxWords: perChapterMax,
       userRequirements,
       outlineSkeleton, // 跨章节去重上下文
+      imageAssets: imageAssets.map((item) => ({ key: item.key, description: item.description })),
     }, reportTypeName);
     const result = await aiService.chat({
       messages: [
@@ -344,6 +471,8 @@ async function runGreenReportContentTask({
       }
     }
 
+    content = replaceImagePlaceholders(content, imageAssets, usedImageIds);
+
     workspaceStore.saveChapterContent({ nodeId: leaf.id, content });
 
     // 原子完成计数（并发安全：JS 单线程，自增无竞争）
@@ -353,6 +482,19 @@ async function runGreenReportContentTask({
 
   // 并发调度所有章节
   await parallelLimit(leaves, CONCURRENCY, generateOneChapter);
+
+  // AI 未主动引用的图片按相关性强制补入正文，确保已填写描述的图片全部使用
+  if (imageAssets.length) {
+    const generatedState = workspaceStore.loadState();
+    insertRemainingImages({
+      leaves: collectLeaves(generatedState.outlineData?.outline || []),
+      outlineSkeleton,
+      imageAssets,
+      usedImageIds,
+      workspaceStore,
+      publish,
+    });
+  }
 
   const finalState = workspaceStore.loadState();
   checkpointTask(

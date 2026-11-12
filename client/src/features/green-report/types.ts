@@ -22,6 +22,12 @@ export interface GreenProjectInfo {
   reportingPeriod: string;
   reportScope: string;
   keyTopics: string;
+  /** 编制人员，每行“姓名|职称” */
+  compileStaffText: string;
+  /** 关键指标，每行“指标类别|指标名称|现状值|目标值|单位|对应章节” */
+  keyIndicatorsText: string;
+  /** 公示平台，每行“平台名称|网址” */
+  publicityPlatformsText: string;
   /** 封面回显字段：编制单位 */
   compileUnit: string;
   /** 封面回显字段：编制日期 YYYY-MM-DD */
@@ -99,14 +105,25 @@ export const GREEN_DOCUMENT_STYLE_LABELS: Record<GreenDocumentStyle, string> = {
   academic: '学术规范型',
 };
 
+/** 按本地时区返回 YYYY-MM-DD，避免 toISOString 在早上 8 点前返回前一天。 */
+export function getLocalDateString(date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   companyName: '',
   industry: '',
   reportingPeriod: '',
   reportScope: '',
   keyTopics: '',
+  compileStaffText: '',
+  keyIndicatorsText: '',
+  publicityPlatformsText: '',
   compileUnit: '',
-  compileDate: new Date().toISOString().slice(0, 10),
+  compileDate: getLocalDateString(),
   reportCode: '',
 };
 

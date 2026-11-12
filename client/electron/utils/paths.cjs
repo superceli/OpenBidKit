@@ -45,6 +45,11 @@ function getKnowledgeBaseDir(app) {
   return path.join(getWorkspaceDir(app), 'knowledge-base');
 }
 
+/** 绿色报告图片素材目录，正文自动配图从这里读取。 */
+function getGreenReportImagesDir(app) {
+  return path.join(getWorkspaceDir(app), 'green-report-images');
+}
+
 function getAiLogsDir(app) {
   return path.join(getUserDataPath(app), 'logs', 'ai');
 }
@@ -106,6 +111,17 @@ function getSigningPageTemplatePath(app) {
   return path.join(__dirname, '..', '..', 'assets', 'signing-page-template.docx');
 }
 
+/** 绿色报告每页底纹背景图路径；打包后在 resources/assets，开发时在 client/assets。 */
+function getGreenReportPageBackgroundPath(app) {
+  if (process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND) {
+    return process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND;
+  }
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'assets', 'green-report-page-bg.png');
+  }
+  return path.join(__dirname, '..', '..', 'assets', 'green-report-page-bg.png');
+}
+
 /** 开发时编译用的助手工程路径。 */
 function getOpenXmlHelperProjectPath() {
   return path.join(__dirname, '..', '..', '..', 'openxmlhelper', 'src', 'OpenXmlHelper', 'OpenXmlHelper.csproj');
@@ -148,8 +164,10 @@ module.exports = {
   getDonationStateFilePath,
   getGpuStartupProbePath,
   getGreenReportCoverTemplatePath,
+  getGreenReportPageBackgroundPath,
   getSigningPageTemplatePath,
   getGeneratedImagesDir,
+  getGreenReportImagesDir,
   getImportedImagesDir,
   getKnowledgeBaseDir,
   getLicenseFilePath,

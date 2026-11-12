@@ -3,7 +3,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 28;
+const schemaVersion = 30;
 
 function createInitialSchema(db) {
   db.exec(`
@@ -1085,6 +1085,37 @@ function createGreenReportSchema(db) {
   `);
 }
 
+function createGreenReportImagesSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS green_report_images (
+      id TEXT PRIMARY KEY,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT '',
+      size INTEGER NOT NULL DEFAULT 0,
+      description TEXT NOT NULL DEFAULT '',
+      folder_id TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_green_report_images_created
+    ON green_report_images(created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_green_report_images_folder
+    ON green_report_images(folder_id, created_at);
+  `);
+}
+
+// 图片素材归属知识库文件夹，按企业/资料文件夹隔离。
+function addGreenReportImageFolderId(db) {
+  const columns = getExistingColumns(db, 'green_report_images');
+  if (!columns.has('folder_id')) {
+    db.exec(`ALTER TABLE green_report_images ADD COLUMN folder_id TEXT NOT NULL DEFAULT '';`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_green_report_images_folder ON green_report_images(folder_id, created_at);');
+}
+
 // 哲元绿色报告工具箱：清理所有投标相关表结构。
 function createTaskLogsSchema(db) {
   db.exec(`
@@ -1225,6 +1256,16 @@ const schemaHealthTableGroups = [
     tables: ['green_report_meta', 'green_report_tasks', 'green_report_outline_nodes'],
     repair: createGreenReportSchema,
   },
+  {
+    version: 29,
+    tables: ['green_report_images'],
+    repair: createGreenReportImagesSchema,
+  },
+  {
+    version: 30,
+    tables: ['green_report_images'],
+    repair: addGreenReportImageFolderId,
+  },
 ];
 
 function removeKnowledgeMigrationMeta(db) {
@@ -1244,6 +1285,13 @@ const schemaHealthColumnGroups = [
     table: 'green_report_meta',
     columns: {
       template_id: 'TEXT',
+    },
+  },
+  {
+    version: 30,
+    table: 'green_report_images',
+    columns: {
+      folder_id: "TEXT NOT NULL DEFAULT ''",
     },
   },
 ];
@@ -1446,6 +1494,16 @@ const migrations = [
     version: 28,
     description: '新增绿色新闻表结构 green_news',
     up: createGreenNewsSchema,
+  },
+  {
+    version: 29,
+    description: '新增绿色报告图片素材表结构 green_report_images',
+    up: createGreenReportImagesSchema,
+  },
+  {
+    version: 30,
+    description: '绿色报告图片素材归属知识库文件夹 folder_id',
+    up: addGreenReportImageFolderId,
   },
 ];
 

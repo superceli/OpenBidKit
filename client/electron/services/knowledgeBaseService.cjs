@@ -1217,7 +1217,25 @@ function createKnowledgeBaseService({ app, aiService, configStore, knowledgeBase
         candidateItems = [];
         updateDocument(documentId, { status: 'converting', progress: 15, message: '正在转换为 Markdown', error: null }, webContents);
         const result = await runDocumentStep(documentId, 'convert_markdown', async () => {
-          const parsedMarkdown = stripMarkdownFence((await parseDocumentWithConfig(app, sourcePath, config, { assetScope: `knowledge-${documentId}`, preserveImages: false })).trim());
+          const parsedMarkdown = stripMarkdownFence((await parseDocumentWithConfig(app, sourcePath, config, {
+            assetScope: `knowledge-${documentId}`,
+            preserveImages: false,
+            ocrFallback: true,
+            onOcrFallback: () => updateDocument(documentId, {
+              status: 'converting',
+              progress: 20,
+              message: '检测到扫描版 PDF，正在使用 MinerU OCR 解析',
+              error: null,
+            }, webContents),
+            onOcrProgress: ({ index, total }) => updateDocument(documentId, {
+              status: 'converting',
+              progress: 20,
+              message: total > 1
+                ? `正在使用 MinerU OCR 分段解析（第 ${index}/${total} 段）`
+                : '正在使用 MinerU OCR 解析',
+              error: null,
+            }, webContents),
+          })).trim());
           if (!parsedMarkdown) throw new Error('文档未解析出有效 Markdown 内容');
           await fsp.writeFile(markdownPath, `${parsedMarkdown}\n`, 'utf-8');
           knowledgeBaseStore.updateMarkdownMetadata(documentId, parsedMarkdown);
@@ -2300,6 +2318,10 @@ function createKnowledgeBaseService({ app, aiService, configStore, knowledgeBase
 
     searchItems(keyword, options) {
       return knowledgeBaseStore.searchItemsByKeyword(keyword, options);
+    },
+
+    readItemsByFolderName(folderName, options) {
+      return knowledgeBaseStore.readItemsByFolderName(folderName, options);
     },
   };
 }

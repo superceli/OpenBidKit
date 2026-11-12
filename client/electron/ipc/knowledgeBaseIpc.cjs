@@ -1,11 +1,14 @@
 const { ipcMain } = require('electron');
 
-function registerKnowledgeBaseIpc({ knowledgeBaseService }) {
+function registerKnowledgeBaseIpc({ knowledgeBaseService, greenReportImageService }) {
   ipcMain.handle('knowledge-base:list', () => knowledgeBaseService.list());
   ipcMain.handle('knowledge-base:create-folder', (_event, name) => knowledgeBaseService.createFolder(name));
   ipcMain.handle('knowledge-base:rename-folder', (_event, folderId, name) => knowledgeBaseService.renameFolder(folderId, name));
   ipcMain.handle('knowledge-base:reorder-folder', (_event, draggedFolderId, targetFolderId, position) => knowledgeBaseService.reorderFolder(draggedFolderId, targetFolderId, position));
-  ipcMain.handle('knowledge-base:delete-folder', (_event, folderId) => knowledgeBaseService.deleteFolder(folderId));
+  ipcMain.handle('knowledge-base:delete-folder', async (_event, folderId) => {
+    await greenReportImageService.deleteImagesByFolder(folderId);
+    return knowledgeBaseService.deleteFolder(folderId);
+  });
   ipcMain.handle('knowledge-base:delete-document', (_event, documentId) => knowledgeBaseService.deleteDocument(documentId));
   ipcMain.handle('knowledge-base:move-document', (_event, documentId, targetFolderId, targetDocumentId, position) => knowledgeBaseService.moveDocument(documentId, targetFolderId, targetDocumentId, position));
   ipcMain.handle('knowledge-base:upload-documents', (event, folderId) => knowledgeBaseService.uploadDocuments(folderId, event.sender));

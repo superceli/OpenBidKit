@@ -1,8 +1,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const crypto = require('node:crypto');
 const { dialog } = require('electron');
 const AdmZip = require('adm-zip');
+const { PDFDocument } = require('pdf-lib');
 const { formatDocumentParseError, isLibreOfficeMissingError, normalizeDocumentParseError } = require('./documentParseErrors.cjs');
 const { compactLogError, createDeveloperLogger, textMetrics } = require('../utils/developerLog.cjs');
 const { getImportedImagesDir } = require('../utils/paths.cjs');
@@ -22,6 +24,8 @@ const mineruAccurateSupportedExtensions = new Set([
 ]);
 const duplicateCheckSupportedExtensions = new Set(['.doc', '.docx', '.wps', '.pdf', '.md', '.markdown', '.xls', '.xlsx']);
 const remoteImageTimeoutMs = 10000;
+// MinerU-Agent 轻量接口限制单文件 10MB，留出余量按 9.5MB 分段
+const MINERU_AGENT_MAX_FILE_BYTES = Math.floor(9.5 * 1024 * 1024);
 const markdownImagePattern = /!\[(?<alt>[^\]]*)\]\((?<target><[^>]+>|[^)\s]+)(?<title>\s+"[^"]*")?\)/gi;
 const htmlImageSrcPattern = /(<img\b[^>]*?\bsrc=["'])(?<src>[^"']+)(["'][^>]*>)/gi;
 
@@ -268,6 +272,75 @@ async function pollMineruAccurate(token, batchId, fileName) {
   }
 
   throw new Error(`MinerU 精准解析轮询超时，请稍后重试，batch_id: ${batchId}`);
+}
+
+/**
+ * 把超过 MinerU 轻量接口大小限制的 PDF 按页拆成多个分段。
+ * 返回的分段文件位于临时目录，调用方负责清理。
+ */
+async function splitPdfForOcr(filePath, maxBytes) {
+  const buffer = await fs.readFile(filePath);
+  const source = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const pageCount = source.getPageCount();
+  if (!pageCount) throw new Error('PDF 没有可解析的页面');
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lvcert-pdf-ocr-'));
+  const chunkPaths = [];
+  try {
+    let pageIndex = 0;
+    while (pageIndex < pageCount) {
+      const chunkDoc = await PDFDocument.create();
+      let addedPages = 0;
+      let chunkBytes = null;
+      while (pageIndex < pageCount) {
+        const [page] = await chunkDoc.copyPages(source, [pageIndex]);
+        chunkDoc.addPage(page);
+        addedPages += 1;
+        chunkBytes = Buffer.from(await chunkDoc.save());
+        if (chunkBytes.length > maxBytes) {
+          chunkDoc.removePage(chunkDoc.getPageCount() - 1);
+          addedPages -= 1;
+          chunkBytes = Buffer.from(await chunkDoc.save());
+          if (addedPages === 0) {
+            throw new Error('PDF 单页超过 MinerU 轻量接口 10MB 限制，请先拆分文件再上传');
+          }
+          break;
+        }
+        pageIndex += 1;
+      }
+      if (!addedPages || !chunkBytes) break;
+      const chunkPath = path.join(tempDir, `chunk-${String(chunkPaths.length + 1).padStart(2, '0')}.pdf`);
+      await fs.writeFile(chunkPath, chunkBytes);
+      chunkPaths.push(chunkPath);
+    }
+  } catch (error) {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+  return { chunkPaths, tempDir };
+}
+
+/** 使用 MinerU 轻量接口 OCR；文件超过 10MB 时自动拆分后逐段解析并拼接。 */
+async function parsePdfWithMineruAgentOcr(filePath, parseOptions, onProgress) {
+  const stats = await fs.stat(filePath);
+  if (stats.size <= MINERU_AGENT_MAX_FILE_BYTES) {
+    onProgress?.({ index: 1, total: 1 });
+    return parseWithMineruAgent(filePath, parseOptions);
+  }
+
+  const { chunkPaths, tempDir } = await splitPdfForOcr(filePath, MINERU_AGENT_MAX_FILE_BYTES);
+  try {
+    const parts = [];
+    for (let i = 0; i < chunkPaths.length; i += 1) {
+      onProgress?.({ index: i + 1, total: chunkPaths.length });
+      const part = await parseWithMineruAgent(chunkPaths[i], parseOptions);
+      if (part.trim()) parts.push(part.trim());
+    }
+    if (!parts.length) throw new Error('PDF 分段 OCR 未解析出有效内容');
+    return parts.join('\n\n');
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 async function uploadFile(fileUrl, filePath) {
@@ -556,14 +629,43 @@ async function parseDocumentWithConfig(app, filePath, config, options = {}) {
       markdown = preserveImages ? await rewriteMarkdownImages(markdown, assets, { localBaseDir: path.dirname(filePath) }) : stripMarkdownImages(markdown);
     }
   } catch (error) {
-    await deleteImportedImageAssets(assets).catch(() => undefined);
-    developerLogger.write('file.parse.error', {
-      duration_ms: Date.now() - startedAt,
-      parser: summarizeParserForLog(parser, options),
-      asset_count: assets?.index || 0,
-      error: compactLogError(error),
-    });
-    throw normalizeDocumentParseError(error, filePath);
+    // 本地解析扫描版 PDF 时没有文字层，可按需回退到 MinerU OCR
+    const canOcrFallback = parser.provider === 'local'
+      && parser.ext === '.pdf'
+      && options.ocrFallback === true
+      && error?.code === 'pdf_text_layer_missing';
+    if (canOcrFallback) {
+      try {
+        options.onOcrFallback?.();
+        developerLogger.write('file.parse.ocr_fallback.started', { file: await summarizeFileForLog(filePath) });
+        const mineruToken = config.components?.file_parser?.mineru_token || '';
+        markdown = mineruToken
+          ? await parseWithMineruAccurate(filePath, mineruToken, parseOptions)
+          : await parsePdfWithMineruAgentOcr(filePath, parseOptions, options.onOcrProgress);
+        developerLogger.write('file.parse.ocr_fallback.completed', {
+          provider: mineruToken ? 'mineru-accurate-api' : 'mineru-agent-api',
+          markdown_metrics: textMetrics(markdown),
+        });
+      } catch (ocrError) {
+        await deleteImportedImageAssets(assets).catch(() => undefined);
+        developerLogger.write('file.parse.error', {
+          duration_ms: Date.now() - startedAt,
+          parser: summarizeParserForLog(parser, options),
+          asset_count: assets?.index || 0,
+          error: compactLogError(ocrError),
+        });
+        throw new Error(`扫描版 PDF OCR 解析失败：${ocrError.message || '未知错误'}`);
+      }
+    } else {
+      await deleteImportedImageAssets(assets).catch(() => undefined);
+      developerLogger.write('file.parse.error', {
+        duration_ms: Date.now() - startedAt,
+        parser: summarizeParserForLog(parser, options),
+        asset_count: assets?.index || 0,
+        error: compactLogError(error),
+      });
+      throw normalizeDocumentParseError(error, filePath);
+    }
   }
   const result = preserveImages ? markdown : stripMarkdownImages(markdown);
   developerLogger.write('file.parse.completed', {

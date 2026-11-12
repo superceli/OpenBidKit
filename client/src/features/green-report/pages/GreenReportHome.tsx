@@ -11,7 +11,7 @@ import ReportConfigPage from './ReportConfigPage';
 import OutlinePage from './OutlinePage';
 import ContentPage from './ContentPage';
 import type { GreenDocumentStyle, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportType } from '../types';
-import { DEFAULT_GREEN_PROJECT_INFO, GREEN_STEPS, GREEN_STEP_LABELS } from '../types';
+import { DEFAULT_GREEN_PROJECT_INFO, GREEN_STEPS, GREEN_STEP_LABELS, getLocalDateString } from '../types';
 import { resolveReportTypeName } from '../reportTypes';
 
 interface GreenReportHomeProps {
@@ -39,6 +39,17 @@ const initialExportProgress = {
   filePath: '',
 };
 
+const SKIP_COVER_FRONT_MATTER_KEY = 'green-report.skip-cover-frontmatter';
+
+function readSkipCoverFrontMatter() {
+  try {
+    const raw = localStorage.getItem(SKIP_COVER_FRONT_MATTER_KEY);
+    return raw === null ? true : raw === 'true';
+  } catch {
+    return true;
+  }
+}
+
 function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
   const { showToast } = useToast();
   const [state, setState] = useState<GreenReportState>(emptyState);
@@ -47,9 +58,11 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
   const [draftDocumentStyle, setDraftDocumentStyle] = useState<GreenDocumentStyle>('standard');
   const [draftTargetWords, setDraftTargetWords] = useState(20000);
   const [draftTemplateId, setDraftTemplateId] = useState<string | null>(null);
+  const [skipCoverFrontMatter, setSkipCoverFrontMatter] = useState(readSkipCoverFrontMatter);
   const [templates, setTemplates] = useState<ExportTemplateRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [wordExportProgress, setWordExportProgress] = useState(initialExportProgress);
+  const [pdfExportProgress, setPdfExportProgress] = useState(initialExportProgress);
 
   useEffect(() => {
     trackPageView('green-report');
@@ -63,12 +76,12 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       return;
     }
     greenReport.loadState().then((s) => {
-      setState(s);
-      const loadedProjectInfo = s.projectInfo || DEFAULT_GREEN_PROJECT_INFO;
-      // 老数据可能没有 compileDate，回退为今天
+      const loadedProjectInfo = { ...DEFAULT_GREEN_PROJECT_INFO, ...(s.projectInfo || {}) };
+      // 老数据可能没有 compileDate，回退为今天（本地时区）
       if (!loadedProjectInfo.compileDate) {
-        loadedProjectInfo.compileDate = new Date().toISOString().slice(0, 10);
+        loadedProjectInfo.compileDate = getLocalDateString();
       }
+      setState({ ...s, projectInfo: loadedProjectInfo });
       setDraftProjectInfo(loadedProjectInfo);
       setDraftPageCount(s.pageCount ?? 30);
       setDraftDocumentStyle(s.documentStyle ?? 'standard');
@@ -112,6 +125,26 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     return off;
   }, [showToast]);
 
+  useEffect(() => {
+    const ex = window.lvcert?.export;
+    if (!ex) return undefined;
+    const off = ex.onPdfExportProgress((event: WordExportProgressEvent) => {
+      setPdfExportProgress({
+        running: event.phase === 'running',
+        progress: event.progress,
+        message: event.message,
+        error: event.phase === 'error' ? event.message : '',
+        filePath: '',
+      });
+      if (event.phase === 'success') {
+        showToast(event.message || 'PDF 已导出', 'success');
+      } else if (event.phase === 'error') {
+        showToast(event.message || 'PDF 导出失败', 'error');
+      }
+    });
+    return off;
+  }, [showToast]);
+
   const stepIndex = GREEN_STEPS.indexOf(state.step);
   const canGoBack = stepIndex > 0;
   const canGoForward = stepIndex < GREEN_STEPS.length - 1;
@@ -141,37 +174,72 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     }
   }, [draftTargetWords, draftPageCount, draftDocumentStyle, draftTemplateId, showToast]);
 
-  const handleExportWord = useCallback(async () => {
-    if (!state.outlineData?.outline?.length) {
-      showToast('请先生成报告目录和正文', 'error');
-      return;
-    }
-    setWordExportProgress({ ...initialExportProgress, running: true, message: '正在准备导出...' });
+  const handleSkipCoverFrontMatterChange = useCallback((value: boolean) => {
+    setSkipCoverFrontMatter(value);
     try {
-      // 若选中了模板，从模板库取完整 config；否则用默认导出格式
-      let exportFormat = DEFAULT_EXPORT_FORMAT;
-      if (state.templateId) {
-        const template = await window.lvcert?.templates?.get(state.templateId);
-        if (template?.config) exportFormat = template.config;
-      }
-      // 报告编号为空时自动生成；编制日期为空时默认今天
-      let reportCode = state.projectInfo.reportCode;
-      if (!reportCode) {
-        reportCode = await window.lvcert?.greenReport?.generateReportCode();
-      }
-      // 编制日期格式为"YYYY年M月"（不到具体日）
-      const rawDate = state.projectInfo.compileDate || new Date().toISOString().slice(0, 10);
-      const dateObj = new Date(rawDate);
-      const compileDate = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月`;
-      // 报告标题用用户勾选的报告类型名称（自定义类型取用户输入的名称）
-      const reportTitle = resolveReportTypeName(state.reportType) || '绿色报告';
-      // 委托单位即企业名称（全局唯一企业标识字段，UI 上已合并）
-      const clientUnit = state.projectInfo.companyName || '';
-      const result = await window.lvcert.export.exportWord({
+      localStorage.setItem(SKIP_COVER_FRONT_MATTER_KEY, String(value));
+    } catch {
+      // 本地偏好写入失败不影响导出
+    }
+  }, []);
+
+  const buildExportPayload = useCallback(async () => {
+    // 报告标题用用户勾选的报告类型名称（自定义类型取用户输入的名称）
+    const reportTitle = resolveReportTypeName(state.reportType) || '绿色报告';
+    // 委托单位即企业名称（全局唯一企业标识字段，UI 上已合并）
+    const clientUnit = state.projectInfo.companyName || '';
+
+    // 若选中了模板，从模板库取完整 config；否则用绿色报告默认页眉页脚
+    let exportFormat = DEFAULT_EXPORT_FORMAT;
+    if (state.templateId) {
+      const template = await window.lvcert?.templates?.get(state.templateId);
+      if (template?.config) exportFormat = template.config;
+    } else {
+      exportFormat = {
+        ...DEFAULT_EXPORT_FORMAT,
+        page: {
+          ...DEFAULT_EXPORT_FORMAT.page,
+          header_enabled: true,
+          header_text: [clientUnit, reportTitle].filter(Boolean).join('  '),
+          footer_enabled: true,
+          footer_text: '',
+          page_number_enabled: true,
+          page_number_format: '第{page}页，共{pages}页',
+        },
+      };
+    }
+
+    // 报告编号为空时自动生成；编制日期为空时默认今天
+    let reportCode = state.projectInfo.reportCode;
+    if (!reportCode) {
+      reportCode = await window.lvcert?.greenReport?.generateReportCode();
+    }
+    // 编制日期格式为"YYYY年M月"（不到具体日）
+    const rawDate = state.projectInfo.compileDate || getLocalDateString();
+    const [rawYear, rawMonth] = rawDate.split('-').map(Number);
+    const compileDate = Number.isFinite(rawYear) && Number.isFinite(rawMonth)
+      ? `${rawYear}年${rawMonth}月`
+      : rawDate;
+
+    const publicityPlatforms = String(state.projectInfo.publicityPlatformsText || '')
+      .split(/\r?\n/)
+      .map((line) => {
+        const [name, url] = line.split('|').map((part) => part.trim());
+        return name ? { name, url: url || '' } : null;
+      })
+      .filter((item): item is { name: string; url: string } => Boolean(item));
+
+    return {
+      reportTitle,
+      clientUnit,
+      reportCode: reportCode || '',
+      publicityPlatforms,
+      payload: {
         project_name: state.projectInfo.companyName || '绿色报告',
-        outline: state.outlineData.outline,
+        outline: state.outlineData?.outline || [],
         export_format: exportFormat,
         cover_template: 'green-report',
+        skip_cover_frontmatter: skipCoverFrontMatter,
         cover_fields: {
           clientUnit,
           reportCode: reportCode || '',
@@ -183,7 +251,20 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
         report_scope: state.projectInfo.reportScope || '',
         company_name: state.projectInfo.companyName || '',
         report_type_name: reportTitle,
-      });
+        publicity_platforms: publicityPlatforms,
+      },
+    };
+  }, [state.outlineData, state.projectInfo, state.reportType, state.templateId, skipCoverFrontMatter]);
+
+  const handleExportWord = useCallback(async () => {
+    if (!state.outlineData?.outline?.length) {
+      showToast('请先生成报告目录和正文', 'error');
+      return;
+    }
+    setWordExportProgress({ ...initialExportProgress, running: true, message: '正在准备导出...' });
+    try {
+      const { payload } = await buildExportPayload();
+      const result = await window.lvcert.export.exportWord(payload);
       if (result.success && result.path) {
         setWordExportProgress((prev) => ({ ...prev, filePath: result.path as string }));
       }
@@ -191,7 +272,25 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
       showToast(`导出 Word 失败：${error instanceof Error ? error.message : String(error)}`, 'error');
       setWordExportProgress(initialExportProgress);
     }
-  }, [state.outlineData, state.projectInfo, state.templateId, showToast]);
+  }, [buildExportPayload, state.outlineData, showToast]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (!state.outlineData?.outline?.length) {
+      showToast('请先生成报告目录和正文', 'error');
+      return;
+    }
+    setPdfExportProgress({ ...initialExportProgress, running: true, message: '正在准备导出...' });
+    try {
+      const { payload } = await buildExportPayload();
+      const result = await window.lvcert.export.exportPdf(payload);
+      if (result.success && result.path) {
+        setPdfExportProgress((prev) => ({ ...prev, filePath: result.path as string }));
+      }
+    } catch (error) {
+      showToast(`导出 PDF 失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+      setPdfExportProgress(initialExportProgress);
+    }
+  }, [buildExportPayload, state.outlineData, showToast]);
 
   const toolbarGroups: FloatingToolbarGroup[] = [
     {
@@ -220,8 +319,15 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
           id: 'export-word',
           label: '导出 Word',
           icon: <ToolbarDocumentIcon />,
-          disabled: !state.outlineData?.outline?.length || wordExportProgress.running,
+          disabled: !state.outlineData?.outline?.length || wordExportProgress.running || pdfExportProgress.running,
           onClick: handleExportWord,
+        },
+        {
+          id: 'export-pdf',
+          label: '导出 PDF',
+          icon: <ToolbarDocumentIcon />,
+          disabled: !state.outlineData?.outline?.length || wordExportProgress.running || pdfExportProgress.running,
+          onClick: handleExportPdf,
         },
       ],
     },
@@ -308,11 +414,13 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             draftDocumentStyle={draftDocumentStyle}
             draftTargetWords={draftTargetWords}
             draftTemplateId={draftTemplateId}
+            skipCoverFrontMatter={skipCoverFrontMatter}
             templates={templates}
             onDraftPageCountChange={setDraftPageCount}
             onDraftDocumentStyleChange={setDraftDocumentStyle}
             onDraftTargetWordsChange={setDraftTargetWords}
             onDraftTemplateIdChange={setDraftTemplateId}
+            onSkipCoverFrontMatterChange={handleSkipCoverFrontMatterChange}
             onSave={handleSaveReportConfig}
           />
         )}
@@ -390,7 +498,9 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
               }
             }}
             wordExportProgress={wordExportProgress}
+            pdfExportProgress={pdfExportProgress}
             onExportWord={handleExportWord}
+            onExportPdf={handleExportPdf}
           />
         )}
       </div>

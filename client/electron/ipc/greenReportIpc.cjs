@@ -2,7 +2,7 @@
 
 const { ipcMain } = require('electron');
 
-function registerGreenReportIpc({ greenReportStore, taskService }) {
+function registerGreenReportIpc({ greenReportStore, greenReportImageService, taskService }) {
   ipcMain.handle('green-report:load-state', () => {
     return greenReportStore.loadState();
   });
@@ -47,6 +47,22 @@ function registerGreenReportIpc({ greenReportStore, taskService }) {
     return greenReportStore.generateReportCode();
   });
 
+  ipcMain.handle('green-report:list-images', (_event, folderId) => {
+    return greenReportImageService.list(folderId);
+  });
+
+  ipcMain.handle('green-report:add-images', (_event, folderId) => {
+    return greenReportImageService.addImages(folderId);
+  });
+
+  ipcMain.handle('green-report:update-image', (_event, payload) => {
+    return greenReportImageService.updateImage(payload);
+  });
+
+  ipcMain.handle('green-report:delete-image', (_event, imageId) => {
+    return greenReportImageService.deleteImage(imageId);
+  });
+
   ipcMain.handle('tasks:start-green-report-outline', async (event, payload) => {
     taskService.subscribe(event.sender);
     return taskService.startGreenReportOutline(payload);
@@ -54,7 +70,10 @@ function registerGreenReportIpc({ greenReportStore, taskService }) {
 
   ipcMain.handle('tasks:start-green-report-content', async (event, payload) => {
     taskService.subscribe(event.sender);
-    return taskService.startGreenReportContent(payload);
+    return taskService.startGreenReportContent({
+      ...payload,
+      imageAssets: greenReportImageService.listForGeneration(payload?.projectInfo?.companyName),
+    });
   });
 
   ipcMain.handle('tasks:cancel-green-report-outline', (event) => {

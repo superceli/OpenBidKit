@@ -1,7 +1,6 @@
 export type SectionId =
   | 'green-report'
   | 'knowledge-base'
-  | 'document-knowledge-base'
   | 'green-news'
   | 'resources'
   | 'template-settings'

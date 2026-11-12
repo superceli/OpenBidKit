@@ -1,6 +1,6 @@
 {
   "name": "lvcert-client",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "哲元绿色报告工具箱独立桌面客户端",
   "author": "mark",
@@ -176,6 +176,7 @@
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^11.14.0",
     "mime-types": "^3.0.2",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.1.1",

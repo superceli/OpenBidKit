@@ -372,6 +372,16 @@
   gap: 14px;
 }
 
+.green-report-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.green-report-field-span-2 {
+  grid-column: 1 / -1;
+}
+
 .green-report-field {
   display: flex;
   flex-direction: column;
@@ -437,6 +447,14 @@
   color: var(--yb-text-muted);
   margin-top: 2px;
   line-height: 1.55;
+}
+
+.green-report-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--yb-text);
 }
 
 .green-report-label {
@@ -1051,3 +1069,4 @@
   font-size: 12px;
   color: var(--yb-text-muted);
 }
+

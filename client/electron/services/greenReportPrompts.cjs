@@ -1,6 +1,7 @@
 'use strict';
 
-const { buildReferenceStandardsMarkdown, buildIndustryTopicsMarkdown } = require('./esgReferenceData.cjs');
+const { buildIndustryTopicsMarkdown } = require('./esgReferenceData.cjs');
+const { buildPolicyReferenceMarkdown } = require('./greenPolicyReferenceData.cjs');
 
 const REPORT_TYPE_LABELS = {
   esg: 'ESG报告（环境、社会与治理）',
@@ -23,175 +24,30 @@ const DOCUMENT_STYLE_GUIDANCE = {
   academic: '采用学术规范型写作风格，引用国内外标准和研究，注重方法论说明和文献引用，语言客观严谨。',
 };
 
-// ============ 报告大纲模板 ============
-// 说明：
-// - 非评价类报告（esg、sustainability、csr、carbon-footprint、green-finance）按市面通用披露流程组织，
-//   不含 A级/AA级/AAA级 综合评价结论，最后一章统一为"附录"。
-// - 环境影响评价报告（environmental-impact）按建设项目环评标准流程组织，
-//   含"评价结论与建议"（工程可行性结论，不是分级评价）。
-// - 绿色评价类报告（绿色工厂评价、绿色供应链评价、绿色设计产品评价等）使用 EVALUATION_OUTLINE_TEMPLATE，
-//   按市面绿色制造体系评价标准流程组织，须含综合评价等级（A级/AA级/AAA级）和附录。
-const OUTLINE_TEMPLATES = {
-  esg: [
-    { title: '报告前言', description: '编制背景、报告范围、时间边界与编制依据（GRI、SASB、TCFD等）' },
-    { title: '公司概况', description: '企业简介、业务范围、组织架构、报告期内重大变化' },
-    { title: 'ESG治理架构', description: 'ESG管理委员会、职责分工、决策机制、信息披露' },
-    { title: '环境（E）绩效', description: '能源消耗、温室气体排放、水资源、废弃物管理、生物多样性' },
-    { title: '社会（S）绩效', description: '员工权益与发展、供应链管理、社区参与、客户权益' },
-    { title: '治理（G）绩效', description: '公司治理结构、商业道德、风险管理、信息披露' },
-    { title: 'ESG目标与展望', description: '下一年度ESG目标、改进计划与实施路径' },
-    { title: '附录', description: 'ESG指标数据表、GRI标准索引表、第三方审验声明' },
-  ],
-  sustainability: [
-    { title: '报告前言', description: '编制背景、报告范围与依据标准' },
-    { title: '组织概况', description: '企业简介、战略方向、利益相关方' },
-    { title: '可持续发展战略', description: '战略框架、目标体系、实施路径' },
-    { title: '经济绩效', description: '经营成果、经济效益、创新投入' },
-    { title: '环境绩效', description: '能源、排放、水资源、循环经济' },
-    { title: '社会绩效', description: '员工、社区、客户、供应链' },
-    { title: '利益相关方参与', description: '识别、沟通、回应机制' },
-    { title: '未来展望与承诺', description: '可持续发展目标与行动计划' },
-    { title: '附录', description: '指标对照表、GRI索引表、第三方审验报告' },
-  ],
-  csr: [
-    { title: '报告前言', description: '编制说明、报告范围与时间边界' },
-    { title: '企业概况', description: '企业简介、使命愿景、发展历程' },
-    { title: '社会责任战略与管理', description: '社会责任理念、组织体系、管理制度' },
-    { title: '股东权益保护', description: '公司治理、投资者关系、信息披露' },
-    { title: '员工权益与发展', description: '劳动合同、薪酬福利、职业健康、培训发展' },
-    { title: '客户与消费者权益', description: '产品质量、客户服务、消费者保护' },
-    { title: '供应链责任', description: '供应商管理、采购合规、合作共赢' },
-    { title: '社区参与与公益', description: '社区建设、公益捐赠、志愿服务' },
-    { title: '环境保护责任', description: '节能减排、绿色运营、环保投入' },
-    { title: '未来展望', description: '下一年度社会责任目标与计划' },
-    { title: '附录', description: '社会责任指标数据表、标准索引、审验声明' },
-  ],
-  'carbon-footprint': [
-    { title: '报告前言', description: '编制目的、范围边界与核算标准' },
-    { title: '组织与运营概况', description: '企业简介、业务边界、组织结构' },
-    { title: '核算方法与标准', description: 'GHG Protocol、ISO 14064标准说明' },
-    { title: 'Scope 1 直接排放', description: '固定燃烧、移动燃烧、过程排放、fugitive排放' },
-    { title: 'Scope 2 间接排放', description: '外购电力、热力、蒸汽排放' },
-    { title: 'Scope 3 其他间接排放', description: '上下游排放、出差、废弃物处理等' },
-    { title: '排放总量与结构分析', description: '排放汇总、结构占比、趋势分析' },
-    { title: '减排目标与路径', description: '碳中和目标、减排措施、实施计划' },
-    { title: '数据质量管理', description: '数据来源、质量评估、不确定性分析' },
-    { title: '附录', description: '排放因子表、活动数据表、第三方核证声明' },
-  ],
-  'green-finance': [
-    { title: '报告前言', description: '报告目的、适用范围与编制依据' },
-    { title: '发行人概况', description: '机构简介、治理结构、可持续发展战略' },
-    { title: '绿色金融框架', description: '募集资金用途、项目评估与筛选、资金管理' },
-    { title: '募集资金使用情况', description: '资金分配、投建项目清单、投放进度' },
-    { title: '项目环境影响', description: '节能减排量、环境效益测算、对比分析' },
-    { title: '资金管理与监控', description: '专户管理、台账记录、内部控制' },
-    { title: '第三方评估与认证', description: '评估机构意见、认证报告摘要' },
-    { title: '未来展望', description: '后续绿色项目计划与资金安排' },
-    { title: '附录', description: '项目清单明细表、环境效益数据表、第三方认证报告' },
-  ],
-  'environmental-impact': [
-    { title: '总论', description: '项目背景、编制依据、评价标准、评价范围' },
-    { title: '建设项目概况', description: '项目名称、建设内容、工艺流程、选址比选' },
-    { title: '环境质量现状', description: '大气环境、水环境、声环境、生态环境现状' },
-    { title: '工程分析', description: '污染源强核算、物料平衡、水平衡分析' },
-    { title: '环境影响预测与评价', description: '大气影响、地表水影响、地下水影响、噪声影响' },
-    { title: '污染防治措施', description: '废气、废水、固废、噪声防治措施及技术可行性' },
-    { title: '环境风险评价', description: '风险识别、源项分析、预测与评价、防范措施' },
-    { title: '总量控制与排污许可', description: '总量指标核算与申请' },
-    { title: '环境影响经济损益分析', description: '环保投资、运行费用、经济效益、社会效益' },
-    { title: '环境管理与监测计划', description: '施工期与运营期管理、监测方案' },
-    { title: '评价结论与建议', description: '工程环境可行性总结论、主要环境影响结论、污染防治措施可行性结论、建议措施' },
-    { title: '附录', description: '监测数据、计算模式说明、相关图件、环评资质证书' },
-  ],
-};
-
-// ============ 绿色评价类报告通用大纲模板 ============
-// 适用于绿色工厂评价、绿色供应链评价、绿色设计产品评价、绿色园区评价、
-// 绿色制造评价、智能制造示范工厂评价等工信部绿色制造体系评价报告，
-// 以及其他需要给出 A级/AA级/AAA级 综合评价等级的绿色评价报告。
-const EVALUATION_OUTLINE_TEMPLATE = [
-  { title: '报告前言', description: '评价目的、评价对象、评价范围、评价期、评价依据（法规、政策、标准）' },
-  { title: '企业概况', description: '企业简介、组织架构、生产规模、主要产品、工艺路线、地理位置' },
-  { title: '评价依据', description: '相关法律法规、政策文件、国家标准与行业标准、企业内部管理制度清单' },
-  { title: '评价指标体系', description: '按评价指标框架逐项说明各一级指标、二级指标及权重；通常覆盖基础设施、管理体系、能源资源投入、产品、环境排放等维度' },
-  { title: '自评价结果', description: '企业对照评价指标体系逐项自评、提供佐证材料、汇总自评得分' },
-  { title: '第三方评价', description: '评价流程、评价方法、现场核查、各维度得分及扣分项、关键问题与重大不符合项' },
-  { title: '综合评价结论', description: '给出综合评价等级（A级 / AA级 / AAA级），并列出各维度评分依据、扣分项和改进建议' },
-  { title: '改进建议', description: '针对扣分项与短板提出可执行的整改路径、责任部门与时间表' },
-  { title: '附录', description: '评价指标评分明细表、评价依据标准索引、第三方评价机构资质证明、企业自评表、关键佐证材料清单' },
+// ============ 报告大纲模板（制度规范 + 第三方评价双轨） ============
+// 所有报告统一使用该框架，覆盖 13 个标准模块，结论使用"优秀"。
+// 封面与目录由导出模板生成，不作为目录章节。
+const DUAL_TRACK_OUTLINE_TEMPLATE = [
+  { title: '前言', description: '以"尊敬的各利益相关方"开篇，按治理结构确定致辞人（董事长/企业负责人/企业代表）署名；用4个"以……"排比段阐述核心理念；结尾展望与致谢' },
+  { title: '关于本报告', description: '报告说明、编制参考（8-9项国家政策法规）、报告范围、时间范围、称谓说明、报告特点、核心理念表、编制人员表；不得包含"编制机构与数据来源""编制流程"小节' },
+  { title: '企业基本信息', description: '企业名称、简称、法定代表人、注册资本、成立日期、企业类型、登记状态、注册地址、主营业务、服务对象、联系电话（表格呈现）' },
+  { title: '关键指标总览', description: '财务数据与关键指标用 Mermaid 柱形图、饼图展示：覆盖经营、投入、质量合规、人才、环境等类别，不再用表格罗列' },
+  { title: '制度规范', description: '以"第X条"公文体撰写：总则、规范依据与编制背景、评价范围与期限、指导思想与基本原则、战略定位与总体目标、实施路径与阶段规划、组织架构与职责分工、专项领域条款、考核与评价、监督检查与持续改进、附则；每个条文后附1张表格' },
+  { title: '投入维度评价', description: '第三方视角评价资源投入：投入规模、结构占比、行业对标、投入保障机制，配数据表；章节标题须结合报告主题命名，如“研发投入评价”“创新投入评价”' },
+  { title: '管理维度评价', description: '第三方视角评价过程管理：组织体系、制度执行、流程管控、监督考核，配管理分析表；章节标题须结合报告主题命名' },
+  { title: '产出维度评价', description: '第三方视角评价产出成果：数量、质量、成果转化、知识产权，配产出统计表；章节标题须结合报告主题命名' },
+  { title: '效益维度评价', description: '第三方视角评价综合效益：经济效益、社会效益、环境效益、行业带动，配效益分析表；章节标题须结合报告主题命名' },
+  { title: '保障维度评价', description: '第三方视角评价保障能力：人才、资金、平台、风险防控、持续改进，配保障能力表；章节标题须结合报告主题命名' },
+  { title: '综合评价', description: '评价概述（评价方法、依据、周期）、分维度评价、综合评价表，给出"优秀"结论；不得包含"评价机构与委托关系"小节' },
+  { title: '报告结论', description: '总体概述、综合评价表（各维度评价结果均为"优秀"）、未来展望' },
+  { title: '附录1 索引', description: '编制索引（序号 | 编制内容 | 所在章节）和评价索引（序号 | 评价维度 | 评价内容 | 所在章节）' },
+  { title: '附录2 法律法规与政策参考清单', description: '15-22项法律法规与政策，含实施时间和主要内容，覆盖国家法律、规划、部门规章、地方政策、国家标准、国际议程（SDGs）' },
 ];
-
-/**
- * 判断是否为环境影响评价报告。
- * 环境影响评价报告（环评）属于评价类，但其结论是工程环境可行性结论，不是 A级/AA级/AAA级 分级评价。
- */
-function isEnvironmentalImpactReport(reportType, reportTypeName) {
-  const name = String(reportTypeName || '').toLowerCase();
-  const id = String(reportType || '').toLowerCase();
-  return id === 'environmental-impact'
-    || name.includes('环境影响评价')
-    || name.includes('环评')
-    || (name.includes('环境影响') && name.includes('评价'));
-}
-
-/**
- * 判断是否为绿色评价类报告（需给出 A级/AA级/AAA级 综合评价等级）。
- * 覆盖工信部绿色制造体系评价（绿色工厂/园区/供应链/设计产品/制造评价）等，
- * 排除环境影响评价报告（环评结论为工程可行性，非分级评价）。
- */
-function isEvaluationReport(reportType, reportTypeName) {
-  if (isEnvironmentalImpactReport(reportType, reportTypeName)) return false;
-  const name = String(reportTypeName || '').toLowerCase();
-  const id = String(reportType || '').toLowerCase();
-  // 优先识别工信部绿色制造体系评价类报告 id
-  const greenMfgEvalIds = [
-    'green-factory-eval', 'green-manufacturing-eval', 'green-supply-chain-eval',
-    'green-design-product-eval-statement', 'green-park-eval', 'green-enterprise-eval',
-    'green-comprehensive-eval', 'green-logistics-eval', 'green-packaging-eval',
-    'green-recovery-eval', 'smart-manufacturing-demo-factory-eval', 'digital-pilot-eval',
-    'enterprise-digital-pilot-eval', 'digital-green-low-carbon-comprehensive-eval',
-    'green-low-carbon-production-eval', 'green-environmental-measures-eval',
-    'green-power-eval', 'green-power-certificate-eval', 'green-development-plan-eval',
-    'green-development-appraisal', 'energy-saving-carbon-reduction-eval',
-    'energy-saving-assessment', 'energy-evaluation', 'energy-assessment',
-    'enterprise-energy-assessment', 'energy-consumption-eval', 'energy-technology-eval',
-    'err-energy-eval', 'water-saving-eval', 'industrial-solid-waste-utilization-eval',
-    'raw-material-selection-eval', 'raw-material-capability-eval',
-    'equipment-process-optimization-eval', 'product-process-optimization-eval',
-    'production-tech-innovation-eval', 'production-tech-renovation-eval',
-    'purification-workshop-eval', 'digital-evaluation', 'digital-green-low-carbon-system-eval',
-    'digital-nc-manufacturing-eval', 'digital-pilot-eval-report',
-    'green-supply-chain-eval-statement', 'enterprise-green-transport-eval',
-    'green-packaging-transport-eval', 'enterprise-green-packaging-eval',
-    'product-design-rationality-eval', 'product-design-advanced-eval', 'product-upgrade-eval',
-    'technological-innovation-eval', 'tech-achievement-comprehensive-eval',
-    'innovation-achievement-eval', 'innovation-incentive-eval',
-    'smart-management-system-eval', 'tooling-equipment-eval', 'capacity-assessment',
-    'safety-status-eval', 'safety-reliability-eval', 'bid-response-comprehensive-eval',
-    'enterprise-operation-eval', 'quality-evaluation', 'scale-service-eval',
-    'performance-comprehensive-eval', 'institution-system-eval', 'integrity-evaluation',
-    'energy-consumption-reduction-eval', 'after-sales-service-eval',
-    'after-sales-service-comprehensive-eval', 'emergency-supply-eval',
-    'four-wastes-eval', 'gtr-waste-eval', 'waste-gas-water-solid-eval',
-    'green-low-carbon-digital-enterprise-eval',
-  ];
-  if (greenMfgEvalIds.includes(id)) return true;
-  // 名称兜底判断：含"评价/评估"且不是环评
-  if (name.includes('评价') || name.includes('评估')) return true;
-  // 英文 id 兜底
-  if (id.includes('eval') || id.includes('assessment')) return true;
-  return false;
-}
 
 function buildOutlineTemplateMarkdown(reportType, reportTypeName) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const lines = [`# ${label}参考大纲`];
-  let template;
-  if (isEvaluationReport(reportType, reportTypeName) && !OUTLINE_TEMPLATES[reportType]) {
-    template = EVALUATION_OUTLINE_TEMPLATE;
-  } else {
-    template = OUTLINE_TEMPLATES[reportType] || OUTLINE_TEMPLATES.esg;
-  }
+  const template = DUAL_TRACK_OUTLINE_TEMPLATE;
   template.forEach((item, i) => {
     lines.push(`${i + 1}. ${item.title}`);
     if (item.description) lines.push(`   - ${item.description}`);
@@ -199,14 +55,31 @@ function buildOutlineTemplateMarkdown(reportType, reportTypeName) {
   return lines.join('\n');
 }
 
+/** 用户填写的编制人员、补充关键指标和公示平台；企业工商信息与关键指标优先由知识库提供。 */
+function buildProjectFactsBlock(projectInfo = {}) {
+  const parts = [];
+  if (String(projectInfo.compileStaffText || '').trim()) {
+    parts.push(`\n报告编制人员（用户填写，必须按“姓名|职称”原样列成表格，至少保留全部人员）：
+${String(projectInfo.compileStaffText).trim()}`);
+  }
+  if (String(projectInfo.keyIndicatorsText || '').trim()) {
+    parts.push(`\n关键指标（用户补充，作为知识库资料的补充与兜底；与知识库实际数据冲突时以知识库为准，不得改写或编造）：
+${String(projectInfo.keyIndicatorsText).trim()}`);
+  }
+  if (String(projectInfo.publicityPlatformsText || '').trim()) {
+    parts.push(`\n公示平台（用户填写）：
+${String(projectInfo.publicityPlatformsText).trim()}`);
+  }
+  return parts.join('\n');
+}
+
 function buildKnowledgeContextBlock(knowledgeContext) {
   if (!knowledgeContext?.items?.length) return '';
-  const lines = ['\n以下是从知识库检索到的企业相关资料，请在生成时参考这些信息：'];
+  const lines = ['\n以下是从知识库检索到的企业相关资料，请在生成时优先采用；其中的工商信息、财务数据、环境能耗、员工与社会责任、公司治理、产品服务、荣誉资质、知识产权等字段均为权威数据，对应章节必须逐项引用，不得省略或改写：'];
   knowledgeContext.items.forEach((item, i) => {
     lines.push(`--- [${i + 1}] ${item.title} ---`);
     if (item.resume) lines.push(item.resume);
     if (item.content) lines.push(item.content);
-    if (item.documentName) lines.push(`（来源：${item.documentName}）`);
   });
   lines.push('---');
   return lines.join('\n');
@@ -215,26 +88,21 @@ function buildKnowledgeContextBlock(knowledgeContext) {
 function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
-  const isEval = isEvaluationReport(reportType, reportTypeName);
-  const isEia = isEnvironmentalImpactReport(reportType, reportTypeName);
+  const structureRule = `\n7. 本报告采用"制度规范 + 第三方评价"双轨结构，必须覆盖以下13个标准模块（可按行业细化子项，但模块不可缺失）：
+   - 前言（"尊敬的各利益相关方"开篇，按治理结构确定致辞人署名：设立董事会由董事长致辞，未设立董事会由企业负责人或企业代表致辞，结尾展望与致谢）
+   - 关于本报告（报告说明、编制参考、报告范围、时间范围、称谓说明、报告特点、核心理念表）
+   - 企业基本信息
+   - 关键指标总览（财务数据与关键指标用 Mermaid 柱形图、饼图展示，不用表格罗列）
+   - 制度规范（以"第X条"公文体撰写：总则、依据、范围与期限、指导思想、战略目标、实施路径、组织职责、专项条款、考核评价、监督检查、附则；每个条文后附1张表格）
+   - 五个评价维度章节（第二章起，按“投入→管理→产出→效益→保障”展开）；章节标题必须结合报告主题命名，不要直接照抄“投入维度评价”等通用词，例如创新激励报告可用“研发与技术创新激励方案”“成果转化与知识产权激励方案”；每章须有章首引导段和 X.1 总述
+   - 综合评价（评价概述、分维度评价、综合评价表，给出"优秀"结论）
+   - 报告结论（总体概述、综合评价表、未来展望）
+   - 附录1 索引（编制索引、评价索引）
+   - 附录2 法律法规与政策参考清单（15-22项，含实施时间和主要内容）
+   - 禁止生成"编制机构与数据来源""编制流程""评价机构与委托关系"这三类小节
+   封面与目录由导出模板自动生成，不要作为目录章节。`;
 
-  let structureRule;
-  if (isEval) {
-    structureRule = `\n7. 本报告为绿色评价类报告，必须按市面绿色评价报告标准流程组织目录，目录须包含以下章节（可按行业细化调整顺序与子项）：
-   - 报告前言（评价目的、对象、范围、评价期、评价依据）
-   - 企业概况
-   - 评价依据（法律法规、政策文件、国家与行业标准、企业内部制度）
-   - 评价指标体系（按一级/二级指标与权重列出，通常覆盖基础设施、管理体系、能源资源投入、产品、环境排放等维度）
-   - 自评价结果（企业逐项自评、佐证材料、自评得分）
-   - 第三方评价（评价流程、方法、现场核查、各维度得分与扣分项、重大不符合项）
-   - 综合评价结论（明确给出 A级 / AA级 / AAA级 综合评价等级，附评级依据与改进建议）
-   - 改进建议（针对扣分项的整改路径、责任部门与时间表）
-   - 附录（评价指标评分明细表、评价依据标准索引、第三方评价机构资质证明、企业自评表、关键佐证材料清单）`;
-  } else if (isEia) {
-    structureRule = `\n7. 本报告为环境影响评价报告，按建设项目环评标准流程组织目录，须包含"评价结论与建议"章节（工程环境可行性总结论、主要环境影响结论、污染防治措施可行性结论与建议措施），最后一章为"附录"（监测数据、计算模式说明、相关图件、环评资质证书）`;
-  } else {
-    structureRule = `\n7. 本报告为非评价类绿色披露报告，按市面通用披露流程组织目录（报告前言→公司概况→治理与战略→核心议题绩效→目标与展望→附录），不要包含 A级/AA级/AAA级 评级结论章节；目录最后一章必须是"附录"，收录指标数据表、GRI/SASB/TCFD 标准索引、第三方审验声明等支撑材料`;
-  }
+  const standardsRule = '5. 目录须对标国家"十四五""十五五"规划、行业政策与国家标准，在附录中列出政策依据清单；不要以 GRI/SASB/TCFD 作为主要框架';
 
   return `你是一名专业的${label}撰写专家。根据用户提供的企业信息和报告类型，生成一份结构完整、内容专业的${label}目录。
 
@@ -243,7 +111,7 @@ function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
 2. 目录层级不超过三级，每个节点包含 title 和 description
 3. 章节编号使用 1、1.1、1.1.1 格式
 4. 每个叶子节点的 description 应说明该章节应涵盖的具体内容
-5. 目录应符合国内外主流报告标准（如GRI、SASB、TCFD等），优先覆盖下方列出的核心指标和行业重大议题
+${standardsRule}
 6. 写作风格要求：${styleGuidance}${structureRule}`;
 }
 
@@ -256,10 +124,8 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
   if (projectInfo.reportScope) parts.push(`报告范围：${projectInfo.reportScope}`);
   if (projectInfo.keyTopics) parts.push(`重点关注议题：${projectInfo.keyTopics}`);
-  // 评价类报告：传评测机构信息给大纲 AI
-  if (isEvaluationReport(reportType, reportTypeName)) {
-    if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
-  }
+  const factsBlock = buildProjectFactsBlock(projectInfo);
+  if (factsBlock) parts.push(factsBlock);
   // 目标字数 + 页数：让 AI 据此控制目录章节数量和每章深度
   const estimatedFromPages = options.pageCount ? options.pageCount * 800 : 0;
   const estimatedTotal = options.targetWords || estimatedFromPages;
@@ -276,18 +142,14 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
     parts.push(`篇幅规划：请控制目录叶子节点数量在 ${minLeaves}-${maxLeaves} 个之间，使每章正文字数约 ${Math.floor(estimatedTotal / Math.max(minLeaves, 1))}-${Math.floor(estimatedTotal / Math.max(maxLeaves, 1))} 字，避免章节过碎或过粗`);
   }
   parts.push(`\n参考大纲模板：\n${buildOutlineTemplateMarkdown(reportType, reportTypeName)}`);
-  const standardsBlock = buildReferenceStandardsMarkdown(reportType, projectInfo.industry);
+  // 双轨框架只注入行业议题，不注入 GRI/TCFD 标准指标
+  const standardsBlock = buildIndustryTopicsMarkdown(projectInfo.industry);
   if (standardsBlock) parts.push(`\n${standardsBlock}`);
+  parts.push(buildPolicyReferenceMarkdown({ title: '报告编制参考政策清单', min: 8, max: 9 }));
   const kbBlock = buildKnowledgeContextBlock(options.knowledgeContext);
   if (kbBlock) parts.push(kbBlock);
 
-  if (isEvaluationReport(reportType, reportTypeName)) {
-    parts.push(`\n报告结构要求：本报告为绿色评价类报告，目录须严格按市面绿色评价报告标准流程组织，必须包含：评价依据、评价指标体系、自评价结果、第三方评价、综合评价结论（明确给出 A级/AA级/AAA级 综合评价等级，附评级依据、各维度评分、扣分项与改进建议）、改进建议；最后一章必须是"附录"（评价指标评分明细表、评价依据标准索引、第三方评价机构资质证明、企业自评表、关键佐证材料清单）`);
-  } else if (isEnvironmentalImpactReport(reportType, reportTypeName)) {
-    parts.push(`\n报告结构要求：本报告为环境影响评价报告，按建设项目环评标准流程组织，目录须包含"评价结论与建议"章节（工程环境可行性总结论，不是 A级/AA级/AAA级 分级评价），最后一章为"附录"（监测数据、计算模式说明、相关图件、环评资质证书）`);
-  } else {
-    parts.push(`\n报告结构要求：本报告为非评价类绿色披露报告，不要包含 A级/AA级/AAA级 评级结论章节；目录最后一章必须是"附录"，收录指标数据表、GRI/SASB/TCFD 标准索引、第三方审验声明等支撑材料`);
-  }
+  parts.push(`\n报告结构要求：本报告采用"制度规范 + 第三方评价"双轨结构，目录必须覆盖前言、关于本报告、企业基本信息、关键指标总览、制度规范（第X条公文体）、五个评价维度章节（按投入→管理→产出→效益→保障展开，标题结合报告主题命名）、综合评价（给出"优秀"结论）、报告结论、附录1索引、附录2法律法规与政策参考清单；封面与目录由导出模板生成，不要列入目录`);
 
   if (options.userRequirements) {
     parts.push(`\n用户附加要求：\n${options.userRequirements}`);
@@ -299,23 +161,15 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
 function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, minWords) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
-  const isEval = isEvaluationReport(reportType, reportTypeName);
-  const isEia = isEnvironmentalImpactReport(reportType, reportTypeName);
-
-  let conclusionRule;
-  if (isEval) {
-    conclusionRule = `\n9. 本报告为绿色评价类报告，必须包含综合评价等级（A级/AA级/AAA级）：
-   - 在"综合评价结论"章节必须给出明确评级，评级判定标准：总分 ≥ 90 分 → AAA级；80-89 分 → AA级；70-79 分 → A级
-   - 评级须有据可依：列出各一级指标（基础设施、管理体系、能源资源投入、产品、环境排放）的得分及加权汇总
-   - 列明扣分项、重大不符合项及其影响
-   - 不得随意给分或凑分；评级与得分须前后一致
-   - 第三方评价章节须以第三方评测机构视角撰写
-   - 末尾给出改进建议要点，与"改进建议"章节呼应`;
-  } else if (isEia) {
-    conclusionRule = `\n9. 若章节标题含"评价结论"或"评价结论与建议"，按建设项目环评规范生成工程环境可行性总结论（明确给出"从环境保护角度，项目建设可行/不可行"的结论性意见），并附主要环境影响结论、污染防治措施可行性结论与建议措施；本报告为环境影响评价报告，不适用 A级/AA级/AAA级 分级评价`;
-  } else {
-    conclusionRule = `\n9. 本报告为非评价类绿色披露报告，正文中不得出现 A级/AA级/AAA级 综合评价等级、综合评分或类似分级评价结论；可在各议题章节内给出阶段性目标完成度、绩效达成情况等定性或量化描述，但不要做整体评级`;
-  }
+  const conclusionRule = `\n9. 本报告采用"制度规范 + 第三方评价"双轨结构，必须遵守：
+   - 称谓切换：前言用第一人称"我们"；制度章节用"本公司""公司"公文体；评价章节用"该企业"第三方视角
+   - 制度章节条文用加粗的"第一条、第二条……"开头（不使用标题级编号），每个条文后附1张结构化表格（职责分工表、阶段规划表、投入方向表等）
+   - 评价章节按"投入→管理→产出→效益→保障"组织，每个分节为"一段文字说明 + 一张数据/分析表格"，每章3-5张表格
+   - 综合评价表、附录索引、政策清单必须用 Markdown 表格呈现；财务数据与关键指标改用 Mermaid 图表
+   - 综合评价与报告结论章节必须给出"评价结果：优秀"，各维度评价结果均为"优秀"
+   - 每章可加一行加粗的对仗式主题标语（引号内），必须写成 <p align="center"><strong>“标语”</strong></p> 以居中展示，不要使用标题级编号
+   - 政策对标：引用国家法律法规、"十四五""十五五"规划、部门规章、地方政策和国家标准，不以 GRI/SASB/TCFD 作为主要依据
+   - 关键数据（营业收入、研发费用、研发投入占比等）在全篇保持一致`;
 
   return `你是一名专业的${label}写作专家。你的唯一任务是直接输出一份写好的${label}正文。
 
@@ -328,13 +182,19 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
 
 写作规则：
 1. 使用 Markdown 格式；语言正式、专业，符合报告文体
-2. 本章开头必须先写 2-3 句话的章节摘要（这是内容摘要，不是写作计划）：概括本章核心议题、关键数据或结论，直接作为正文首段。示例："本章介绍公司 2025 年度能源消耗与温室气体排放情况。全年碳排放总量约 5.2 万吨 CO₂e，同比下降 8.3%，主要得益于生产工艺节能改造。" 摘要后直接展开具体内容
+2. 本章开头必须先写 2-3 句话的章节摘要（这是内容摘要，不是写作计划）：概括本章核心议题、关键数据或结论，直接作为正文首段。示例："本章介绍公司 2025 年度能源消耗与温室气体排放情况。全年碳排放总量约 5.2 万吨 CO₂e，同比下降 8.3%，主要得益于生产工艺节能改造。" 摘要后直接展开具体内容；例外：前言、关于本报告章节不写章节摘要，直接进入正文
 3. 章节编号规则（非常重要）：
    - 章节编号（如"第一章""1.1""2.1"等）已由报告大纲统一管理，正文不要重复输出章节级编号标题
    - 正文内部如需细分小标题，**只能使用 Markdown 三级标题（###）或加粗短语**，严禁使用 # 或 ## 开头的标题（渲染层已降级但会丢失格式），不要手动添加"1.1""2.1"等数字编号
    - 若必须使用编号，须以前置给定的"本章编号"为前缀逐级递增（如本章编号为 1.1，则内部子项为 1.1.1、1.1.2），严禁每个章节都从 1.1 开始
 4. 信息来源策略（重要）：
-   - 优先级：知识库资料 > 模型联网查询结果 > 模型知识
+   - 优先级：知识库资料 > 用户填写的编制人员/关键指标（补充与兜底） > 模型联网查询结果 > 模型知识
+   - 企业工商登记信息必须优先从知识库资料中提取；知识库缺失时才允许联网核实，仍缺失则写"以工商登记为准"，严禁编造
+   - 关键指标必须优先从知识库资料中提取现状值、目标值、单位和对应章节；知识库缺少时才使用用户填写的关键指标清单兜底；两者都没有的指标，不得编造具体数值
+   - 财务数据（营业收入、成本、利润、纳税、资产、负债、研发费用等）、员工人数与结构、知识产权数量、资质证书与荣誉、审计/检测结论等事实性数据，严禁编造或估算；缺失时改写为展望、未来规划类表述（如"将持续加大研发投入""不断完善知识产权布局"），不得写"暂无数据"或"待补充"
+   - 环境、能源、碳排放等量化指标同样优先使用知识库真实数据；确实缺失时以管理措施与改进方向表述为主，不得虚构具体数值；已提供的真实数据不得改写
+   - 若下方提供了"报告编制人员"清单，这是权威数据，必须原样采用；用户填写的关键指标清单作为兜底数据，采用时不得改写数值
+   - 政策法规引用必须从下方提供的政策清单中选择，不得编造清单外的法规；未提供政策清单时，只引用确有把握的法规
    - 如果下方提供了知识库资料，必须优先引用其中的真实数据、案例和表述，不得编造与资料冲突的内容
    - 对于资料中已有的具体数值（如排放量、营收、人数等），直接引用资料数据
    - 若知识库无相关数据且已启用联网搜索，调用联网工具核实企业信息，包括：
@@ -343,11 +203,12 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
      引用查询结果，并在涉及工商字段时优先采用国家企业信用信息公示系统（gsxt.gov.cn）、企查查、爱企查、天眼查等权威来源的数据
    - 若知识库 + 联网搜索 + 模型知识均无法获取工商登记字段的具体值，则在正文中以"以工商登记信息为准"代替该字段值，严禁编造或猜测
    - 工商登记字段必须以 Markdown 表格形式展示（强制，违反将导致输出不合格）：
-     适用章节：含"企业基本情况""企业概况""公司概况""组织与运营概况""工商登记""报告前言"等标题的章节
+     适用章节：含"企业基本信息""企业基本情况""企业概况""公司概况""组织与运营概况""工商登记""报告前言"等标题的章节
      必须列出的字段及顺序：企业名称、统一社会信用代码、法定代表人、注册资本、成立日期、注册地址、企业类型、经营范围、联系电话、经营期限
      字段值规则（重要）：
      - 字段值在知识库/联网/模型知识中能找到 → 填入真实值
      - 字段值缺失 → 一律填"以工商登记为准"，不得留空、不得编造、不得写 XXX 或占位
+     - 每个字段必须独占一行，按上述顺序完整列出全部字段；严禁把多个字段合并到同一行（例如把"统一社会信用代码、法定代表人、注册资本、成立日期"写成一行），严禁省略字段
      格式范例（假设注册资本和联系电话缺失）：
      | 字段 | 内容 |
      | --- | --- |
@@ -363,25 +224,33 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
      | 经营期限 | 2010-01-01 至长期 |
      表格后可补一段企业简介文字（200-400 字），不要把工商字段拆成散文段落或列表项
    - 严禁使用 [XX]、[待填]、XXX、xXX 等占位符或假占位文本
-   - 严禁编造精确到个位数的具体数字伪装成真实数据；估算值应给出量级（如「约 5000 吨」）而非虚假精确值
+   - 正文中的数值必须来自知识库或用户填写；不得虚构审计机构、会计师事务所、报告编号、证书编号、检测结论等事实信息
+   - 正文不得输出任何数据来源说明，如"数据取自…""资料来源…""据…统计""摘自…""来源：…"等，直接陈述数据本身
+   - 不得提及审计报告、审计意见、审计机构、会计政策变更或"与审计报告一致"等表述；确需说明数据依据时，统一写作"关键数据源于企业提供支撑性材料，口径一致、可核验"
+   - 严禁生成"编制机构与数据来源""编制流程""评价机构与委托关系"这三类小节或段落，也不要写独立性声明、审核过程、保密管理等说明；编制单位、编制人员等正常信息可以按需出现
    - 对于企业联系方式（地址、电话、邮箱等），若知识库或联网查询已提供则直接使用；否则在正文中以"以工商登记信息为准"代替，不得使用 XXX 或虚假占位
 5. 字数控制：严格遵守"本章目标字数"和"本章字数上限"，不要为了凑字数堆砌废话，也不要因为字数限制而输出你的压缩策略分析——直接写出符合字数的内容即可
-6. 适当使用表格、列表增强可读性；如涉及指标对比、数据展示，优先用 Markdown 表格
+6. 关键指标、财务类数据必须用 Mermaid 图表展示（柱形图用 xychart-beta，占比用 pie），不得用 Markdown 表格罗列；其他定性或清单类内容可用表格
 7. 如涉及标准引用，标注标准名称（如GRI 305、ISO 14064等）；如涉及行业议题，结合下方提供的行业议题说明进行展开
-8. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述，避免整篇只有估算值
+8. 即使没有具体数据，也要写出该章节应包含的内容框架、管理措施、政策机制、目标设定等定性描述；没有真实数据时用管理现状与未来规划表述，不得为了凑齐数据而虚构数值
 ${conclusionRule}
 10. 若章节标题含"附录"，正文可使用表格罗列指标数据、标准索引、评分明细表、资质证明清单等内容，不强制字数下限，也不强制写章节摘要（规则 #2 对附录章节豁免）
 11. 写作风格：${styleGuidance}
 12. 跨章节数据一致性（并发生成时极其重要）：
     - 同一数据（如全年碳排放总量、能耗总量、员工人数等）在所有章节中必须保持一致，不得出现在 A 章是 5.2 万吨、在 B 章变成 3.8 万吨的情况
-    - 如果不确定某数据的精确值，使用"约 X"给出量级，并在所有章节中保持同一量级
+    - 同一数据在所有章节中必须使用完全一致的数值，不得虚构或前后矛盾
     - 需要引用其他章节的数据时，写"详见 X.X 章节"并保持数值一致
     - 跨章节去重（极其重要，违反将导致全篇大量重复内容）：
     - 下方会提供本篇报告的完整目录骨架和本章位置，你只写本章负责的内容，严禁跨章节重复
     - "公司概况""企业概况""组织与运营概况""报告前言"这类开篇章节已经介绍了企业背景、行业定位、业务范围等信息，后续所有章节（ESG治理、环境绩效、社会绩效、治理绩效等）一律不要再重复写这些基础信息
     - 环境绩效章节写能源消耗、温室气体排放，治理绩效章节写公司治理结构、商业道德，社会绩效章节写员工权益、社区参与——各管各的议题，不要交叉复述
     - 同一数据（如"全年能耗 10 万吨标准煤"）只在最合适的章节（如环境绩效）详细展开，其他章节如要引用只写"详见 X.X 章节"
-    - 若本章处于全篇末尾（如展望、附录），也不要回头重述前文已讲过的论点，保持与前文呼应但不重复`;
+    - 若本章处于全篇末尾（如展望、附录），也不要回头重述前文已讲过的论点，保持与前文呼应但不重复
+13. 图片素材使用规则：
+    - 若下方提供"可用图片素材"清单，只有在图片与本章内容直接相关时才配图
+    - 配图位置单独一行输出 [[IMG-001]] 形式的占位符，禁止输出图片 URL、Markdown 图片语法或 base64
+    - 每章最多 2 张；不得引用清单外的图片，不得编造图片
+    - 图片与本章内容无关时不要插入`;
 }
 
 function buildContentUserInstruction(node, projectInfo, reportType, options = {}, reportTypeName) {
@@ -426,8 +295,14 @@ ${trailingContext || '  （本章是最后一章）'}`;
   if (projectInfo.companyName) parts.push(`委托单位：${projectInfo.companyName}`);
   if (projectInfo.industry) parts.push(`所属行业：${projectInfo.industry}`);
   if (projectInfo.reportingPeriod) parts.push(`报告期：${projectInfo.reportingPeriod}`);
-  // 第三方评测机构信息（评价类报告必需）
-  if (projectInfo.compileUnit) parts.push(`第三方评测/编制机构：${projectInfo.compileUnit}`);
+  if (projectInfo.compileUnit) parts.push(`编制单位：${projectInfo.compileUnit}`);
+  const compileDateText = String(projectInfo.compileDate || '').trim();
+  if (compileDateText) {
+    const dateMatch = compileDateText.match(/^(\d{4})-(\d{1,2})/);
+    parts.push(`编制日期：${dateMatch ? `${dateMatch[1]}年${Number(dateMatch[2])}月` : compileDateText}`);
+  }
+  const factsBlock = buildProjectFactsBlock(projectInfo);
+  if (factsBlock) parts.push(factsBlock);
   // 篇幅约束：每章目标字数 + 字数上限（硬护栏）+ 页数指引
   if (options.chapterTargetWords && options.chapterMaxWords) {
     parts.push(`本章目标字数：${options.chapterTargetWords} 字（字数上限 ${options.chapterMaxWords} 字，严禁超出上限；允许略低于目标，不必强行凑字）`);
@@ -445,59 +320,94 @@ ${trailingContext || '  （本章是最后一章）'}`;
   const kbBlock = buildKnowledgeContextBlock(options.knowledgeContext);
   if (kbBlock) parts.push(kbBlock);
 
+  if (Array.isArray(options.imageAssets) && options.imageAssets.length) {
+    parts.push(`\n可用图片素材（只能引用以下编号）：
+${options.imageAssets.map((item) => `- ${item.key}：${item.description}`).join('\n')}
+
+配图要求：
+- 只在图片与本章内容直接相关时插入，每章最多 2 张
+- 在需要插图的位置单独一行输出 [[编号]]，例如 [[IMG-001]]
+- 禁止输出图片 URL、Markdown 图片语法或清单外编号
+- 同一图片全篇只使用一次`);
+  }
+
   // 评价结论/环评结论章节的明确指引
   const nodeTitle = String(node.title || '');
-  if (isEvaluationReport(reportType, reportTypeName)) {
-    // 评价类报告：自评价结果章节
-    if (nodeTitle.includes('自评价') || nodeTitle.includes('自评结果') || nodeTitle.includes('自评得分')) {
-      parts.push(`\n本章为企业自评价结果章节，须以企业自身视角撰写，包含：
-- 企业对照评价指标体系逐项自评的过程说明
-- 各一级指标的自评得分与依据
-- 提供的佐证材料清单（如管理体系认证证书、监测报告、能源审计报告等）
-- 自评总分汇总`);
+  // 双轨框架按"一级章节"识别章节类型，避免把"制度规范"下的子条款误判为评价章节
+  const chapterTopTitle = Array.isArray(options.outlineSkeleton)
+    ? (options.outlineSkeleton.find((item) => item.id === node.id)?.topTitle || '')
+    : '';
+  const chapterTitle = chapterTopTitle || nodeTitle;
+  parts.push(`\n本章写作要求（通用绿色专项报告框架）：
+- 称谓：前言用第一人称"我们"；制度章节用"本公司""公司"；评价章节用"该企业"第三方视角
+- 每个分节采用"一段文字说明 + 一张数据/分析表格"，本章合计 3-5 张 Markdown 表格
+- 关键数据（营业收入、研发费用、研发投入占比等）须与全篇其他章节保持一致
+- 本章开头须加一行加粗的对仗式主题标语（引号内），并写成 <p align="center"><strong>“标语”</strong></p>，不要输出章节级编号标题`);
+    if (chapterTitle.includes('前言')) {
+      parts.push(`\n本章为前言：不要写章节摘要、导语或"本前言简要回顾……"之类的说明性文字，直接从"尊敬的各利益相关方"开篇；不罗列财务数据和经营指标；用4个"以……"排比段阐述核心理念（如以制度建设筑牢根基、以技术研发驱动升级、以客户需求为导向、以人才发展为抓手）；结尾写展望与致谢，使用第一人称"我们"。
+致辞人署名必须依据知识库资料中的治理结构判断，不得默认写"企业负责人"，也不得臆造头衔：
+- 资料显示"设立董事会"或提供"董事长姓名" → 由董事长致辞，署名为"董事长 姓名"；未提供姓名时只写"董事长"，不得编造姓名
+- 资料显示"未设立董事会" → 由企业负责人致辞，署名为"企业负责人 姓名"（有法定代表人姓名时使用该姓名）；没有可用姓名时写"企业负责人"或"企业代表"
+- 资料未提及治理结构 → 统一以"企业代表"署名
+署名单独成行放在正文末尾，格式为"职务 姓名"，下一行写落款日期（使用上方提供的编制日期），两行均右对齐，例如：
+<p align="right">企业负责人 阳娜</p>
+<p align="right">2026年11月</p>
+不得出现 XXX、[姓名] 等占位内容`);
     }
-    // 评价类报告：第三方评价章节注入评测机构信息
-    if (nodeTitle.includes('第三方评价') || nodeTitle.includes('第三方评估') || nodeTitle.includes('第三方审查')) {
-      const evaluator = projectInfo.compileUnit || projectInfo.companyName || '第三方评价机构';
-      parts.push(`\n本章为第三方评价章节，由"${evaluator}"作为第三方评测机构出具。正文须以第三方评测机构的视角撰写，包含：
-- 评价流程说明（文件审查、现场核查、数据验证等）
-- 评价方法（指标对标法、权重加权评分法等）
-- 各一级指标（基础设施、管理体系、能源资源投入、产品、环境排放等）的第三方评分与扣分项
-- 现场核查发现的关键问题与重大不符合项`);
+    if (chapterTitle.includes('关于本报告')) {
+      parts.push(`\n本章为"关于本报告"：分小节说明报告说明、编制参考（从下方政策清单中选择8-9项）、报告范围、时间范围、称谓说明、报告特点；数据依据统一写作"关键数据源于企业提供支撑性材料，口径一致、可核验"；"核心理念"用 Markdown 表格列出5项价值观及其内涵；编制人员须用 Markdown 表格列出"姓名 | 职称"；不得生成"编制机构与数据来源""编制流程"小节；不得写审计报告、审计意见、审计机构、会计政策变更、"与审计报告一致"等表述；不得写编制分工或人员分工说明；也不得写评价机构与委托关系、独立性、审核过程、保密等说明`);
     }
-    // 综合评价结论章节：强制输出评级
-    if (nodeTitle.includes('评价结论') || nodeTitle.includes('综合评价')) {
-      const evaluator = projectInfo.compileUnit || '第三方评测机构';
-      parts.push(`\n本章为综合评价结论章节，是整份评价报告的核心结论，必须按以下规范输出：
-
-一、综合评价等级（必须输出，不可省略）：
-- 必须在章节开头明确给出综合评价等级：A级 / AA级 / AAA级（仅从这三档中选一）
-- 评级判定标准：总分 ≥ 90 分 → AAA级；80-89 分 → AA级；70-79 分 → A级；低于 70 分不予评级
-- 必须写出最终得分和等级，格式示例："经综合评价，${projectInfo.companyName || '该企业'}综合得分 85 分，综合评价等级为 AA级。"
-
-二、各维度评分汇总（必须输出，不可省略）：
-- 用 Markdown 表格列出各一级指标得分、权重、加权得分，示例：
-  | 一级指标 | 权重(%) | 得分 | 加权得分 |
-  |---------|--------|------|---------|
-  | 基础设施 | 20 | 85 | 17.0 |
-  | 管理体系 | 20 | 80 | 16.0 |
-  | 能源资源投入 | 20 | 90 | 18.0 |
-  | 产品 | 20 | 85 | 17.0 |
-  | 环境排放 | 20 | 85 | 17.0 |
-  | **合计** | **100** | | **85.0** |
-
-三、扣分项与重大不符合项：
-- 列明各维度的扣分项及扣分原因
-- 如有重大不符合项（一票否决项），明确标注其影响
-
-四、评价结论与建议：
-- 由"${evaluator}"出具综合评价结论
-- 末尾给出改进建议要点，与"改进建议"章节呼应`);
+    if (chapterTitle.includes('企业基本信息')) {
+      parts.push(`\n本章为企业基本信息：用 Markdown 表格列出企业名称、企业简称、统一社会信用代码、法定代表人、注册资本、成立日期、企业类型、登记状态、注册地址、主营业务、服务对象、联系电话；必须一行一个字段、按上述顺序完整列出，严禁合并字段（如把信用代码、法定代表人、注册资本写在同一行）或省略字段；已提供的字段原样使用，未提供的字段填"以工商登记为准"，不得编造；如本章补充财务数据，须用 Mermaid 柱形图呈现，不得用表格罗列`);
     }
-  } else if (isEnvironmentalImpactReport(reportType, reportTypeName) && nodeTitle.includes('评价结论')) {
-    parts.push(`\n本章为环境影响评价结论章节，按建设项目环评规范输出工程环境可行性总结论（明确"从环境保护角度，项目建设可行/不可行"），并附主要环境影响结论、污染防治措施可行性结论与建议措施；本报告为环评报告，不适用 A级/AA级/AAA级 分级评价`);
-  } else if (nodeTitle.includes('附录')) {
-    parts.push(`\n本章为附录章节，可使用表格、清单等形式罗列指标数据、标准索引、评分明细表、资质证明等支撑材料，不强制字数下限`);
+    if (chapterTitle.includes('关键指标') || chapterTitle.includes('指标总览')) {
+      parts.push(`\n本章为关键指标总览：财务数据与关键指标必须用 Mermaid 图表展示，不再用 Markdown 表格罗列。至少输出 2 个图表，每个图表后写 2-3 句解读：
+- 财务类（营业收入、营业成本、利润总额、净利润、纳税额等）用柱形图，y 轴上限按数据自动调整：
+\`\`\`mermaid
+xychart-beta
+    title "2025年度财务数据（万元）"
+    x-axis ["营业收入", "营业成本", "利润总额", "净利润", "纳税额"]
+    y-axis "金额（万元）" 0 --> 800
+    bar [772.2, 507, 89.25, 86.65, 29.2]
+\`\`\`
+- 指标构成、占比、结构类用饼图：
+\`\`\`mermaid
+pie title 关键指标构成
+    "经营指标" : 40
+    "环境指标" : 30
+    "社会责任" : 20
+    "公司治理" : 10
+\`\`\`
+图表数据只能来自知识库资料或用户填写的关键指标清单；数据不足以成图时不得虚构数值，改用文字描述现状与未来规划；严禁虚构财务、人数、知识产权、证书类数据`);
+    }
+    if (chapterTitle.includes('制度') || chapterTitle.includes('规范')) {
+      parts.push(`\n本章为制度规范章节：以公文体撰写，条文用加粗的"第一条、第二条……"开头（不使用标题级编号），至少包含总则、规范依据与编制背景、评价范围与期限、指导思想与基本原则、战略定位与总体目标、实施路径与阶段规划（基础建设期→深化推进期→巩固提升期）、组织架构与职责分工、专项领域条款、考核与评价、监督检查与持续改进、附则；每个条文后附1张表格；专项条款须紧扣企业主营业务；本章使用"本公司""公司"称谓；规范依据须从下方政策清单中选择，不得编造`);
+    }
+    if (chapterTitle.includes('综合评价')) {
+      parts.push(`\n本章为综合评价章节，是整份报告的核心结论：先写评价概述（评价方法、评价依据、评价周期，不得出现评价机构名称、委托关系、独立性声明或保密条款），再分维度评价，最后用 Markdown 表格汇总各维度评价结果，明确给出"评价结果：优秀"；结论须与前文制度、投入、管理、产出、效益、保障章节的数据一致，不得输出 A级/AA级/AAA级 分级`);
+    }
+    if (chapterTitle.includes('报告结论')) {
+      parts.push(`\n本章为报告结论：总体概述 + 各维度综合评价表（评价结果均为"优秀"）+ 未来展望；不得输出 A级/AA级/AAA级 分级`);
+    }
+    if (chapterTitle.includes('附录') && chapterTitle.includes('索引')) {
+      parts.push(`\n本章为附录1索引：分别用 Markdown 表格输出"编制索引"（序号 | 编制内容 | 所在章节）和"评价索引"（序号 | 评价维度 | 评价内容 | 所在章节），不强制章节摘要`);
+    }
+    if (chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'))) {
+      parts.push(`\n本章为附录2政策清单：用 Markdown 表格列出15-22项法律法规与政策，字段包含序号、名称、实施时间、主要内容；必须优先从下方政策清单中选择，不得编造清单外的法规；覆盖国家法律、五年规划、部门规章、地方政策、国家标准及国际议程（SDGs），须与报告主题和行业匹配`);
+    }
+
+  const isAboutReportChapter = chapterTitle.includes('关于本报告');
+  const isPolicyAppendix = chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'));
+  if (isAboutReportChapter || chapterTitle.includes('制度') || isPolicyAppendix) {
+    parts.push(buildPolicyReferenceMarkdown({
+      min: isAboutReportChapter ? 8 : (isPolicyAppendix ? 15 : 8),
+      max: isAboutReportChapter ? 9 : (isPolicyAppendix ? 22 : 10),
+    }));
+  }
+
+  const isSpecialChapter = /前言|关于本报告|企业基本信息|关键指标|指标总览|制度|规范|综合评价|报告结论|附录/.test(chapterTitle);
+  if (!isSpecialChapter) {
+    parts.push(`\n本章为评价维度章节：先写章首引导段（阐述该维度与企业战略的协同机制），再写 ${chapterNo}.1 总述（战略定位 + 发展目标），然后按分节展开；每个分节为"一段文字说明 + 一张数据/分析表格"，确保与本章标题对应的评价维度一致`);
   }
 
   if (options.userRequirements) {
@@ -508,11 +418,8 @@ ${trailingContext || '  （本章是最后一章）'}`;
 
 module.exports = {
   REPORT_TYPE_LABELS,
-  OUTLINE_TEMPLATES,
-  EVALUATION_OUTLINE_TEMPLATE,
+  DUAL_TRACK_OUTLINE_TEMPLATE,
   DOCUMENT_STYLE_GUIDANCE,
-  isEnvironmentalImpactReport,
-  isEvaluationReport,
   buildOutlineTemplateMarkdown,
   buildOutlineSystemPrompt,
   buildOutlineUserInstruction,

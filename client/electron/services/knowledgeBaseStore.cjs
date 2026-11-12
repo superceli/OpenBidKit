@@ -1148,6 +1148,49 @@ function createKnowledgeBaseStore({ app, db }) {
     return { keyword: kw, items };
   }
 
+  /** 按知识库文件夹名称读取该文件夹下全部成功文档的知识条目，用于绿色报告按委托单位取材。 */
+  function readItemsByFolderName(folderName, options = {}) {
+    const name = String(folderName || '').trim();
+    if (!name) return { keyword: name, items: [] };
+    const limit = Math.max(1, Math.min(Number(options.limit) || 20, 50));
+    const contentExcerptChars = Number(options.contentExcerptChars) || 800;
+    const folder = db.prepare(`
+      SELECT folder_id FROM knowledge_folders
+      WHERE TRIM(name) = ?
+      ORDER BY sort_order ASC, created_at ASC
+      LIMIT 1
+    `).get(name);
+    if (!folder) return { keyword: name, items: [] };
+
+    const docRows = db.prepare(`
+      SELECT document_id FROM knowledge_documents
+      WHERE folder_id = ? AND status = 'success'
+      ORDER BY sort_order ASC, created_at DESC
+      LIMIT ?
+    `).all(folder.folder_id, limit);
+    if (!docRows.length) return { keyword: name, items: [] };
+
+    const docPlaceholders = docRows.map(() => '?').join(', ');
+    const rows = db.prepare(`
+      SELECT ki.item_id, ki.title, ki.resume, ki.content, ki.source_file,
+             kd.document_id, kd.file_name
+      FROM knowledge_items ki
+      JOIN knowledge_documents kd ON kd.document_id = ki.document_id
+      WHERE kd.document_id IN (${docPlaceholders})
+      ORDER BY kd.sort_order ASC, kd.created_at DESC, ki.sort_order ASC, ki.id ASC
+    `).all(...docRows.map((row) => row.document_id));
+
+    const items = rows.map((row) => ({
+      documentId: row.document_id,
+      documentName: row.file_name,
+      itemId: row.item_id,
+      title: row.title,
+      resume: row.resume,
+      content: String(row.content || '').slice(0, contentExcerptChars),
+    }));
+    return { keyword: name, items };
+  }
+
   ensureBaseDir();
 
   return {
@@ -1182,6 +1225,7 @@ function createKnowledgeBaseStore({ app, db }) {
     readAnalysis,
     getOutlineReferences,
     searchItemsByKeyword,
+    readItemsByFolderName,
     resolvePath,
   };
 }

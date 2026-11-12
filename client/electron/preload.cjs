@@ -178,6 +178,12 @@ const bridge = {
     clear: () => ipcRenderer.invoke('green-report:clear'),
     generateReportCode: () => ipcRenderer.invoke('green-report:generate-report-code'),
   },
+  imageLibrary: {
+    list: (folderId) => ipcRenderer.invoke('green-report:list-images', folderId),
+    addImages: (folderId) => ipcRenderer.invoke('green-report:add-images', folderId),
+    updateImage: (payload) => ipcRenderer.invoke('green-report:update-image', payload),
+    deleteImage: (imageId) => ipcRenderer.invoke('green-report:delete-image', imageId),
+  },
   templates: {
     list: () => ipcRenderer.invoke('templates:list'),
     get: (templateId) => ipcRenderer.invoke('templates:get', templateId),

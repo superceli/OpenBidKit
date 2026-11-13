@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const {
   buildOutlineSystemPrompt,
@@ -216,13 +216,15 @@ async function runGreenReportOutlineTask({
 
   publish('正在调用AI生成目录...', 20);
 
-  const systemPrompt = buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName);
+  const framework = ['evaluation', 'esg-disclosure'].includes(projectInfo?.reportFramework) ? projectInfo.reportFramework : 'dual-track';
+  const systemPrompt = buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName, framework);
   const userPrompt = buildOutlineUserInstruction(reportType, projectInfo, {
     pageCount,
     documentStyle,
     targetWords,
     knowledgeContext,
     userRequirements,
+    framework,
   }, reportTypeName);
 
   // AI 调用期间的模拟进度：从 20% 逐步涨到 65%，让用户看到持续推进
@@ -286,6 +288,7 @@ async function runGreenReportContentTask({
   taskControl,
 }) {
   const { reportType, reportTypeName, projectInfo, pageCount, documentStyle, targetWords, userRequirements } = payload;
+  const framework = ['evaluation', 'esg-disclosure'].includes(projectInfo?.reportFramework) ? projectInfo.reportFramework : 'dual-track';
   const state = workspaceStore.loadState();
   const leaves = collectLeaves(state.outlineData?.outline || []);
 
@@ -352,7 +355,7 @@ async function runGreenReportContentTask({
     publish(`全篇目标 ${numericTargetWords} 字，共 ${leaves.length} 章，每章目标 ${basePerChapter} 字（上限 ${perChapterMax} 字）`, 6);
   }
 
-  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName, perChapterMin);
+  const systemPrompt = buildContentSystemPrompt(reportType, documentStyle, reportTypeName, perChapterMin, framework);
   const total = leaves.length;
   let completed = 0;
   let webSearchDowngradePublished = false;
@@ -376,8 +379,8 @@ async function runGreenReportContentTask({
   // 调用 AI 对超长章节进行精简
   async function trimContent(originalContent, chapterTitle, targetMax, aiServiceRef) {
     try {
-      const trimSystem = '你是一名专业的报告内容编辑。请对提供的章节正文进行精简压缩，保留核心论点、关键数据和结构框架，删除冗余表述、重复论证和次要细节。精简后字数须严格不超过目标上限，保持 Markdown 格式和报告文体。只输出精简后的正文，不要解释。';
-      const trimUser = `请精简以下"${chapterTitle}"章节正文，精简后字数严格不超过 ${targetMax} 字。\n\n原文：\n${originalContent}`;
+      const trimSystem = '你是一名专业的报告内容编辑。请对提供的章节正文进行精简压缩，保留核心论点、关键数据和结构框架，删除冗余表述、重复论证和次要细节。精简后字数须严格不超过目标上限，保持 Markdown 格式和报告文体。严禁删除、改写或省略原文中的 ```mermaid 代码块和 Markdown 表格：必须原样保留全部图表代码与表格数据，其中的数值不得修改；只压缩文字段落。只输出精简后的正文，不要解释。';
+      const trimUser = `请精简以下"${chapterTitle}"章节正文，精简后正文字数严格不超过 ${targetMax} 字（图表代码和表格不计入字数）。必须完整保留所有 mermaid 图表代码块和 Markdown 表格。\n\n原文：\n${originalContent}`;
       const result = await aiServiceRef.chat({
         messages: [
           { role: 'system', content: trimSystem },
@@ -385,7 +388,13 @@ async function runGreenReportContentTask({
         ],
       });
       const trimmed = typeof result === 'string' ? result : (result?.content || result?.message?.content || '');
-      return trimmed || originalContent;
+      if (!trimmed) return originalContent;
+      // 精简可能把图表删掉：图表数量减少时保留原文，优先保证图表与数据完整
+      const countMermaid = (text) => (String(text || '').match(/```mermaid/gi) || []).length;
+      if (countMermaid(originalContent) > countMermaid(trimmed)) {
+        return originalContent;
+      }
+      return trimmed;
     } catch (_err) {
       return originalContent;
     }
@@ -416,6 +425,7 @@ async function runGreenReportContentTask({
       chapterTargetWords: basePerChapter,
       chapterMaxWords: perChapterMax,
       userRequirements,
+      framework,
       outlineSkeleton, // 跨章节去重上下文
       imageAssets: imageAssets.map((item) => ({ key: item.key, description: item.description })),
     }, reportTypeName);
@@ -468,10 +478,38 @@ async function runGreenReportContentTask({
       }
     }
 
-    // 后处理：如果章节超上限，调用 AI 精简一次
+    // 前言章节禁止表格：模型偶尔输出核心理念表/举措表，检测到表格时重试一次
+    const prefaceChapter = framework === 'dual-track' && /前言/.test(chapterTopTitle);
+    const hasMarkdownTable = /^\s*\|.*\|\s*$/m.test(content);
+    if (prefaceChapter && content && hasMarkdownTable) {
+      publish(`${leaf.title} 出现了表格，正在按“纯段落”重新生成…`, Math.round((completed / total) * 100));
+      try {
+        const retryHint = '\n\n【重要】上一次输出包含了 Markdown 表格，违反了本章要求。请重新输出本章完整内容：不得出现任何 Markdown 表格（包括核心理念表、年度举措表、管理导向表），核心理念一律用"以……"排比段落表达，不得出现表头或表格线。';
+        const retryResult = await aiService.chat({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `${userPrompt}${retryHint}` },
+          ],
+        });
+        const retryContent = typeof retryResult === 'string'
+          ? retryResult
+          : (retryResult?.content || retryResult?.message?.content || '');
+        if (retryContent && !/^\s*\|.*\|\s*$/m.test(retryContent)) {
+          content = retryContent;
+        }
+      } catch (error) {
+        // 重试失败时保留原内容
+      }
+      if (taskControl.signal.aborted) {
+        throw taskControl.signal.reason || new Error('任务已取消');
+      }
+    }
+
+    // 后处理：如果章节超上限，调用 AI 精简一次；含图表的章节放宽阈值，避免重写时丢图
     if (perChapterMax > 0 && content) {
       const currentWords = countWords(content);
-      if (currentWords > perChapterMax * 1.2) {
+      const trimThreshold = perChapterMax * (/```mermaid/i.test(content) ? 1.5 : 1.2);
+      if (currentWords > trimThreshold) {
         publish(`${leaf.title} 实际 ${currentWords} 字，超过上限 ${perChapterMax}，正在精简...`, Math.round((completed / total) * 100));
         content = await trimContent(content, leaf.title, perChapterMax, aiService);
         // 精简后再检查一次取消标志（精简本身也是一次异步调用）

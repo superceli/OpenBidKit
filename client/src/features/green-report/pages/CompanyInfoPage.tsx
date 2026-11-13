@@ -221,25 +221,6 @@ function CompanyInfoPage({
         </div>
 
         <div className="green-report-block">
-          <h2 className="green-report-title">编制信息与公示平台</h2>
-          <p className="green-report-subtitle">企业工商信息与关键指标优先从知识库提取；这里可填写编制人员、补充关键指标和公示平台</p>
-          <div className="green-report-form-grid">
-            <label className="green-report-field green-report-field-span-2">
-              <span className="green-report-field-label">编制人员 <span className="green-report-field-optional">（每行“姓名|职称”，至少 3 人）</span></span>
-              <textarea className="green-report-textarea" value={draftProjectInfo.compileStaffText} onChange={handleFieldChange('compileStaffText')} placeholder={'张三|ESG商业分析师\n李四|高级工程师\n王五|会计师'} rows={4} />
-            </label>
-            <label className="green-report-field green-report-field-span-2">
-              <span className="green-report-field-label">补充关键指标 <span className="green-report-field-optional">（可选；留空则从知识库提取，每行“类别|名称|现状值|目标值|单位|对应章节”）</span></span>
-              <textarea className="green-report-textarea" value={draftProjectInfo.keyIndicatorsText} onChange={handleFieldChange('keyIndicatorsText')} placeholder={'投入|研发投入占营业收入比例|2.5%|≥2.5%|%|投入评价\n质量|客户满意度|98%|≥95%|%|管理评价'} rows={4} />
-            </label>
-            <label className="green-report-field green-report-field-span-2">
-              <span className="green-report-field-label">公示平台 <span className="green-report-field-optional">（每行“平台名称|网址”，留空使用默认平台）</span></span>
-              <textarea className="green-report-textarea" value={draftProjectInfo.publicityPlatformsText} onChange={handleFieldChange('publicityPlatformsText')} placeholder={'蔚碳环保官网|https://www.weitanhuanbao.com\n绿色低碳投标网|https://www.tanshuangbiao.com'} rows={3} />
-            </label>
-          </div>
-        </div>
-
-        <div className="green-report-block">
           <h2 className="green-report-title">封面信息</h2>
           <p className="green-report-subtitle">导出 Word 时回显到封面页，留空则不显示该字段</p>
           <div className="green-report-form">

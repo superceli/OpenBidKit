@@ -24,6 +24,16 @@ const DOCUMENT_STYLE_GUIDANCE = {
   academic: '采用学术规范型写作风格，引用国内外标准和研究，注重方法论说明和文献引用，语言客观严谨。',
 };
 
+// ============ 报告框架类型 ============
+// dual-track：制度规范 + 第三方评价双轨（默认，含前言/关于本报告/附录，封面目录由导出模板生成）
+// evaluation：专项评价报告（旧版写法，八章结构，直接从第一章开始，不生成封面/目录/签章页/尾页）
+// esg-disclosure：ESG 披露报告（十章结构，直接从第一章开始，不生成封面/目录/签章页/尾页）
+const REPORT_FRAMEWORKS = { 'dual-track': '双轨制框架', evaluation: '评价报告框架', 'esg-disclosure': 'ESG披露框架' };
+
+function resolveFrameworkLabel(framework) {
+  return REPORT_FRAMEWORKS[framework] || REPORT_FRAMEWORKS['dual-track'];
+}
+
 // ============ 报告大纲模板（制度规范 + 第三方评价双轨） ============
 // 所有报告统一使用该框架，覆盖 13 个标准模块，结论使用"优秀"。
 // 封面与目录由导出模板生成，不作为目录章节。
@@ -44,10 +54,40 @@ const DUAL_TRACK_OUTLINE_TEMPLATE = [
   { title: '附录2 法律法规与政策参考清单', description: '15-22项法律法规与政策，含实施时间和主要内容，覆盖国家法律、规划、部门规章、地方政策、国家标准、国际议程（SDGs）' },
 ];
 
-function buildOutlineTemplateMarkdown(reportType, reportTypeName) {
+// ============ 专项评价报告大纲模板（旧版写法，八章结构） ============
+// 直接从第一章开始，不生成封面、目录、签章页、尾页；章节标题可按报告主题调整。
+const EVALUATION_OUTLINE_TEMPLATE = [
+  { title: '企业概况', description: '公司简介（工商登记信息、成立时间、注册资本、注册地址、主营业务）、业务范围与经营模式、组织架构与人员配置' },
+  { title: '评价目的与依据', description: '评价背景与目标（摸清现状、判断匹配、提出路径）、评价依据与标准（评价方法、口径、可比性与务实性原则）' },
+  { title: '评价对象现状', description: '围绕报告主题展开：总量与构成、岗位设置与分工、资历与能力结构、近年变化情况' },
+  { title: '业务需求与匹配分析', description: '结合企业主营业务与实际场景逐项分析需求（如技术支撑、交付响应、项目管理），判断现有条件与业务需求的匹配程度' },
+  { title: '投入与产出效率', description: '经费与资源投入水平、成果与绩效表现、人均产出与效率分析' },
+  { title: '适配性评价', description: '与业务规模的匹配度、与同行业一般水平对比、不足与冗余分析' },
+  { title: '问题识别与优化建议', description: '主要问题、优化路径与建设方案、人才引进与培养机制' },
+  { title: '评价结论', description: '总体评价结论、后续改进方向' },
+];
+
+// ============ ESG 披露报告大纲模板（十章结构，所有报告类型通用） ============
+// 直接从第一章开始，不生成封面、目录、签章页、尾页；章节标题按报告主题调整。
+const ESG_OUTLINE_TEMPLATE = [
+  { title: '编制说明', description: '编制目的、编制依据、编制范围与期间、编制方法（资料核查/访谈/问卷/对标）、数据口径与说明' },
+  { title: '公司概况与治理管理', description: '公司概况（工商登记信息，表格呈现）、治理架构、管理体系与职责分工、利益相关方沟通、实质性议题' },
+  { title: '合规经营与风险管理', description: '合规体系、廉洁与商业道德、信息安全与客户隐私、风险管理（风险识别、评估、应对）' },
+  { title: '环境与专项绩效', description: '按报告主题命名：ESG 报告写环境绩效（环境管理、能源与气候、水资源与废弃物、绿色服务）；碳足迹报告写核算边界与排放源、排放结果；专项报告写对应主题的现状与绩效' },
+  { title: '社会绩效：员工', description: '员工结构、员工权益、职业健康与安全、培训与发展' },
+  { title: '社会绩效：客户与社区', description: '服务质量、客户满意与投诉、供应链责任、社会公益' },
+  { title: '创新与高质量发展', description: '研发投入、知识产权、创新成果与转化' },
+  { title: '关键绩效', description: '按报告主题汇总关键指标（ESG 报告为环境/社会/治理绩效；其他报告为主题关键指标），用 Mermaid 图表 + 表格呈现，并写明资质与外部认可' },
+  { title: '差距分析与改进计划', description: '差距分析、改进计划（措施、时限、责任部门）、披露与跟踪机制' },
+  { title: '结论', description: '主要结论（分条）、总体评价、建议摘要（近期/中期/长期）' },
+];
+
+function buildOutlineTemplateMarkdown(reportType, reportTypeName, framework) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const lines = [`# ${label}参考大纲`];
-  const template = DUAL_TRACK_OUTLINE_TEMPLATE;
+  const template = framework === 'evaluation'
+    ? EVALUATION_OUTLINE_TEMPLATE
+    : (framework === 'esg-disclosure' ? ESG_OUTLINE_TEMPLATE : DUAL_TRACK_OUTLINE_TEMPLATE);
   template.forEach((item, i) => {
     lines.push(`${i + 1}. ${item.title}`);
     if (item.description) lines.push(`   - ${item.description}`);
@@ -89,10 +129,36 @@ function buildKnowledgeContextBlock(knowledgeContext) {
   return lines.join('\n');
 }
 
-function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
+function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName, framework) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
-  const structureRule = `\n7. 本报告采用"制度规范 + 第三方评价"双轨结构，必须覆盖以下13个标准模块（可按行业细化子项，但模块不可缺失）：
+  const isEvaluation = framework === 'evaluation';
+  const isEsgDisclosure = framework === 'esg-disclosure';
+  const structureRule = isEvaluation
+    ? `\n7. 本报告采用"专项评价报告"结构，必须覆盖以下8个一级章节（章节标题可结合报告主题命名，但模块不可缺失）：
+   - 企业概况（公司简介、业务与组织架构）
+   - 评价目的与依据（评价背景与目标、评价依据与标准）
+   - 评价对象现状（总量与构成、岗位与分工、资历与能力结构、近年变化）
+   - 业务需求与匹配分析（结合主营业务逐项分析，判断匹配程度）
+   - 投入与产出效率（资金与资源投入、成果绩效、人均产出）
+   - 适配性评价（与业务规模匹配度、同行水平对比、不足与冗余）
+   - 问题识别与优化建议（主要问题、优化路径、人才引进与培养机制）
+   - 评价结论（总体结论、后续改进方向）
+   要求：一级章节即整篇主体，直接从第一章开始；不生成前言、关于本报告、制度规范、附录、致谢、封面、目录、签章页和尾页；每个一级章节下设 2-4 个二级小节，合计约 8 章、24-32 个叶子节点。`
+    : (isEsgDisclosure
+      ? `\n7. 本报告采用"可持续披露"通用结构（适用于 ESG、碳足迹、绿色金融、专项评价等所有报告类型），必须覆盖以下10个一级章节（章节标题须结合报告类型与主题命名，但模块不可缺失）：
+   - 编制说明（编制目的、编制依据、编制范围与期间、编制方法、数据口径与说明）
+   - 公司概况与治理管理（公司概况、治理架构、管理体系与职责分工、利益相关方沟通、实质性议题）
+   - 合规经营与风险管理（合规体系、廉洁与商业道德、信息安全与客户隐私、风险管理）
+   - 环境与专项绩效（ESG 报告写环境绩效；碳足迹报告写核算边界与排放源、排放结果；其他报告写该主题的现状与绩效）
+   - 社会绩效：员工（员工结构、员工权益、职业健康与安全、培训与发展）
+   - 社会绩效：客户与社区（服务质量、客户满意与投诉、供应链责任、社会公益）
+   - 创新与高质量发展（研发投入、知识产权、创新成果与转化）
+   - 关键绩效（按报告主题汇总关键指标，配 Mermaid 图表与表格，并写明资质与外部认可）
+   - 差距分析与改进计划（差距分析、改进计划、披露与跟踪机制）
+   - 结论（主要结论、总体评价、建议摘要）
+   要求：直接以"编制说明"作为第一章，不生成封面、目录、前言致辞、关于本报告、制度规范、附录、签章页和尾页；每个一级章节下设 3-5 个二级小节，合计约 10 章、35-45 个叶子节点。章节标题要贴合作业主题：例如碳足迹报告可用"核算边界与排放源""排放结果与强度"；社会责任报告可保留"社会绩效"表述。`
+      : `\n7. 本报告采用"制度规范 + 第三方评价"双轨结构，必须覆盖以下13个标准模块（可按行业细化子项，但模块不可缺失）：
    - 前言（"尊敬的各利益相关方"开篇，按治理结构确定致辞人署名：设立董事会由董事长致辞，未设立董事会由企业负责人或企业代表致辞，结尾展望与致谢）
    - 关于本报告（报告说明、编制参考、报告范围、时间范围、称谓说明、报告特点、核心理念表）
    - 企业基本信息
@@ -104,9 +170,11 @@ function buildOutlineSystemPrompt(reportType, documentStyle, reportTypeName) {
    - 附录1 索引（编制索引、评价索引）
    - 附录2 法律法规与政策参考清单（15-22项，含实施时间和主要内容）
    - 禁止生成"编制机构与数据来源""编制流程""评价机构与委托关系"这三类小节
-   封面与目录由导出模板自动生成，不要作为目录章节。`;
+   封面与目录由导出模板自动生成，不要作为目录章节。`);
 
-  const standardsRule = '5. 目录须对标国家"十四五""十五五"规划、行业政策与国家标准，在附录中列出政策依据清单；不要以 GRI/SASB/TCFD 作为主要框架';
+  const standardsRule = isEvaluation || isEsgDisclosure
+    ? '5. 编制依据可对标国家"十四五""十五五"规划、行业政策与国家标准，但不要把政策清单单列为附录章节；不要以 GRI/SASB/TCFD 作为主要框架'
+    : '5. 目录须对标国家"十四五""十五五"规划、行业政策与国家标准，在附录中列出政策依据清单；不要以 GRI/SASB/TCFD 作为主要框架';
 
   return `你是一名专业的${label}撰写专家。根据用户提供的企业信息和报告类型，生成一份结构完整、内容专业的${label}目录。
 
@@ -145,8 +213,8 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
     const maxLeaves = Math.max(minLeaves, Math.ceil(estimatedTotal / 800));
     parts.push(`篇幅规划：请控制目录叶子节点数量在 ${minLeaves}-${maxLeaves} 个之间，使每章正文字数约 ${Math.floor(estimatedTotal / Math.max(minLeaves, 1))}-${Math.floor(estimatedTotal / Math.max(maxLeaves, 1))} 字，避免章节过碎或过粗`);
   }
-  parts.push(`\n参考大纲模板：\n${buildOutlineTemplateMarkdown(reportType, reportTypeName)}`);
-  // 双轨框架只注入行业议题，不注入 GRI/TCFD 标准指标
+  parts.push(`\n参考大纲模板：\n${buildOutlineTemplateMarkdown(reportType, reportTypeName, options.framework)}`);
+  // 框架只注入行业议题，不注入 GRI/TCFD 标准指标
   const standardsBlock = buildIndustryTopicsMarkdown(projectInfo.industry);
   if (standardsBlock) parts.push(`\n${standardsBlock}`);
   parts.push(buildPolicyReferenceMarkdown({ title: '报告编制参考政策清单', min: 8, max: 9 }));
@@ -162,10 +230,31 @@ function buildOutlineUserInstruction(reportType, projectInfo, options = {}, repo
   return parts.join('\n');
 }
 
-function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, minWords) {
+function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, minWords, framework) {
   const label = resolveReportTypeLabel(reportType, reportTypeName);
   const styleGuidance = DOCUMENT_STYLE_GUIDANCE[documentStyle] || DOCUMENT_STYLE_GUIDANCE.standard;
-  const conclusionRule = `\n9. 本报告采用"制度规范 + 第三方评价"双轨结构，必须遵守：
+  const isEvaluation = framework === 'evaluation';
+  const isEsgDisclosure = framework === 'esg-disclosure';
+  const conclusionRule = isEvaluation
+    ? `\n9. 本报告采用"专项评价报告"结构，必须遵守：
+   - 统一使用"该公司""企业"第三方评价视角，语言客观、务实
+   - 按"现状—需求—匹配—问题—建议—结论"的逻辑推进，前后数据与结论一致
+   - 每个小节以连贯论述为主，可按需配合数据/分析表格（每章 1-3 张），不要堆砌表格
+   - 财务数据与关键指标优先用 Mermaid 图表（柱形图 xchart-beta、占比 pie）呈现，不得用 Markdown 表格罗列
+   - 不输出章节标语、前言、关于本报告、制度条文、附录索引等双轨制内容；不写致谢
+   - 政策法规仅作为评价依据引用，不单列政策清单章节
+   - 关键数据（营业收入、研发费用、研发投入占比等）在全篇保持一致`
+    : (isEsgDisclosure
+      ? `\n9. 本报告采用"可持续披露"通用结构（适用于所有报告类型），必须遵守：
+   - 统一使用"公司""该公司"第三人称，客观陈述、数据驱动，不写"我们"式致辞
+   - 每个小节按"现状—数据—管理措施—改进方向"组织，重要数据配表格或 Mermaid 图表
+   - 按报告类型组织内容：ESG 报告覆盖环境/社会/治理；碳足迹报告围绕核算边界、排放源、排放结果；专项报告围绕该主题现状与绩效
+   - 财务、能耗、碳排放、员工、知识产权、证书等事实数据严禁编造；缺失时写管理措施与未来规划
+   - 关键绩效章节中的量化指标优先用 Mermaid 图表（xychart-beta / pie）呈现
+   - 不输出章节标语、致辞式前言、关于本报告、制度条文、附录索引等双轨制内容
+   - 政策法规作为编制依据引用，不单列政策清单章节
+   - 关键数据（营业收入、研发费用、能耗、碳排放、员工人数等）在全篇保持一致`
+      : `\n9. 本报告采用"制度规范 + 第三方评价"双轨结构，必须遵守：
    - 称谓切换：前言用第一人称"我们"；制度章节用"本公司""公司"公文体；评价章节用"该企业"第三方视角
    - 制度章节条文用加粗的"第一条、第二条……"开头（不使用标题级编号），每个条文后附1张结构化表格（职责分工表、阶段规划表、投入方向表等）
    - 评价章节按"投入→管理→产出→效益→保障"组织，每个分节为"一段文字说明 + 一张数据/分析表格"，每章3-5张表格
@@ -173,7 +262,7 @@ function buildContentSystemPrompt(reportType, documentStyle, reportTypeName, min
    - 综合评价与报告结论章节必须给出"评价结果：优秀"，各维度评价结果均为"优秀"
    - 每章可加一行加粗的对仗式主题标语（引号内），必须写成 <p align="center"><strong>“标语”</strong></p> 以居中展示，不要使用标题级编号
    - 政策对标：引用国家法律法规、"十四五""十五五"规划、部门规章、地方政策和国家标准，不以 GRI/SASB/TCFD 作为主要依据
-   - 关键数据（营业收入、研发费用、研发投入占比等）在全篇保持一致`;
+   - 关键数据（营业收入、研发费用、研发投入占比等）在全篇保持一致`);
 
   return `你是一名专业的${label}写作专家。你的唯一任务是直接输出一份写好的${label}正文。
 
@@ -342,18 +431,39 @@ ${options.imageAssets.map((item) => `- ${item.key}：${item.description}`).join(
     ? (options.outlineSkeleton.find((item) => item.id === node.id)?.topTitle || '')
     : '';
   const chapterTitle = chapterTopTitle || nodeTitle;
+  const isEvaluation = options.framework === 'evaluation';
+  const isEsgDisclosure = options.framework === 'esg-disclosure';
   // 关键指标章节用 Mermaid 图表呈现，必须排除“每节一张表格”的通用要求，避免指令冲突
-  const isKeyIndicatorChapter = chapterTitle.includes('关键指标') || chapterTitle.includes('指标总览');
+  const isKeyIndicatorChapter = !isEsgDisclosure && (chapterTitle.includes('关键指标') || chapterTitle.includes('指标总览'));
+  const isPrefaceChapter = !isEvaluation && !isEsgDisclosure && chapterTitle.includes('前言');
   const chapterTableRule = isKeyIndicatorChapter
     ? '- 本章为关键指标总览：禁止输出任何 Markdown 表格（包括指标清单、指标明细表），指标数据一律改用 Mermaid 图表呈现'
-    : '- 每个分节采用"一段文字说明 + 一张数据/分析表格"，本章合计 3-5 张 Markdown 表格';
-  parts.push(`\n本章写作要求（通用绿色专项报告框架）：
+    : (isPrefaceChapter
+      ? '- 本章为前言：整章不要使用任何 Markdown 表格（含核心理念表、年度举措表、管理导向表），全部用连贯段落呈现'
+      : (isEvaluation || isEsgDisclosure
+        ? '- 以连贯论述为主，可按需配合 1-3 张数据/分析表格，不要堆砌表格'
+        : '- 每个分节采用"一段文字说明 + 一张数据/分析表格"，本章合计 3-5 张 Markdown 表格'));
+  parts.push(isEvaluation
+    ? `\n本章写作要求（专项评价报告框架）：
+- 称谓：统一使用"该公司""企业"第三方评价视角
+${chapterTableRule}
+- 关键数据（营业收入、研发费用、研发投入占比等）须与全篇其他章节保持一致
+- 不要输出章节标语、<p align="center"> 标语或章节级编号标题`
+    : (isEsgDisclosure
+      ? `\n本章写作要求（可持续披露框架）：
+- 称谓：统一使用"公司""该公司"第三人称
+${chapterTableRule}
+- 关键数据（营业收入、能耗、碳排放、员工人数等）须与全篇其他章节保持一致
+- 章节标题与内容须贴合当前报告类型，不要套用不相关的主题表述
+- 不要输出章节标语、致辞式前言或章节级编号标题`
+      : `\n本章写作要求（通用绿色专项报告框架）：
 - 称谓：前言用第一人称"我们"；制度章节用"本公司""公司"；评价章节用"该企业"第三方视角
 ${chapterTableRule}
 - 关键数据（营业收入、研发费用、研发投入占比等）须与全篇其他章节保持一致
-- 本章开头须加一行加粗的对仗式主题标语（引号内），并写成 <p align="center"><strong>“标语”</strong></p>，不要输出章节级编号标题`);
-    if (chapterTitle.includes('前言')) {
+- 本章开头须加一行加粗的对仗式主题标语（引号内），并写成 <p align="center"><strong>“标语”</strong></p>，不要输出章节级编号标题`));
+    if (!isEvaluation && !isEsgDisclosure && chapterTitle.includes('前言')) {
       parts.push(`\n本章为前言：不要写章节摘要、导语或"本前言简要回顾……"之类的说明性文字，直接从"尊敬的各利益相关方"开篇；不罗列财务数据和经营指标；用4个"以……"排比段阐述核心理念（如以制度建设筑牢根基、以技术研发驱动升级、以客户需求为导向、以人才发展为抓手）；结尾写展望与致谢，使用第一人称"我们"。
+整章严禁输出任何 Markdown 表格（不要核心理念表、年度举措表、管理导向表），核心理念一律用"以……"排比段落表达，不要出现表头或表格线。
 致辞人署名必须依据知识库资料中的治理结构判断，不得默认写"企业负责人"，也不得臆造头衔：
 - 资料显示"设立董事会"或提供"董事长姓名" → 由董事长致辞，署名为"董事长 姓名"；未提供姓名时只写"董事长"，不得编造姓名
 - 资料显示"未设立董事会" → 由企业负责人致辞，署名为"企业负责人 姓名"（有法定代表人姓名时使用该姓名）；没有可用姓名时写"企业负责人"或"企业代表"
@@ -363,7 +473,7 @@ ${chapterTableRule}
 <p align="right">2026年11月</p>
 不得出现 XXX、[姓名] 等占位内容`);
     }
-    if (chapterTitle.includes('关于本报告')) {
+    if (!isEvaluation && !isEsgDisclosure && chapterTitle.includes('关于本报告')) {
       parts.push(`\n本章为"关于本报告"：分小节说明报告说明、编制参考（从下方政策清单中选择8-9项）、报告范围、时间范围、称谓说明、报告特点；数据依据统一写作"关键数据源于企业提供支撑性材料，口径一致、可核验"；"核心理念"用 Markdown 表格列出5项价值观及其内涵；编制人员须用 Markdown 表格列出"姓名 | 职称"；不得生成"编制机构与数据来源""编制流程"小节；不得写审计报告、审计意见、审计机构、会计政策变更、"与审计报告一致"等表述；不得写编制分工或人员分工说明；也不得写评价机构与委托关系、独立性、审核过程、保密等说明`);
     }
     if (chapterTitle.includes('企业基本信息')) {
@@ -399,25 +509,64 @@ pie title 关键指标构成
 \`\`\`
 饼图权重如无真实来源，按报告类型合理设定即可；柱形图数值必须来自知识库资料或用户填写的关键指标清单。数据不足以成图时不得虚构数值，改用文字描述现状与未来规划，绝对不得退回 Markdown 表格；严禁虚构财务、人数、知识产权、证书类数据`);
     }
-    if (chapterTitle.includes('制度') || chapterTitle.includes('规范')) {
+    if (!isEvaluation && (chapterTitle.includes('制度') || chapterTitle.includes('规范'))) {
       parts.push(`\n本章为制度规范章节：以公文体撰写，条文用加粗的"第一条、第二条……"开头（不使用标题级编号），至少包含总则、规范依据与编制背景、评价范围与期限、指导思想与基本原则、战略定位与总体目标、实施路径与阶段规划（基础建设期→深化推进期→巩固提升期）、组织架构与职责分工、专项领域条款、考核与评价、监督检查与持续改进、附则；每个条文后附1张表格；专项条款须紧扣企业主营业务；本章使用"本公司""公司"称谓；规范依据须从下方政策清单中选择，不得编造`);
     }
-    if (chapterTitle.includes('综合评价')) {
+    if (!isEvaluation && chapterTitle.includes('综合评价')) {
       parts.push(`\n本章为综合评价章节，是整份报告的核心结论：先写评价概述（评价方法、评价依据、评价周期，不得出现评价机构名称、委托关系、独立性声明或保密条款），再分维度评价，最后用 Markdown 表格汇总各维度评价结果，明确给出"评价结果：优秀"；结论须与前文制度、投入、管理、产出、效益、保障章节的数据一致，不得输出 A级/AA级/AAA级 分级`);
     }
-    if (chapterTitle.includes('报告结论')) {
+    if (!isEvaluation && chapterTitle.includes('报告结论')) {
       parts.push(`\n本章为报告结论：总体概述 + 各维度综合评价表（评价结果均为"优秀"）+ 未来展望；不得输出 A级/AA级/AAA级 分级`);
     }
-    if (chapterTitle.includes('附录') && chapterTitle.includes('索引')) {
+    if (isEvaluation && (chapterTitle.includes('评价结论') || chapterTitle.includes('结论'))) {
+      parts.push(`\n本章为评价结论章节：先给出总体评价结论（结合前文现状、匹配、投入产出、适配性分析），再分条列出后续改进方向；结论须与前文数据一致；不使用"优秀/AAA"等分级表述，语言客观务实`);
+    }
+    if (!isEvaluation && chapterTitle.includes('附录') && chapterTitle.includes('索引')) {
       parts.push(`\n本章为附录1索引：分别用 Markdown 表格输出"编制索引"（序号 | 编制内容 | 所在章节）和"评价索引"（序号 | 评价维度 | 评价内容 | 所在章节），不强制章节摘要`);
     }
-    if (chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'))) {
+    if (!isEvaluation && chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'))) {
       parts.push(`\n本章为附录2政策清单：用 Markdown 表格列出15-22项法律法规与政策，字段包含序号、名称、实施时间、主要内容；必须优先从下方政策清单中选择，不得编造清单外的法规；覆盖国家法律、五年规划、部门规章、地方政策、国家标准及国际议程（SDGs），须与报告主题和行业匹配`);
     }
 
-  const isAboutReportChapter = chapterTitle.includes('关于本报告');
-  const isPolicyAppendix = chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'));
-  if (isAboutReportChapter || chapterTitle.includes('制度') || isPolicyAppendix) {
+  if (isEsgDisclosure && (chapterTitle.includes('编制说明') || chapterTitle.includes('编制目的'))) {
+    parts.push(`\n本章为编制说明：分小节写编制目的、编制依据、编制范围与期间（报告主体、边界、时间范围）、编制方法（资料核查、访谈、问卷、标杆对比）、数据口径与说明（财务、环境、社会数据的来源与单位）；语言客观，不写致辞、致谢或报告亮点罗列；
+本章只作说明性文字，不铺陈企业成绩，不重复后续章节内容`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('公司治理') || chapterTitle.includes('治理管理') || chapterTitle.includes('ESG管理') || chapterTitle.includes('公司概况'))) {
+    parts.push(`\n本章为公司概况与治理管理：公司概况用 Markdown 表格列出工商登记字段（缺失填"以工商登记为准"）；再写治理架构（股东会/执行董事/监事/经营层及决策机制）、管理体系与职责分工（含 ESG 或专项工作小组）、利益相关方沟通（识别对象、沟通方式、诉求回应）、实质性议题（议题识别方法与重要性排序）；不写审计意见与评价机构关系`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('合规') || chapterTitle.includes('风险'))) {
+    parts.push(`\n本章为合规经营与风险管理：合规体系（法规清单、合规性评价、合同审查、培训）、廉洁与商业道德、信息安全与客户隐私、风险管理（识别—评估—应对—监控，列出重大风险与应对策略）；避免编造处罚记录，缺失时写制度建设与防控措施`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('环境') || chapterTitle.includes('碳') || chapterTitle.includes('能源') || chapterTitle.includes('专项绩效'))) {
+    parts.push(`\n本章为环境与专项绩效，按报告类型组织内容：
+- ESG / 环境类报告：环境管理、能源与气候（能耗、碳排放必须用 Mermaid 柱形图/饼图并分析强度变化）、水资源与废弃物、绿色服务
+- 碳足迹报告：核算边界与排放源、活动数据与排放因子、排放结果与强度
+- 其他专项报告：该主题的现状、数据与绩效表现
+数据缺失时写计量与改进计划，不得虚构`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('员工') || chapterTitle.includes('人才'))) {
+    parts.push(`\n本章为社会绩效（员工）：员工结构（人数、性别、年龄、学历，用表格）、员工权益（合同、社保、工时、诉求渠道）、职业健康与安全（体系认证、安全投入、培训演练、事故指标）、培训与发展（培训场次/人次/投入、双通道晋升）；事实数据缺失时写制度与规划`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('客户') || chapterTitle.includes('社区') || chapterTitle.includes('供应链'))) {
+    parts.push(`\n本章为社会绩效（客户与社区）：服务质量（项目数量、一次交付合格率、报告时效）、客户满意与投诉（满意度调查、投诉处理闭环）、供应链责任（供应商数量、本地化与体系认证比例、廉洁协议）、社会公益（活动场次、覆盖人次、投入）；数据缺失时写管理机制与改进方向`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('创新') || chapterTitle.includes('研发'))) {
+    parts.push(`\n本章为创新与高质量发展：研发投入（费用、占营收比例、研发人员与工时）、知识产权（有效数量与类型、新增数量）、创新成果与转化（新产品新服务收入、转化率、研发投入产出比）；严禁编造知识产权数量与研发费用，缺失时写布局与规划`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('关键绩效') || chapterTitle.includes('关键指标'))) {
+    parts.push(`\n本章为关键绩效：按报告主题汇总关键指标（ESG 报告为环境/社会/治理三个维度；其他报告为主题核心指标），量化指标必须用 Mermaid 图表呈现，可再配 1-2 张 Markdown 汇总表；最后写资质与外部认可（体系认证、行业荣誉、政府认定）。数值必须与前文章节一致，缺失指标如实标注统计范围，不得虚构`);
+  }
+  if (isEsgDisclosure && (chapterTitle.includes('差距') || chapterTitle.includes('改进'))) {
+    parts.push(`\n本章为差距分析与改进计划：先列出主要差距（不涉及重大违规），再用表格给出改进计划（措施、时限、责任部门、投入预算），最后说明披露与跟踪机制（披露周期、渠道、后续第三方审验计划）；改进计划须可执行、可检查`);
+  }
+  if (isEsgDisclosure && chapterTitle.includes('结论')) {
+    parts.push(`\n本章为结论：先分条输出主要结论（覆盖报告主题各主要维度），再作总体评价（所处阶段判断），最后给出近期/中期/长期建议摘要；结论须与前文数据一致，不使用"优秀/AAA"等分级表述`);
+  }
+
+  const isAboutReportChapter = !isEvaluation && !isEsgDisclosure && chapterTitle.includes('关于本报告');
+  const isPolicyAppendix = !isEvaluation && !isEsgDisclosure && chapterTitle.includes('附录') && (chapterTitle.includes('政策') || chapterTitle.includes('法规'));
+  if (isAboutReportChapter || (!isEvaluation && !isEsgDisclosure && chapterTitle.includes('制度')) || isPolicyAppendix) {
     parts.push(buildPolicyReferenceMarkdown({
       min: isAboutReportChapter ? 8 : (isPolicyAppendix ? 15 : 8),
       max: isAboutReportChapter ? 9 : (isPolicyAppendix ? 22 : 10),
@@ -425,7 +574,7 @@ pie title 关键指标构成
   }
 
   const isSpecialChapter = /前言|关于本报告|企业基本信息|关键指标|指标总览|制度|规范|综合评价|报告结论|附录/.test(chapterTitle);
-  if (!isSpecialChapter) {
+  if (!isEvaluation && !isEsgDisclosure && !isSpecialChapter) {
     parts.push(`\n本章为评价维度章节：先写章首引导段（阐述该维度与企业战略的协同机制），再写 ${chapterNo}.1 总述（战略定位 + 发展目标），然后按分节展开；每个分节为"一段文字说明 + 一张数据/分析表格"，确保与本章标题对应的评价维度一致`);
   }
 

@@ -7,6 +7,12 @@ export type GreenReportType = string;
 
 export type GreenDocumentStyle = 'standard' | 'narrative' | 'data-driven' | 'academic';
 
+/** 报告框架：dual-track 双轨制（默认）；evaluation 专项评价（旧版写法）；esg-disclosure ESG披露（十章，从第一章开始） */
+export type GreenReportFramework = 'dual-track' | 'evaluation' | 'esg-disclosure';
+
+/** 页面底图：default 默认底图；brand 品牌Logo底图；none 不使用底图 */
+export type GreenPageBackground = 'default' | 'brand' | 'none';
+
 export type GreenTaskType =
   | 'green-report-outline'
   | 'green-report-content';
@@ -34,6 +40,10 @@ export interface GreenProjectInfo {
   compileDate: string;
   /** 封面回显字段：报告编号，空字符串表示自动生成 */
   reportCode: string;
+  /** 报告框架，缺省按双轨制处理 */
+  reportFramework?: GreenReportFramework;
+  /** 页面底图，缺省使用默认底图 */
+  pageBackground?: GreenPageBackground;
 }
 
 export interface GreenKnowledgeContextItem {
@@ -148,6 +158,8 @@ export const DEFAULT_GREEN_PROJECT_INFO: GreenProjectInfo = {
   compileUnit: '安徽蔚碳环保科技有限公司',
   compileDate: getLocalDateString(),
   reportCode: '',
+  reportFramework: 'dual-track',
+  pageBackground: 'none',
 };
 
 export const DEFAULT_GREEN_REPORT_CONFIG = {

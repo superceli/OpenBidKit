@@ -11,6 +11,7 @@ const { REMOTE_IMAGE_RETRY_ATTEMPTS, REMOTE_IMAGE_RETRY_DELAY_MS } = require('..
 const { renderMarkdownHtml } = require('../utils/renderMarkdownHtml.cjs');
 const { getLocalImageRenderService } = require('./localImageRenderService.cjs');
 const { findLibreOfficeCommand, runLibreOfficeConvertToPdf } = require('../utils/libreOffice.cjs');
+const { convertDocxToPdfWithLocalOffice } = require('../utils/localOfficePdf.cjs');
 const {
   AlignmentType,
   BorderStyle,
@@ -499,10 +500,11 @@ function buildWordHeaders(pageSetup, backgroundParagraph = null) {
   };
 }
 
-/** 绿色报告整页底纹：以页眉浮动图方式衬于每页正文下方。 */
-function buildGreenReportPageBackgroundParagraph(pageSetup, appRef) {
+/** 绿色报告整页底纹：以页眉浮动图方式衬于每页正文下方。variant：default=默认底图，brand=品牌Logo底图，none=不使用底图。 */
+function buildGreenReportPageBackgroundParagraph(pageSetup, backgroundVariant) {
   try {
-    const backgroundPath = getGreenReportPageBackgroundPath(appRef || app);
+    if (backgroundVariant === 'none') return null;
+    const backgroundPath = getGreenReportPageBackgroundPath(app, backgroundVariant);
     if (!backgroundPath || !fs.existsSync(backgroundPath)) return null;
     const paper = PAPER_DIMENSIONS_MM[pageSetup?.paper_size] || PAPER_DIMENSIONS_MM.a4;
     const landscape = pageSetup?.orientation === 'landscape';
@@ -2391,6 +2393,7 @@ async function buildDocxResult(payload, options = {}) {
     developerLogger: options.developerLogger,
     exportFormat,
     greenReport: payload.cover_template === 'green-report',
+    pageBackground: payload.page_background || 'none',
     level1Started: false,
     feasibility: readFeasibilityExportContext(payload),
   };
@@ -2480,7 +2483,7 @@ async function buildDocxResult(payload, options = {}) {
   const pageNumberStart = Math.max(1, Math.floor(Number(pageSetup ? pageSetup.page_number_start : 1) || 1));
   const headers = buildWordHeaders(
     pageSetup,
-    context.greenReport ? buildGreenReportPageBackgroundParagraph(pageSetup) : null,
+    context.greenReport ? buildGreenReportPageBackgroundParagraph(pageSetup, context.pageBackground) : null,
   );
   if (headers?.default && firstPageDifferent) {
     headers.first = headers.default;
@@ -2788,12 +2791,6 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
 
       reportProgress(progressContext, 10, '正在生成 Word 中间文件。');
       const soffice = await findLibreOfficeCommand();
-      if (!soffice) {
-        const message = '未检测到 LibreOffice，无法生成 PDF。请先安装 LibreOffice 后重试。';
-        reportProgress(progressContext, 100, message, { phase: 'error' });
-        developerLogger.write('export.pdf.error', { error: new Error('LibreOffice not found') });
-        return { success: false, message };
-      }
 
       const tmpDir = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'green-report-pdf-'));
       let tempDocxPath = null;
@@ -2823,17 +2820,33 @@ function createExportService({ configStore, openXmlHelperService, aiService, app
           await fs.promises.copyFile(tempBodyPath, tempDocxPath);
         }
 
-        reportProgress(progressContext, 75, '正在通过 LibreOffice 转换为 PDF。');
-        developerLogger.write('export.pdf.convert.started', {
-          libre_office: soffice,
-          temp_docx: path.basename(tempDocxPath),
-        });
-        await runLibreOfficeConvertToPdf(soffice, tempDocxPath, tmpDir);
-
-        const pdfFileName = `${path.basename(tempDocxPath, '.docx')}.pdf`;
-        const tempPdfPath = path.join(tmpDir, pdfFileName);
-        if (!fs.existsSync(tempPdfPath)) {
-          throw new Error('LibreOffice 转换完成但未找到 PDF 输出文件');
+        let tempPdfPath = null;
+        if (soffice) {
+          reportProgress(progressContext, 75, '正在通过 LibreOffice 转换为 PDF。');
+          developerLogger.write('export.pdf.convert.started', {
+            libre_office: soffice,
+            temp_docx: path.basename(tempDocxPath),
+          });
+          await runLibreOfficeConvertToPdf(soffice, tempDocxPath, tmpDir);
+          const pdfFileName = `${path.basename(tempDocxPath, '.docx')}.pdf`;
+          tempPdfPath = path.join(tmpDir, pdfFileName);
+          if (!fs.existsSync(tempPdfPath)) {
+            throw new Error('LibreOffice 转换完成但未找到 PDF 输出文件');
+          }
+        } else {
+          // 没有 LibreOffice 时，退回到本机 WPS / Word 的 COM 转换
+          reportProgress(progressContext, 75, '未检测到 LibreOffice，正在使用本机 WPS / Word 转换为 PDF。');
+          tempPdfPath = await convertDocxToPdfWithLocalOffice(tempDocxPath, tmpDir);
+          developerLogger.write('export.pdf.convert.local_office', {
+            success: Boolean(tempPdfPath),
+            temp_docx: path.basename(tempDocxPath),
+          });
+          if (!tempPdfPath) {
+            const message = '未检测到可用的 PDF 转换组件：请安装 LibreOffice、WPS Office 或 Microsoft Word 后重试。';
+            reportProgress(progressContext, 100, message, { phase: 'error' });
+            developerLogger.write('export.pdf.error', { error: new Error('No PDF converter available') });
+            return { success: false, message };
+          }
         }
         reportProgress(progressContext, 90, '正在保存 PDF 文件。');
         await fs.promises.copyFile(tempPdfPath, result.filePath);

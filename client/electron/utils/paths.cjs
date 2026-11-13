@@ -123,12 +123,12 @@ function getSigningPageTemplatePath(app) {
   return resolveBundledAssetPath(app, 'signing-page-template.docx');
 }
 
-/** 绿色报告每页底纹背景图路径；打包后在 resources/assets，开发时在 client/assets。 */
-function getGreenReportPageBackgroundPath(app) {
-  if (process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND) {
+/** 绿色报告每页底纹背景图路径；variant=brand 时使用品牌底图。打包后在 resources/assets，开发时在 client/assets。 */
+function getGreenReportPageBackgroundPath(app, variant = 'default') {
+  if (process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND && variant !== 'brand') {
     return process.env.LVCERT_GREEN_REPORT_PAGE_BACKGROUND;
   }
-  return resolveBundledAssetPath(app, 'green-report-page-bg.png');
+  return resolveBundledAssetPath(app, variant === 'brand' ? 'green-report-page-bg-2.png' : 'green-report-page-bg.png');
 }
 
 /** 开发时编译用的助手工程路径。 */

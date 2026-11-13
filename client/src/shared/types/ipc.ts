@@ -1,7 +1,7 @@
 import type { AiHttpErrorPayload, ChatCompletionRequest, JsonCompletionRequest } from './ai';
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelInfoResult, ModelListResult, UpdateChannel } from './config';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
-import type { GreenDocumentStyle, GreenKnowledgeContext, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportSummary, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
+import type { GreenDocumentStyle, GreenKnowledgeContext, GreenPageBackground, GreenProjectInfo, GreenReportFramework, GreenReportState, GreenReportStep, GreenReportSummary, GreenReportType, GreenSaveOutlineRequest } from '../../features/green-report/types';
 import type { ImageLibraryItem, ImageLibraryMutationResult } from './imageLibrary';
 import type { ExportFormatConfig, ExportTemplateRecord } from './exportFormat';
 
@@ -608,7 +608,7 @@ export interface LvcertBridge {
     saveReportType: (reportId: string, reportType: GreenReportType) => Promise<void>;
     saveProjectInfo: (reportId: string, projectInfo: GreenProjectInfo) => Promise<GreenReportState>;
     saveOutlineConfig: (reportId: string, payload: { targetWords?: number }) => Promise<GreenReportState>;
-    saveReportConfig: (reportId: string, payload: { targetWords?: number; pageCount?: number; documentStyle?: GreenDocumentStyle; templateId?: string | null }) => Promise<GreenReportState>;
+    saveReportConfig: (reportId: string, payload: { targetWords?: number; pageCount?: number; documentStyle?: GreenDocumentStyle; templateId?: string | null; reportFramework?: GreenReportFramework; pageBackground?: GreenPageBackground }) => Promise<GreenReportState>;
     saveKnowledgeContext: (reportId: string, context: GreenKnowledgeContext | null) => Promise<GreenReportState>;
     saveOutline: (reportId: string, payload: GreenSaveOutlineRequest) => Promise<Partial<GreenReportState>>;
     saveChapterContent: (reportId: string, payload: { nodeId: string; content: string }) => Promise<Partial<GreenReportState>>;

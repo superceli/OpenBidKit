@@ -11,7 +11,7 @@ import ReportConfigPage from './ReportConfigPage';
 import OutlinePage from './OutlinePage';
 import ContentPage from './ContentPage';
 import GreenReportList from './GreenReportList';
-import type { GreenBackgroundTaskState, GreenDocumentStyle, GreenProjectInfo, GreenReportState, GreenReportStep, GreenReportSummary, GreenReportType } from '../types';
+import type { GreenBackgroundTaskState, GreenDocumentStyle, GreenPageBackground, GreenProjectInfo, GreenReportFramework, GreenReportState, GreenReportStep, GreenReportSummary, GreenReportType } from '../types';
 import { DEFAULT_GREEN_PROJECT_INFO, GREEN_STEPS, GREEN_STEP_LABELS, getLocalDateString } from '../types';
 import { resolveReportTypeName } from '../reportTypes';
 
@@ -71,6 +71,8 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
   const [draftProjectInfo, setDraftProjectInfo] = useState<GreenProjectInfo>(DEFAULT_GREEN_PROJECT_INFO);
   const [draftPageCount, setDraftPageCount] = useState(30);
   const [draftDocumentStyle, setDraftDocumentStyle] = useState<GreenDocumentStyle>('standard');
+  const [draftFramework, setDraftFramework] = useState<GreenReportFramework>('dual-track');
+  const [draftPageBackground, setDraftPageBackground] = useState<GreenPageBackground>('default');
   const [draftTargetWords, setDraftTargetWords] = useState(20000);
   const [draftTemplateId, setDraftTemplateId] = useState<string | null>(null);
   const [skipCoverFrontMatter, setSkipCoverFrontMatter] = useState(readSkipCoverFrontMatter);
@@ -144,6 +146,13 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     setDraftProjectInfo(loadedProjectInfo);
     setDraftPageCount(nextState.pageCount ?? 30);
     setDraftDocumentStyle(nextState.documentStyle ?? 'standard');
+    setDraftFramework(
+      nextState.projectInfo?.reportFramework === 'evaluation' || nextState.projectInfo?.reportFramework === 'esg-disclosure'
+        ? nextState.projectInfo.reportFramework
+        : 'dual-track',
+    );
+    const loadedBackground = nextState.projectInfo?.pageBackground;
+    setDraftPageBackground(loadedBackground === 'default' || loadedBackground === 'brand' ? loadedBackground : 'none');
     setDraftTargetWords(nextState.targetWords ?? 20000);
     setDraftTemplateId(nextState.templateId ?? null);
   }, []);
@@ -274,21 +283,51 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
   }, [stepIndex]);
 
   const handleSaveReportConfig = useCallback(async () => {
+    const frameworkChanged = (state.projectInfo?.reportFramework || 'dual-track') !== draftFramework;
     const patch = {
       targetWords: draftTargetWords,
       pageCount: draftPageCount,
       documentStyle: draftDocumentStyle,
       templateId: draftTemplateId,
+      reportFramework: draftFramework,
+      pageBackground: draftPageBackground,
     };
-    setState((prev) => ({ ...prev, ...patch }));
-    if (!reportIdRef.current) return;
+    if (!reportIdRef.current) {
+      setState((prev) => ({
+        ...prev,
+        targetWords: draftTargetWords,
+        pageCount: draftPageCount,
+        documentStyle: draftDocumentStyle,
+        templateId: draftTemplateId,
+        projectInfo: { ...prev.projectInfo, reportFramework: draftFramework, pageBackground: draftPageBackground },
+      }));
+      return;
+    }
     try {
-      await window.lvcert?.greenReport?.saveReportConfig(reportIdRef.current, patch);
-      showToast('报告配置已保存', 'success');
+      const saved = await window.lvcert?.greenReport?.saveReportConfig(reportIdRef.current, patch);
+      if (saved) {
+        setState((prev) => ({
+          ...prev,
+          targetWords: saved.targetWords ?? prev.targetWords,
+          pageCount: saved.pageCount ?? prev.pageCount,
+          documentStyle: saved.documentStyle ?? prev.documentStyle,
+          templateId: saved.templateId ?? prev.templateId,
+          projectInfo: saved.projectInfo || prev.projectInfo,
+          step: saved.step || prev.step,
+          // 框架切换时后端会清空旧目录/正文，这里同步清空前端状态
+          outlineData: saved.outlineData ?? null,
+          outlineTask: saved.outlineTask,
+          contentTask: saved.contentTask,
+          status: saved.status,
+          progress: saved.progress,
+        }));
+        if (saved.projectInfo) setDraftProjectInfo(withCompileDate(saved.projectInfo));
+      }
+      showToast(frameworkChanged ? '报告框架已切换，旧目录和正文已清空，请重新生成' : '报告配置已保存', frameworkChanged ? 'info' : 'success');
     } catch (error) {
       showToast(`保存失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
-  }, [draftTargetWords, draftPageCount, draftDocumentStyle, draftTemplateId, showToast]);
+  }, [draftTargetWords, draftPageCount, draftDocumentStyle, draftTemplateId, draftFramework, draftPageBackground, state.projectInfo, showToast]);
 
   // 生成前同步企业信息：用户可能改了委托单位但没点“保存信息”，
   // 若不落库，后台仍会按上一家公司的知识库文件夹取资料，导致跨企业串数据。
@@ -345,6 +384,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
     const clientUnit = targetState.projectInfo.companyName || '';
 
     // 若选中了模板，从模板库取完整 config；否则用绿色报告默认页眉页脚
+    const reportFramework = targetState.projectInfo?.reportFramework || 'dual-track';
     let exportFormat = DEFAULT_EXPORT_FORMAT;
     if (targetState.templateId) {
       const template = await window.lvcert?.templates?.get(targetState.templateId);
@@ -361,6 +401,18 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
           page_number_enabled: true,
           page_number_format: '第{page}页，共{pages}页',
         },
+      };
+    }
+
+    // 专项评价 / ESG披露框架：正文标题用“第一章 / 1.1 / 1.1.1”编号，不显示“第一节”
+    if (reportFramework !== 'dual-track') {
+      exportFormat = {
+        ...exportFormat,
+        headings: (exportFormat.headings || []).map((heading, index) => (
+          index === 0
+            ? { ...heading, numbering_format: 'custom', numbering_template: '第{zh}章' }
+            : { ...heading, numbering_format: 'outline-decimal', numbering_template: '' }
+        )),
       };
     }
 
@@ -394,7 +446,9 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
         outline: targetState.outlineData?.outline || [],
         export_format: exportFormat,
         cover_template: 'green-report',
-        skip_cover_frontmatter: skipCoverFrontMatter,
+        page_background: targetState.projectInfo?.pageBackground || 'none',
+        // 非双轨框架直接从第一章开始，始终不导出封面、目录、签章页和尾页
+        skip_cover_frontmatter: (targetState.projectInfo?.reportFramework || 'dual-track') !== 'dual-track' ? true : skipCoverFrontMatter,
         cover_fields: {
           clientUnit,
           reportCode: reportCode || '',
@@ -740,12 +794,16 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
             state={state}
             draftPageCount={draftPageCount}
             draftDocumentStyle={draftDocumentStyle}
+            draftFramework={draftFramework}
+            draftPageBackground={draftPageBackground}
             draftTargetWords={draftTargetWords}
             draftTemplateId={draftTemplateId}
             skipCoverFrontMatter={skipCoverFrontMatter}
             templates={templates}
             onDraftPageCountChange={setDraftPageCount}
             onDraftDocumentStyleChange={setDraftDocumentStyle}
+            onDraftFrameworkChange={setDraftFramework}
+            onDraftPageBackgroundChange={setDraftPageBackground}
             onDraftTargetWordsChange={setDraftTargetWords}
             onDraftTemplateIdChange={setDraftTemplateId}
             onSkipCoverFrontMatterChange={handleSkipCoverFrontMatterChange}
@@ -772,7 +830,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
                 reportId: reportIdRef.current,
                 reportType: state.reportType,
                 reportTypeName: resolveReportTypeName(state.reportType),
-                projectInfo,
+                projectInfo: { ...projectInfo, reportFramework: draftFramework },
                 targetWords: state.targetWords,
                 pageCount: state.pageCount,
                 documentStyle: state.documentStyle,
@@ -814,7 +872,7 @@ function GreenReportHome({ onSectionChange }: GreenReportHomeProps) {
                 reportId: reportIdRef.current,
                 reportType: state.reportType,
                 reportTypeName: resolveReportTypeName(state.reportType),
-                projectInfo,
+                projectInfo: { ...projectInfo, reportFramework: draftFramework },
                 outlineData: state.outlineData,
                 targetWords: state.targetWords,
                 pageCount: state.pageCount,

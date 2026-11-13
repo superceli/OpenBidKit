@@ -24,6 +24,8 @@ const DEFAULT_PROJECT_INFO = {
   compileUnit: '安徽蔚碳环保科技有限公司',
   compileDate: '',
   reportCode: '',
+  reportFramework: 'dual-track',
+  pageBackground: 'none',
 };
 
 const INTERRUPTED_STATUSES = new Set(['running', 'pausing', 'queued']);
@@ -311,12 +313,28 @@ function createGreenReportStore({ app, db, taskLogStore }) {
     return loadState(reportId);
   }
 
-  function saveReportConfig(reportId, { targetWords, pageCount, documentStyle, templateId }) {
+  function saveReportConfig(reportId, { targetWords, pageCount, documentStyle, templateId, reportFramework, pageBackground }) {
     const fields = {};
     if (targetWords !== undefined) fields.target_words = targetWords;
     if (pageCount !== undefined) fields.page_count = pageCount;
     if (documentStyle !== undefined) fields.document_style = documentStyle;
     if (templateId !== undefined) fields.template_id = templateId;
+    if (reportFramework !== undefined || pageBackground !== undefined) {
+      const current = loadState(reportId);
+      const previousFramework = current.projectInfo?.reportFramework || 'dual-track';
+      const nextProjectInfo = { ...(current.projectInfo || {}) };
+      if (reportFramework !== undefined) nextProjectInfo.reportFramework = reportFramework;
+      if (pageBackground !== undefined) nextProjectInfo.pageBackground = pageBackground;
+      fields.project_info_json = JSON.stringify(nextProjectInfo);
+      if (reportFramework !== undefined && previousFramework !== reportFramework) {
+        // 框架变化意味着目录结构不同：清空旧目录/正文与任务状态，强制重新生成
+        db.prepare(`DELETE FROM ${nodesTable} WHERE report_id = ?`).run(reportId);
+        db.prepare(`DELETE FROM ${tasksTable} WHERE report_id = ?`).run(reportId);
+        fields.status = 'draft';
+        fields.progress = 0;
+        if (current.step === 'content') fields.step = 'outline';
+      }
+    }
     if (Object.keys(fields).length) saveMeta(reportId, fields);
     return loadState(reportId);
   }
